@@ -1,4 +1,5 @@
 from eofs.xarray import Eof
+import numpy as np
 
 def expotas(x, s1, s2, s3, t1, t2, t3):
     return s1*(1-np.exp(-x/t1))+s2*(1-np.exp(-x/t2))+s3*(1-np.exp(-x/t3))

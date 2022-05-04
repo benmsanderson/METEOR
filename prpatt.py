@@ -2,6 +2,12 @@ from eofs.xarray import Eof
 import numpy as np
 import lmfit
 
+def make_4xanom(ds_4x,ds_cnt):
+    ds_4x_anom=ds_4x-ds_cnt.mean("year")
+    ds_4x_anom=ds_4x_anom.rename({'year': 'time'})
+    ds_4x_anom=ds_4x_anom.interpolate_na(dim='lat', method='nearest').interpolate_na(dim='lon', method='nearest')
+    return ds_4x_anom
+
 def expotas(x, s1, s2, s3, t1, t2, t3):
     return s1*(1-np.exp(-x/t1))+s2*(1-np.exp(-x/t2))+s3*(1-np.exp(-x/t3))
 

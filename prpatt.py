@@ -16,7 +16,7 @@ def expotas(x, s1, t1):
 def model(pars, x):
     nt=len(x)
     vals = pars.valuesdict()
-    nm=vals['nm']
+    nm=int(vals['nm'])
     aout=np.empty([nt, nm])
     for i in np.arange(0,nm):
         for j in np.arange(0,nm):

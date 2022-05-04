@@ -42,7 +42,7 @@ def makeparams(t0):
         for j in np.arange(0,nm):
 
             fit_params.add('s'+str(i)+str(j), value=1)
-    fit_params.add('nm',value=nm)
+    fit_params.add('nm',value=nm,min=nm,max=nm)
     return fit_params
 
 def get_timescales(X,t0):

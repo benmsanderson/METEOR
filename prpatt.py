@@ -59,10 +59,10 @@ def get_timescales(X):
     ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]
     return ts
 
-def get_patterns(X,out):
-    e1=expotas(x_array,1,0,0,out.params['t1'].value,0,0)
-    e2=expotas(x_array,1,0,0,out.params['t2'].value,0,0)
-    e3=expotas(x_array,1,0,0,out.params['t3'].value,0,0)
+def get_patterns(X,tsp):
+    e1=expotas(x_array,1,0,0,tsp[0],0,0)
+    e2=expotas(x_array,1,0,0,tsp[1],0,0)
+    e3=expotas(x_array,1,0,0,tsp[2],0,0)
 
     us=np.stack((e1,e2,e3)).T
     u1=us/np.mean(us,0)

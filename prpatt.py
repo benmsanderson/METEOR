@@ -33,6 +33,15 @@ def wgt(X):
     
     return wgt2
 
+def makeparams(nm):
+    fit_params = lmfit.Parameters()
+    for i in np.arange(0,nm):
+        fit_params.add('t'+str(i), value=t0[i])
+        for j in np.arange(0,nm):
+            fit_params.add('s'+str(i)+str(j), value=1)
+    fit_params.add('nm',value=nm)
+    return fit_params
+
 def get_timescales(X,t0):
     nm=len(t0)
     nt=X.shape[0]
@@ -44,12 +53,7 @@ def get_timescales(X,t0):
 
     x_array=np.arange(1,nt+1)
 
-    fit_params = lmfit.Parameters()
-    for i in np.arange(0,nm):
-        fit_params.add('t'+str(i), value=t0[i])
-        for j in np.arange(0,nm):
-            fit_params.add('s'+str(i)+str(j), value=1)
-    fit_params.add('nm',value=nm)
+    fit_params=make_params(nm)
 
     out = lmfit.minimize(residual, fit_params, args=(x_array,), kws={'data': solver.pcs(npcs=nm,pcscaling=1)})
     #ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]

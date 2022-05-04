@@ -62,7 +62,7 @@ def get_timescales(X,t0):
     #ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]
     ts=[]
     for i in np.arange(0,nm):
-        ts[i]=params[t'+str(i)]
+        ts[i]=params['t'+str(i)]
     return ts
 
 def get_patterns(X,tsp):

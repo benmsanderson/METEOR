@@ -65,15 +65,15 @@ def get_patterns(X,tsp):
     
     u1=np.empty([nt, len(tsp)])
     for i,ts in enumerate(tsp):
-        tmp=expotas(x_array,1,0,0,ts,0,0)
+        tmp=expotas(x_array,1,0,0,ts,ts,ts)
         u1[:,i]=tmp/np.mean(tmp)
 
     v1f=np.dot(np.linalg.pinv(u1),X.values.reshape(nt,-1))
-    v1=np.reshape(v1f,v.shape)
+    v1=np.reshape(v1f,(len(tsp),X.shape[1],X.shape[2]))
 
     #Xr=np.reshape(np.dot(u1,v1f),X.shape)         
-    va=xr.DataArray(v1, coords=(None,X.lat,X.lon), dims=('mode','lat','lon'))
+    va=xr.DataArray(v1, coords=(np.array(tsp),X.lat,X.lon), dims=('mode','lat','lon'))
     
-    return va
+    return va,u1
 
 

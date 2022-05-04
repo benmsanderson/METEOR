@@ -13,9 +13,10 @@ def make_4xanom(ds_4x,ds_cnt):
 def expotas(x, s1, t1):
     return s1*(1-np.exp(-x/t1))
 
-def model(pars, x, nm):
+def model(pars, x):
     nt=len(x)
     vals = pars.valuesdict()
+    nm=vals['nm']
     aout=np.empty([nt, nm])
     for i in np.arange(0,nm):
         for j in np.arange(0,nm):
@@ -48,6 +49,7 @@ def get_timescales(X,t0):
         fit_params.add('t'+str(i), value=t0[i])
         for j in np.arange(0,nm):
             fit_params.add('s'+str(i)+str(j), value=1)
+    fit_params.add('nm',value=nm)
 
     out = lmfit.minimize(residual, fit_params, args=(x_array,), kws={'data': solver.pcs(npcs=nm,pcscaling=1)})
     #ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]

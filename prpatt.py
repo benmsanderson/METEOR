@@ -22,7 +22,7 @@ def wgt(X):
     
     return wgt2
 
-def tsdecomp(X):
+def tsdecomp(X,wgt2):
     nt=X.shape[0]
     solver = Eof(X,center=False,weights=wgt2)
 

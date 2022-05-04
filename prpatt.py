@@ -18,7 +18,7 @@ def model(pars, x, nm):
     nt=len(x)
     vals = pars.valuesdict()
 
-    aout=np.empty([nt, nm])
+    aout=np.zeros([nt, nm])
     for i in np.arange(0,nm):
         for j in np.arange(0,nm):
 

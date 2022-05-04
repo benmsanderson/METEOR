@@ -62,12 +62,11 @@ def get_timescales(X):
 def get_patterns(X,tsp):
     nt=X.shape[0]
     x_array=np.arange(1,nt+1)
-    e1=expotas(x_array,1,0,0,tsp[0],0,0)
-    e2=expotas(x_array,1,0,0,tsp[1],0,0)
-    e3=expotas(x_array,1,0,0,tsp[2],0,0)
-
-    us=np.stack((e1,e2,e3)).T
-    u1=us/np.mean(us,0)
+    
+    u1=np.empty([nt, len(tsp)])
+    for i,ts in enumerate(tsp):
+        tmp=expotas(x_array,1,0,0,ts,0,0)
+        u1[:,i]=tmp/np.mean(tmp)
 
     v1f=np.dot(np.linalg.pinv(u1),X.values.reshape(nt,-1))
     v1=np.reshape(v1f,v.shape)

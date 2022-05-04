@@ -14,46 +14,49 @@ def model(pars, x):
 def residual(pars, x, data=None):
     return data-model(pars,x)
   
-def tsdecomp(X)
-nt=X.shape[0]
-solver = Eof(X,center=False,weights=wgt2)
+def tsdecomp(X):
+    nt=X.shape[0]
+    solver = Eof(X,center=False,weights=wgt2)
 
-v=solver.eofsAsCovariance(neofs=3)
-u=solver.pcs(npcs=3,pcscaling=1)
-s=solver.eigenvalues(neigs=3)
+    v=solver.eofsAsCovariance(neofs=3)
+    u=solver.pcs(npcs=3,pcscaling=1)
+    s=solver.eigenvalues(neigs=3)
 
-#vf=v.values.reshape(v.shape[0],-1)
-#vr=vf.reshape(v.shape)
+    #vf=v.values.reshape(v.shape[0],-1)
+    #vr=vf.reshape(v.shape)
 
-x_array=np.arange(1,nt+1)
+    x_array=np.arange(1,nt+1)
 
-fit_params = lmfit.Parameters()
-fit_params.add('s1', value=1)
-fit_params.add('s2', value=1)
-fit_params.add('s3', value=1)
-fit_params.add('t1', value=1)
-fit_params.add('t2', value=50)
-fit_params.add('t3', value=1000)
-fit_params.add('s11', value=1)
-fit_params.add('s12', value=1)
-fit_params.add('s13', value=1)
-fit_params.add('s21', value=1)
-fit_params.add('s22', value=1)
-fit_params.add('s23', value=1)
+    fit_params = lmfit.Parameters()
+    fit_params.add('s1', value=1)
+    fit_params.add('s2', value=1)
+    
+    fit_params.add('s3', value=1)
+    fit_params.add('t1', value=1)
+    fit_params.add('t2', value=50)
+    fit_params.add('t3', value=1000)
+    fit_params.add('s11', value=1)
+    fit_params.add('s12', value=1)
+    fit_params.add('s13', value=1)
+    fit_params.add('s21', value=1)
+    fit_params.add('s22', value=1)
+    fit_params.add('s23', value=1)
 
 
-out = lmfit.minimize(residual, fit_params, args=(x_array,), kws={'data': solver.pcs(npcs=3,pcscaling=1)})
 
-e1=expotas(x_array,1,0,0,out.params['t1'].value,0,0)
-e2=expotas(x_array,1,0,0,out.params['t2'].value,0,0)
-e3=expotas(x_array,1,0,0,out.params['t3'].value,0,0)
+    out = lmfit.minimize(residual, fit_params, args=(x_array,), kws={'data': solver.pcs(npcs=3,pcscaling=1)})
 
-us=np.stack((e1,e2,e3)).T
-u1=us/np.mean(us,0)
+    e1=expotas(x_array,1,0,0,out.params['t1'].value,0,0)
+    e2=expotas(x_array,1,0,0,out.params['t2'].value,0,0)
+    e3=expotas(x_array,1,0,0,out.params['t3'].value,0,0)
 
-v1f=np.dot(np.linalg.pinv(u1),X.values.reshape(nt,-1))
-v1=np.reshape(v1f,v.shape)
+    us=np.stack((e1,e2,e3)).T
+    u1=us/np.mean(us,0)
 
-Xr=np.reshape(np.dot(u1,v1f),X.shape)
+    v1f=np.dot(np.linalg.pinv(u1),X.values.reshape(nt,-1))
+    v1=np.reshape(v1f,v.shape)
+
+    #Xr=np.reshape(np.dot(u1,v1f),X.shape)           
+    return v1,u1
 
 

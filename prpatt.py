@@ -20,7 +20,7 @@ def model(pars, x, nm):
     aout=np.empty([nt, nm])
     for i in np.arange(0,nm):
         for j in np.arange(0,nm):
-            print(i,j,nm)
+
             aout[:,i]=aout[:,i]+expotas(x,vals['s'+str(i)+str(j)],vals['t'+str(i)])
     return aout
 

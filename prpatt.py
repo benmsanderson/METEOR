@@ -56,6 +56,8 @@ def get_timescales(X):
     fit_params.add('s23', value=1)
 
     out = lmfit.minimize(residual, fit_params, args=(x_array,), kws={'data': solver.pcs(npcs=3,pcscaling=1)})
+    ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]
+    return ts
 
 def get_patterns(X,out):
     e1=expotas(x_array,1,0,0,out.params['t1'].value,0,0)

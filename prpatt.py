@@ -60,6 +60,8 @@ def get_timescales(X):
     return ts
 
 def get_patterns(X,tsp):
+    nt=X.shape[0]
+    x_array=np.arange(1,nt+1)
     e1=expotas(x_array,1,0,0,tsp[0],0,0)
     e2=expotas(x_array,1,0,0,tsp[1],0,0)
     e3=expotas(x_array,1,0,0,tsp[2],0,0)

@@ -15,6 +15,13 @@ def model(pars, x):
 def residual(pars, x, data=None):
     return data-model(pars,x)
   
+def wgt(X):
+    weights = np.cos(np.deg2rad(X.lat))
+    weights.name = "weights"
+    wgt2=np.tile(weights,(len(X.lon),1)).T*.99+.01
+    
+    return wgt2
+
 def tsdecomp(X):
     nt=X.shape[0]
     solver = Eof(X,center=False,weights=wgt2)

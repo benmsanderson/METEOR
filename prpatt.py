@@ -25,7 +25,7 @@ def model(pars, x, nm):
     return aout
 
 def residual(pars, x, nm, data=None):
-    return data-model(pars,x)
+    return data-model(pars,x,nm)
   
 def wgt(X):
     weights = np.cos(np.deg2rad(X.lat))

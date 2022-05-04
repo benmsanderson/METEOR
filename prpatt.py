@@ -53,7 +53,7 @@ def get_timescales(X,t0):
 
     x_array=np.arange(1,nt+1)
 
-    fit_params=make_params(nm)
+    fit_params=makeparams(nm)
 
     out = lmfit.minimize(residual, fit_params, args=(x_array,), kws={'data': solver.pcs(npcs=nm,pcscaling=1)})
     #ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]

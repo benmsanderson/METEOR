@@ -13,10 +13,10 @@ def make_4xanom(ds_4x,ds_cnt):
 def expotas(x, s1, t1):
     return s1*(1-np.exp(-x/t1))
 
-def model(pars, x):
+def model(pars, x, nm):
     nt=len(x)
     vals = pars.valuesdict()
-    nm=int(vals['nm'])
+
     aout=np.empty([nt, nm])
     for i in np.arange(0,nm):
         for j in np.arange(0,nm):
@@ -24,7 +24,7 @@ def model(pars, x):
             aout[:,i]=aout[:,i]+expotas(x,vals['s'+str(i)+str(j)],vals['t'+str(i)])
     return aout
 
-def residual(pars, x, data=None):
+def residual(pars, x, nm, data=None):
     return data-model(pars,x)
   
 def wgt(X):
@@ -42,7 +42,6 @@ def makeparams(t0):
         for j in np.arange(0,nm):
 
             fit_params.add('s'+str(i)+str(j), value=1)
-    fit_params.add('nm',value=nm,min=nm,max=nm)
     return fit_params
 
 def get_timescales(X,t0):
@@ -58,7 +57,7 @@ def get_timescales(X,t0):
 
     fit_params=makeparams(t0)
 
-    out = lmfit.minimize(residual, fit_params, args=(x_array,), kws={'data': solver.pcs(npcs=nm,pcscaling=1)})
+    out = lmfit.minimize(residual, fit_params, args=(x_array,nm,), kws={'data': solver.pcs(npcs=nm,pcscaling=1)})
     #ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]
     return out
 

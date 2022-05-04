@@ -20,6 +20,7 @@ def model(pars, x):
     aout=np.empty([nt, nm])
     for i in np.arange(0,nm):
         for j in np.arange(0,nm):
+            print(i,j)
             aout[:,i]=aout[:,i]+expotas(x,vals['s'+str(i)+str(j)],vals['t'+str(i)])
     return aout
 
@@ -39,7 +40,7 @@ def makeparams(t0):
     for i in np.arange(0,nm):
         fit_params.add('t'+str(i), value=t0[i])
         for j in np.arange(0,nm):
-            print(i,j)
+
             fit_params.add('s'+str(i)+str(j), value=1)
     fit_params.add('nm',value=nm)
     return fit_params

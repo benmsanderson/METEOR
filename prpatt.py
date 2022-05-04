@@ -60,7 +60,10 @@ def get_timescales(X,t0):
 
     out = lmfit.minimize(residual, fit_params, args=(x_array,nm,), kws={'data': solver.pcs(npcs=nm,pcscaling=1)})
     #ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]
-    return out
+    ts=[]
+    for i in np.arange(0,nm):
+        ts[i]=params[t'+str(i)]
+    return ts
 
 def get_patterns(X,tsp):
     nt=X.shape[0]

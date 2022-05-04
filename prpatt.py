@@ -24,7 +24,7 @@ def wgt(X):
 
 def tsdecomp(X,wgt2):
     nt=X.shape[0]
-    solver = Eof(X,center=False,weights=wgt2)
+    solver = Eof(X,center=False,weights=wgt(X))
 
     v=solver.eofsAsCovariance(neofs=3)
     u=solver.pcs(npcs=3,pcscaling=1)

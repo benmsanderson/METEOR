@@ -9,17 +9,18 @@ def make_4xanom(ds_4x,ds_cnt):
     ds_4x_anom=ds_4x_anom.interpolate_na(dim='lat', method='nearest').interpolate_na(dim='lon', method='nearest')
     return ds_4x_anom
 
-def expotas(x, s1, s2, s3, t1, t2, t3):
-    return s1*(1-np.exp(-x/t1))+s2*(1-np.exp(-x/t2))+s3*(1-np.exp(-x/t3))
 
-def model(pars, x):
+def expotas(x, s1, t1):
+    return s1*(1-np.exp(-x/t1))
+
+def model(pars, x, nm):
+    nt=len(x)
     vals = pars.valuesdict()
-
-    a1=expotas(x, vals['s01'], vals['s02'], vals['s03'], vals['t1'], vals['t2'], vals['t3'])
-    a2=expotas(x, vals['s11'], vals['s12'], vals['s13'], vals['t1'], vals['t2'], vals['t3'])
-    a3=expotas(x, vals['s21'], vals['s22'], vals['s23'], vals['t1'], vals['t2'], vals['t3'])
-
-    return np.stack((a1,a2,a3)).T
+    aout=np.empty([nt, nm])
+    for i in np.arange(0,nm):
+        for j in np.arange(0,nm):
+            aout[:,i]=aout[:,i]+expotas(x,vals['s'+str(i)+str(j)],vals['t'+str(i)])
+    return aout
 
 def residual(pars, x, data=None):
     return data-model(pars,x)
@@ -31,33 +32,26 @@ def wgt(X):
     
     return wgt2
 
-def get_timescales(X):
+def get_timescales(X,t0):
+    nm=len(t0)
     nt=X.shape[0]
     solver = Eof(X,center=False,weights=wgt(X))
 
-    v=solver.eofsAsCovariance(neofs=3)
-    u=solver.pcs(npcs=3,pcscaling=1)
-    s=solver.eigenvalues(neigs=3)
+    v=solver.eofsAsCovariance(neofs=nm)
+    u=solver.pcs(npcs=nm,pcscaling=1)
+    s=solver.eigenvalues(neigs=nm)
 
     x_array=np.arange(1,nt+1)
 
     fit_params = lmfit.Parameters()
-    fit_params.add('t1', value=1)
-    fit_params.add('t2', value=50)
-    fit_params.add('t3', value=1000)
-    fit_params.add('s01', value=1)
-    fit_params.add('s02', value=1)
-    fit_params.add('s03', value=1)
-    fit_params.add('s11', value=1)
-    fit_params.add('s12', value=1)
-    fit_params.add('s13', value=1)
-    fit_params.add('s21', value=1)
-    fit_params.add('s22', value=1)
-    fit_params.add('s23', value=1)
+    for i in np.arange(0,nm):
+        fit_params.add('t'+str(i), value=t0[i])
+        for j in np.arange(0,nm):
+            fit_params.add('s'+str(i)+str(j), value=1)
 
-    out = lmfit.minimize(residual, fit_params, args=(x_array,), kws={'data': solver.pcs(npcs=3,pcscaling=1)})
-    ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]
-    return ts
+    out = lmfit.minimize(residual, fit_params, args=(x_array,), kws={'data': solver.pcs(npcs=nm,pcscaling=1)})
+    #ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]
+    return out
 
 def get_patterns(X,tsp):
     nt=X.shape[0]
@@ -65,7 +59,7 @@ def get_patterns(X,tsp):
     
     u1=np.empty([nt, len(tsp)])
     for i,ts in enumerate(tsp):
-        tmp=expotas(x_array,1,0,0,ts,ts,ts)
+        tmp=expotas(x_array,1,ts)
         u1[:,i]=tmp/np.mean(tmp)
 
     v1f=np.dot(np.linalg.pinv(u1),X.values.reshape(nt,-1))

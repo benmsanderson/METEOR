@@ -1,6 +1,7 @@
 from eofs.xarray import Eof
 import numpy as np
 import lmfit
+import re 
 
 def make_4xanom(ds_4x,ds_cnt):
     ds_4x_anom=ds_4x-ds_cnt.mean("year")
@@ -14,7 +15,7 @@ def expotas(x, s1, s2, s3, t1, t2, t3):
 def model(pars, x):
     vals = pars.valuesdict()
 
-    a1=expotas(x, vals['s1'], vals['s2'], vals['s3'], vals['t1'], vals['t2'], vals['t3'])
+    a1=expotas(x, vals['s01'], vals['s02'], vals['s03'], vals['t1'], vals['t2'], vals['t3'])
     a2=expotas(x, vals['s11'], vals['s12'], vals['s13'], vals['t1'], vals['t2'], vals['t3'])
     a3=expotas(x, vals['s21'], vals['s22'], vals['s23'], vals['t1'], vals['t2'], vals['t3'])
 
@@ -30,7 +31,7 @@ def wgt(X):
     
     return wgt2
 
-def tsdecomp(X):
+def get_timescales(X):
     nt=X.shape[0]
     solver = Eof(X,center=False,weights=wgt(X))
 
@@ -38,19 +39,15 @@ def tsdecomp(X):
     u=solver.pcs(npcs=3,pcscaling=1)
     s=solver.eigenvalues(neigs=3)
 
-    #vf=v.values.reshape(v.shape[0],-1)
-    #vr=vf.reshape(v.shape)
-
     x_array=np.arange(1,nt+1)
 
     fit_params = lmfit.Parameters()
-    fit_params.add('s1', value=1)
-    fit_params.add('s2', value=1)
-    
-    fit_params.add('s3', value=1)
     fit_params.add('t1', value=1)
     fit_params.add('t2', value=50)
     fit_params.add('t3', value=1000)
+    fit_params.add('s01', value=1)
+    fit_params.add('s02', value=1)
+    fit_params.add('s03', value=1)
     fit_params.add('s11', value=1)
     fit_params.add('s12', value=1)
     fit_params.add('s13', value=1)
@@ -58,10 +55,9 @@ def tsdecomp(X):
     fit_params.add('s22', value=1)
     fit_params.add('s23', value=1)
 
-
-
     out = lmfit.minimize(residual, fit_params, args=(x_array,), kws={'data': solver.pcs(npcs=3,pcscaling=1)})
 
+def get_patterns(X,out):
     e1=expotas(x_array,1,0,0,out.params['t1'].value,0,0)
     e2=expotas(x_array,1,0,0,out.params['t2'].value,0,0)
     e3=expotas(x_array,1,0,0,out.params['t3'].value,0,0)
@@ -72,7 +68,9 @@ def tsdecomp(X):
     v1f=np.dot(np.linalg.pinv(u1),X.values.reshape(nt,-1))
     v1=np.reshape(v1f,v.shape)
 
-    #Xr=np.reshape(np.dot(u1,v1f),X.shape)           
-    return v1,u1
+    #Xr=np.reshape(np.dot(u1,v1f),X.shape)         
+    va=xr.DataArray(v1, coords=(None,X.lat,X.lon), dims=('mode','lat','lon'))
+    
+    return va
 
 

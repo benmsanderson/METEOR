@@ -22,7 +22,7 @@ def model(pars, x, nm):
     for i in np.arange(0,nm):
         for j in np.arange(0,nm):
 
-            aout[:,i]=aout[:,i]+expotas(x,vals['s'+str(j)+str(i)],vals['t'+str(i)])
+            aout[:,i]=aout[:,i]+expotas(x,vals['s'+str(i)+str(j)],vals['t'+str(j)])
     return aout
 
 def residual(pars, x, nm, data=None):

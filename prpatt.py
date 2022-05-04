@@ -2,6 +2,7 @@ from eofs.xarray import Eof
 import numpy as np
 import lmfit
 import re 
+import xarray as xr
 
 def make_4xanom(ds_4x,ds_cnt):
     ds_4x_anom=ds_4x-ds_cnt.mean("year")

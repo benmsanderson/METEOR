@@ -78,10 +78,13 @@ def get_timescales(X,t0):
 
 def recon(u1,s1,v1):
   nm=v1.shape[0]
+  nt=u1.shape[0]
   v1f=v1.values.reshape(nm,-1)
   Xr=np.dot(np.dot(u1,np.diag(s1)),v1f)
   Xrp=np.reshape(Xr,[u1.shape[0],v1.shape[1],v1.shape[2]]) 
-  return Xrp
+  Xo=xr.DataArray(Xrp, coords=(np.arange(0,nt),v1.lat,v1.lon), dims=('time','lat','lon'))
+
+  return Xo
 
 def get_patterns_pinv(X,tsp):
     nt=X.shape[0]

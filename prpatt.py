@@ -69,11 +69,13 @@ def get_patterns(X,tsp):
     nt=X.shape[0]
     x_array=np.arange(1,nt+1)
     
-    u1=np.empty([nt, len(tsp)])
+    u0=np.empty([nt, len(tsp)])
     for i,ts in enumerate(tsp):
         tmp=expotas(x_array,1,ts)
-        u1[:,i]=tmp/np.mean(tmp)
+        u0[:,i]=tmp/np.mean(tmp)
 
+    u1=u0
+    u1[:,-1]=u0[:,-1]-np.dot(np.dot(u0[:,-1],u0[:,:-1]),np.linalg.pinv(u0[:,:-1]))
     v1f=np.dot(np.linalg.pinv(u1),X.values.reshape(nt,-1))
     v1=np.reshape(v1f,(len(tsp),X.shape[1],X.shape[2]))
 

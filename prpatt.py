@@ -14,10 +14,10 @@ def make_4xanom(ds_4x,ds_cnt):
 def expotas(x, s1, t1):
   return s1*(1-np.exp(-x/t1))
 
-def model(pars, x, nm):
+def model(pars, x):
     nt=len(x)
     vals = pars.valuesdict()
-
+    nm=len([value for key, value in vals.items() if 't' in key.lower()])
     aout=np.zeros([nt, nm])
     for i in np.arange(0,nm):
         for j in np.arange(0,nm):
@@ -26,7 +26,7 @@ def model(pars, x, nm):
     return aout
 
 def residual(pars, x, nm, data=None):
-    return data-model(pars,x,nm)
+    return data-model(pars,x)
   
 def wgt(X):
     weights = np.cos(np.deg2rad(X.lat))
@@ -67,6 +67,7 @@ def get_timescales(X,t0):
     for i in np.arange(0,nm):
         ts.append(out.params['t'+str(i)].value)
     return (ts,out)
+
 
 def get_patterns(X,tsp):
     nt=X.shape[0]

@@ -85,6 +85,7 @@ def get_patterns(X,out):
     v0=eofout['v']*0.
     for i,ts in enumerate(tsp):
       ccv=[value for key, value in vals.items() if 's'+str(i) in key.lower()]
+      print(ccv)
       for j,coef in enumerate(ccv):
         tmp=expotas(x_array,coef,ts)
         u0[:,i]=u0[:,i]+tmp

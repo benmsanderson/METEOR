@@ -55,6 +55,8 @@ def svds(X,nm):
     eofout['v']=solver.eofsAsCovariance(neofs=nm)
     eofout['u']=solver.pcs(npcs=nm,pcscaling=1)
     eofout['s']=solver.eigenvalues(neigs=nm)
+    eofout['weights']=solver.getWeights()
+
     return eofout
 
 
@@ -76,12 +78,17 @@ def get_timescales(X,t0):
 
     eofout=svds(X,nm)
 
-def recon(u1,s1,v1):
+def recon(eofout):
+  u1=eofout['u']
+  s1=eofout['s']
+  v1=eofout['v']
+  wgt=eofout['weights']
+
   nm=v1.shape[0]
   nt=u1.shape[0]
   v1f=v1.values.reshape(nm,-1)
   Xr=np.dot(np.dot(u1,np.diag(s1)),v1f)
-  Xrp=np.reshape(Xr,[u1.shape[0],v1.shape[1],v1.shape[2]]) 
+  Xrp=np.reshape(Xr,[u1.shape[0],v1.shape[1],v1.shape[2]])/wgt
   Xo=xr.DataArray(Xrp, coords=(np.arange(0,nt),v1.lat,v1.lon), dims=('time','lat','lon'))
 
   return Xo

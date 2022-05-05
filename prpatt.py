@@ -12,7 +12,7 @@ def make_4xanom(ds_4x,ds_cnt):
 
 
 def expotas(x, s1, t1):
-    return s1*(1-np.exp(-x/t1))
+  return s1*(1-np.exp(-x/t1))
 
 def model(pars, x, nm):
     nt=len(x)
@@ -45,20 +45,23 @@ def makeparams(t0):
             fit_params.add('s'+str(i)+str(j), value=1)
     return fit_params
 
-def get_timescales(X,t0):
-    nm=len(t0)
-    nt=X.shape[0]
+def svds(X,nm):
     solver = Eof(X,center=False,weights=wgt(X))
-
     v=solver.eofsAsCovariance(neofs=nm)
     u=solver.pcs(npcs=nm,pcscaling=1)
     s=solver.eigenvalues(neigs=nm)
+    return u,s,v
 
+
+def get_timescales(X,t0):
+    nm=len(t0)
+    nt=X.shape[0]
+    (u,s,v)=svds(X,nm)
     x_array=np.arange(1,nt+1)
 
     fit_params=makeparams(t0)
 
-    out = lmfit.minimize(residual, fit_params, args=(x_array,nm,), kws={'data': solver.pcs(npcs=nm,pcscaling=1)})
+    out = lmfit.minimize(residual, fit_params, args=(x_array,nm,), kws={'data': u})
     #ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]
     ts=[]
     for i in np.arange(0,nm):
@@ -75,7 +78,7 @@ def get_patterns(X,tsp):
         u0[:,i]=tmp/np.mean(tmp)
 
     u1=u0
-    u1[:,-1]=u0[:,-1]-np.dot(np.dot(u0[:,-1],u0[:,:-1]),np.linalg.pinv(u0[:,:-1]))
+    #u1[:,-1]=u0[:,-1]-np.dot(np.dot(u0[:,-1],u0[:,:-1]),np.linalg.pinv(u0[:,:-1]))
     v1f=np.dot(np.linalg.pinv(u1),X.values.reshape(nt,-1))
     v1=np.reshape(v1f,(len(tsp),X.shape[1],X.shape[2]))
 

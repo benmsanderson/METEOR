@@ -66,7 +66,8 @@ def get_timescales(X,t0):
     ts=[]
     for i in np.arange(0,nm):
         ts.append(out.params['t'+str(i)].value)
-    return (ts,out)
+    us=model(out.params,np.arange(0,nt))
+    return (ts,out,us,[u,s,v])
 
 
 def get_patterns(X,tsp):

@@ -71,32 +71,14 @@ def get_timescales(X,t0):
     us=model(out.params,np.arange(0,nt))
     return (ts,out,us,eofout)
 
-def get_patterns(X,out):
-    vals = out.params.valuesdict()
-    tsp=[value for key, value in vals.items() if 't' in key.lower()]
-    nm=len(tsp)
-    nt=X.shape[0]
     eofout=svds(X,nm)
-    x_array=np.arange(1,nt+1)
-    
-   
-    
-    u0=np.empty([nt, len(tsp)])
-    v0=eofout['v']*0.
-    for i,ts in enumerate(tsp):
-      ccv=[value for key, value in vals.items() if 's'+str(i) in key.lower()]
-      print(ccv)
-      for j,coef in enumerate(ccv):
-        tmp=expotas(x_array,coef,ts)
-        u0[:,i]=u0[:,i]+tmp
-        v0[i,:,:]=v0[i,:,:]+eofout['v'][j,:,:]*eofout['s'][j]
-    v1=v0#np.reshape(v0,(len(tsp),X.shape[1],X.shape[2]))
 
-    #Xr=np.reshape(np.dot(u1,v1f),X.shape)         
-    va=xr.DataArray(v1, coords=(np.array(tsp),X.lat,X.lon), dims=('mode','lat','lon'))
-    
-    return va,u0,v0
-
+def recon(u1,s1,v1):
+  nm=orgeof['v'].shape[0]
+  v1f=np.reshape(v1f,nm,-1)
+  Xr=np.dot(np.dot(u1,np.diag(s1)),v1f)
+  Xrp=np.reshape(np.dot(u1,v1f),[u1.shape[0],v1.shape[1],v1.shape[2]]) 
+  return Xrp
 
 def get_patterns_pinv(X,tsp):
     nt=X.shape[0]

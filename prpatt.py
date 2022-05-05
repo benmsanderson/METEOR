@@ -74,10 +74,10 @@ def get_timescales(X,t0):
     eofout=svds(X,nm)
 
 def recon(u1,s1,v1):
-  nm=orgeof['v'].shape[0]
-  v1f=np.reshape(v1f,nm,-1)
+  nm=v1.shape[0]
+  v1f=v1.values.reshape(nm,-1)
   Xr=np.dot(np.dot(u1,np.diag(s1)),v1f)
-  Xrp=np.reshape(np.dot(u1,v1f),[u1.shape[0],v1.shape[1],v1.shape[2]]) 
+  Xrp=np.reshape(Xr,[u1.shape[0],v1.shape[1],v1.shape[2]]) 
   return Xrp
 
 def get_patterns_pinv(X,tsp):

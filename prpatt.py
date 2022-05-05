@@ -88,13 +88,13 @@ def get_patterns(X,out):
       for j,coef in enumerate(ccv):
         tmp=expotas(x_array,coef,ts)
         u0[:,i]=u0[:,i]+tmp
-        v0[:,i]=v0[:,i]+eofout['v'][:,j]*eofout['s'][j]
-    v1=np.reshape(v0,(len(tsp),X.shape[1],X.shape[2]))
+        v0[i,:,:]=v0[i,:,:]+eofout['v'][j,:,:]*eofout['s'][j]
+    v1=v0#np.reshape(v0,(len(tsp),X.shape[1],X.shape[2]))
 
     #Xr=np.reshape(np.dot(u1,v1f),X.shape)         
     va=xr.DataArray(v1, coords=(np.array(tsp),X.lat,X.lon), dims=('mode','lat','lon'))
     
-    return va,u0
+    return va,u0,v0
 
 
 def get_patterns_pinv(X,tsp):

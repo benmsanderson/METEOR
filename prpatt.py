@@ -27,12 +27,15 @@ def model(pars, x):
 
 def residual(pars, x, nm, data=None):
     return data-model(pars,x)
-  
+
 def wgt(X):
     weights = np.cos(np.deg2rad(X.lat))
-    weights.name = "weights"
+    weights.name = "weights"    
+    return weights
+
+def wgt2(X):
+    weights = wgt(X)
     wgt2=np.tile(weights,(len(X.lon),1)).T*.99+.01
-    
     return wgt2
 
 def makeparams(t0):
@@ -46,7 +49,7 @@ def makeparams(t0):
     return fit_params
 
 def svds(X,nm):
-    solver = Eof(X,center=False,weights=wgt(X))
+    solver = Eof(X,center=False,weights=wgt2(X))
     eofout= {}
 
     eofout['v']=solver.eofsAsCovariance(neofs=nm)

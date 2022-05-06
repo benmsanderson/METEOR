@@ -19,7 +19,7 @@ def imodel(pars, eofout, F, F0=7.41, y0=1850):
   
   us=pmodel(pars,nt)
   usa=xr.DataArray(us, coords=(np.arange(y0,nt+y0),eofout['u'].mode), dims=('time','mode'))
-  Xrs=rmodel(eofout,usa,nt)
+  Xrs=rmodel(eofout,usa)
   inm=Xrs*0.
   for Ft,i in enumerate(np.arange(0,nt-1)):
     dF=(F[i+1]-F[i])/F0
@@ -27,7 +27,7 @@ def imodel(pars, eofout, F, F0=7.41, y0=1850):
     inm[i:,:,:]=inm[i:,:,:]+dF*Xrs[0:ts,:,:].values
   return inm
 
-def rmodel(eofout, us, nt):
+def rmodel(eofout, us):
   eof_synth=eofout.copy()
   eof_synth['u']=us
   Xrs=recon(eof_synth)
@@ -111,8 +111,8 @@ def recon(eofout):
   nm=v1.shape[0]
   nt=u1.shape[0]
   v1f=v1.values.reshape(nm,-1)
-  Xr=np.dot(np.dot(u1,np.diag(np.sqrt(s1))),v1f)
-  Xrp=np.reshape(Xr,[u1.shape[0],v1.shape[1],v1.shape[2]])
+  Xr=np.dot(np.dot(u1,np.diag(s1)),v1f)
+  Xrp=np.reshape(Xr,[u1.shape[0],v1.shape[1],v1.shape[2]])/wgt
   Xo=xr.DataArray(Xrp, coords=(u1.time,v1.lat,v1.lon), dims=('time','lat','lon'))
 
   return Xo

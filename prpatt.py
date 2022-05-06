@@ -52,7 +52,7 @@ def svds(X,nm):
     solver = Eof(X,center=False,weights=wgt2(X))
     eofout= {}
 
-    eofout['v']=solver.eofsAsCovariance(neofs=nm,pcscaling=1)
+    eofout['v']=solver.eofs(neofs=nm,eofscaling=1)
     eofout['u']=solver.pcs(npcs=nm,pcscaling=1)
     eofout['s']=solver.eigenvalues(neigs=nm)
     eofout['weights']=solver.getWeights()

@@ -74,7 +74,8 @@ def get_timescales(X,t0):
     for i in np.arange(0,nm):
         ts.append(out.params['t'+str(i)].value)
     us=model(out.params,np.arange(0,nt))
-    return (ts,out,us,eofout)
+    usa=xr.DataArray(us, coords=(eofout['u'].time,eofout['u'].mode), dims=('time','mode'))
+    return (ts,out,usa,eofout)
 
     eofout=svds(X,nm)
 

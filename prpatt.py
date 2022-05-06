@@ -55,7 +55,9 @@ def imodel_filter(pars, F, F0=7.41, y0=1850):
   #Xrs=rmodel(eofout,usa)
   inm=np.apply_along_axis(lambda m: np.convolve(m, dF, mode='full'), axis=0, arr=usa)
   inm=inm[:nt]
-  return inm
+  inma=xr.DataArray(inm, coords=(np.arange(y0,nt+y0),np.arange(1,nm+1)), dims=('time','mode'))
+
+  return inma
 
 
 def rmodel(eofout, us):
@@ -79,10 +81,11 @@ def pmodel(pars, nt):
             aout[:,i]=aout[:,i]+expotas(x,vals['s'+str(i)+str(j)],vals['t'+str(j)])
     return aout
 
-def residual(pars, data=None):
-    return data-pmodel(pars,data.shape[0])
+def residual(pars, modewgt, data=None):
+    wgt=np.tile(modewgt.T,(data.shape[0],1))
+    return wgt*(data-pmodel(pars,data.shape[0]))
 
-def residual_project(pars, f, data=None):
+def residual_project(pars, f, modewgt, data=None):
     return data-imodel_filter(pars,f )
 
 def wgt(X):
@@ -124,8 +127,8 @@ def get_timescales(X,t0):
     x_array=np.arange(1,nt+1)
 
     fit_params=makeparams(t0)
-
-    out = lmfit.minimize(residual, fit_params, args=(), kws={'data': eofout['u']})
+    modewgt=np.sqrt(eofout['s'])
+    out = lmfit.minimize(residual, fit_params, args=(modewgt,), kws={'data': eofout['u']})
     #ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]
     ts=[]
     for i in np.arange(0,nm):
@@ -140,13 +143,17 @@ def adjust_timescales(X,Xact,pars,t0,f):
     nt=X.shape[0]
     solver = Eof(X,center=False,weights=wgt2(X))
     eofout=svds(X,nm)
-    ua=solver.projectField(Xact,neofs=4,eofscaling=1)
+    modewgt=np.sqrt(eofout['s'])
 
+    ua=solver.projectField(Xact,neofs=nm,eofscaling=1)
+    
+    kys=[key for key, value in vals.items()]
+    fit_params=pars
     x_array=np.arange(1,nt+1)
 
-    fit_params=pars
+    
 
-    out = lmfit.minimize(residual_project, fit_params, args=(f,), kws={'data': ua})
+    out = lmfit.minimize(residual_project, fit_params, args=(f,modewgt,), kws={'data': ua})
     #ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]
     ts=[]
     for i in np.arange(0,nm):

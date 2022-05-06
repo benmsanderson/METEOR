@@ -4,7 +4,7 @@ import lmfit
 import re 
 import xarray as xr
 
-def make_4xanom(ds_4x,ds_cnt):
+def make_anom(ds_4x,ds_cnt):
     ds_4x_anom=ds_4x-ds_cnt.mean("year")
     ds_4x_anom=ds_4x_anom.rename({'year': 'time'})
     ds_4x_anom=ds_4x_anom.interpolate_na(dim='lat', method='nearest').interpolate_na(dim='lon', method='nearest')
@@ -14,11 +14,11 @@ def make_4xanom(ds_4x,ds_cnt):
 def expotas(x, s1, t1):
   return s1*(1-np.exp(-x/t1))
 
-def imodel(pars, eofout, F, F0=7.41):
+def imodel(pars, eofout, F, F0=7.41, y0=1850):
   nt=len(F)
   
   us=pmodel(pars,nt)
-  usa=xr.DataArray(us, coords=(np.arange(0,nt),eofout['u'].mode), dims=('time','mode'))
+  usa=xr.DataArray(us, coords=(np.arange(y0,nt+y0),eofout['u'].mode), dims=('time','mode'))
   Xrs=rmodel(pars,eofout,usa,nt)
   inm=Xrs*0.
   for Ft,i in enumerate(np.arange(0,nt-1)):

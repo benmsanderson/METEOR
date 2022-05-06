@@ -35,7 +35,7 @@ def imodel_eof(pars, F, F0=7.41, y0=1850):
   nm=len([value for key, value in vals.items() if 't' in key.lower()])
    
   us=pmodel(pars,nt)
-  usa=xr.DataArray(us, coords=(np.arange(y0,nt+y0),np.arange(1,nm+1)), dims=('time','mode'))
+  usa=xr.DataArray(us, coords=(np.arange(y0,nt+y0),np.arange(0,nm)), dims=('time','mode'))
   #Xrs=rmodel(eofout,usa)
   inm=usa*0.
   for Ft,i in enumerate(np.arange(0,nt-1)):
@@ -55,7 +55,7 @@ def imodel_filter(pars, F, F0=7.41, y0=1850):
   #Xrs=rmodel(eofout,usa)
   inm=np.apply_along_axis(lambda m: np.convolve(m, dF, mode='full'), axis=0, arr=usa)
   inm=inm[:nt]
-  inma=xr.DataArray(inm, coords=(np.arange(y0,nt+y0),np.arange(1,nm+1)), dims=('time','mode'))
+  inma=xr.DataArray(inm, coords=(np.arange(y0,nt+y0),np.arange(0,nm)), dims=('time','mode'))
 
   return inma
 
@@ -82,11 +82,16 @@ def pmodel(pars, nt):
     return aout
 
 def residual(pars, modewgt, data=None):
-    wgt=np.tile(modewgt.T,(data.shape[0],1))
-    return wgt*(data-pmodel(pars,data.shape[0]))
+    wgtt=np.tile(modewgt.T,(data.shape[0],1))
+    return wgtt*(data-pmodel(pars,data.shape[0]))
 
 def residual_project(pars, f, modewgt, data=None):
-    return data-imodel_filter(pars,f )
+    wgtt=np.tile(modewgt.T,(data.shape[0],1))
+
+    mdl=imodel_filter(pars,f )
+    rs=(data-mdl)
+    rs=rs*wgtt
+    return rs
 
 def wgt(X):
     weights = np.cos(np.deg2rad(X.lat))

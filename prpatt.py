@@ -19,7 +19,7 @@ def imodel(pars, eofout, F, F0=7.41, y0=1850):
   
   us=pmodel(pars,nt)
   usa=xr.DataArray(us, coords=(np.arange(y0,nt+y0),eofout['u'].mode), dims=('time','mode'))
-  Xrs=rmodel(pars,eofout,usa,nt)
+  Xrs=rmodel(eofout,usa,nt)
   inm=Xrs*0.
   for Ft,i in enumerate(np.arange(0,nt-1)):
     dF=(F[i+1]-F[i])/F0
@@ -27,7 +27,7 @@ def imodel(pars, eofout, F, F0=7.41, y0=1850):
     inm[i:,:,:]=inm[i:,:,:]+dF*Xrs[0:ts,:,:].values
   return inm
 
-def rmodel(pars, eofout, us, nt):
+def rmodel(eofout, us, nt):
   eof_synth=eofout.copy()
   eof_synth['u']=us
   Xrs=recon(eof_synth)

@@ -3,6 +3,8 @@ import numpy as np
 import lmfit
 import re 
 import xarray as xr
+from scipy import signal
+
 
 def make_anom(ds_4x,ds_cnt):
     ds_4x_anom=ds_4x-ds_cnt.mean("year")
@@ -42,6 +44,20 @@ def imodel_eof(pars, F, F0=7.41, y0=1850):
     inm[i:,:]=inm[i:,:]+dF*usa[0:ts,:].values
   return inm
 
+def imodel_filter(pars, F, F0=7.41, y0=1850):
+  nt=len(F)
+  dF=np.append(np.diff(F),0)/F0
+  vals = pars.valuesdict()
+  nm=len([value for key, value in vals.items() if 't' in key.lower()])
+   
+  us=pmodel(pars,nt)
+  usa=xr.DataArray(us, coords=(np.arange(y0,nt+y0),np.arange(1,nm+1)), dims=('time','mode'))
+  #Xrs=rmodel(eofout,usa)
+  inm=np.apply_along_axis(lambda m: np.convolve(m, dF, mode='full'), axis=0, arr=usa)
+  inm=inm[:nt]
+  return inm
+
+
 def rmodel(eofout, us):
   eof_synth=eofout.copy()
   eof_synth['u']=us
@@ -67,7 +83,7 @@ def residual(pars, data=None):
     return data-pmodel(pars,data.shape[0])
 
 def residual_project(pars, f, data=None):
-    return data-imodel_eof(pars,f )
+    return data-imodel_filter(pars,f )
 
 def wgt(X):
     weights = np.cos(np.deg2rad(X.lat))
@@ -122,7 +138,8 @@ def adjust_timescales(X,Xact,pars,t0,f):
     vals = pars.valuesdict()
     nm=len([value for key, value in vals.items() if 't' in key.lower()])
     nt=X.shape[0]
-    solver = Eof(X,center=False,weights=prpatt.wgt2(X))
+    solver = Eof(X,center=False,weights=wgt2(X))
+    eofout=svds(X,nm)
     ua=solver.projectField(Xact,neofs=4,eofscaling=1)
 
     x_array=np.arange(1,nt+1)

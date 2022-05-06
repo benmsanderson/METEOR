@@ -27,11 +27,13 @@ def imodel(pars, eofout, F, F0=7.41, y0=1850):
     inm[i:,:,:]=inm[i:,:,:]+dF*Xrs[0:ts,:,:].values
   return inm
 
-def imodel_eof(pars, eofout, F, F0=7.41, y0=1850):
+def imodel_eof(pars, F, F0=7.41, y0=1850):
   nt=len(F)
-  
+  vals = pars.valuesdict()
+  nm=len([value for key, value in vals.items() if 't' in key.lower()])
+   
   us=pmodel(pars,nt)
-  usa=xr.DataArray(us, coords=(np.arange(y0,nt+y0),eofout['u'].mode), dims=('time','mode'))
+  usa=xr.DataArray(us, coords=(np.arange(y0,nt+y0),np.arange(1,nm+1)), dims=('time','mode'))
   #Xrs=rmodel(eofout,usa)
   inm=usa*0.
   for Ft,i in enumerate(np.arange(0,nt-1)):
@@ -63,6 +65,9 @@ def pmodel(pars, nt):
 
 def residual(pars, data=None):
     return data-pmodel(pars,data.shape[0])
+
+def residual_project(pars, f, data=None):
+    return data-imodel_eof(pars,f )
 
 def wgt(X):
     weights = np.cos(np.deg2rad(X.lat))
@@ -105,6 +110,26 @@ def get_timescales(X,t0):
     fit_params=makeparams(t0)
 
     out = lmfit.minimize(residual, fit_params, args=(), kws={'data': eofout['u']})
+    #ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]
+    ts=[]
+    for i in np.arange(0,nm):
+        ts.append(out.params['t'+str(i)].value)
+    us=pmodel(out.params,nt)
+    usa=xr.DataArray(us, coords=(eofout['u'].time,eofout['u'].mode), dims=('time','mode'))
+    return (ts,out,usa,eofout)
+
+def adjust_timescales(X,Xact,pars,t0,f):
+    vals = pars.valuesdict()
+    nm=len([value for key, value in vals.items() if 't' in key.lower()])
+    nt=X.shape[0]
+    solver = Eof(X,center=False,weights=prpatt.wgt2(X))
+    ua=solver.projectField(Xact,neofs=4,eofscaling=1)
+
+    x_array=np.arange(1,nt+1)
+
+    fit_params=pars
+
+    out = lmfit.minimize(residual_project, fit_params, args=(f,), kws={'data': ua})
     #ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]
     ts=[]
     for i in np.arange(0,nm):

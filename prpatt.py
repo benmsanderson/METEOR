@@ -50,7 +50,7 @@ def makeparams(t0):
     nm=len(t0)
     fit_params = lmfit.Parameters()
     for i in np.arange(0,nm):
-        fit_params.add('t'+str(i), value=t0[i],min=0)
+        fit_params.add('t'+str(i), value=t0[i],min=t0[i]/4,max=t0[i]*4)
         for j in np.arange(0,nm):
 
             fit_params.add('s'+str(i)+str(j), value=1)

@@ -14,7 +14,7 @@ def make_4xanom(ds_4x,ds_cnt):
 def expotas(x, s1, t1):
   return s1*(1-np.exp(-x/t1))
 
-def model(pars, x):
+def pmodel(pars, x):
     nt=len(x)
     vals = pars.valuesdict()
     nm=len([value for key, value in vals.items() if 't' in key.lower()])
@@ -26,7 +26,7 @@ def model(pars, x):
     return aout
 
 def residual(pars, x, nm, data=None):
-    return data-model(pars,x)
+    return data-pmodel(pars,x)
 
 def wgt(X):
     weights = np.cos(np.deg2rad(X.lat))
@@ -73,7 +73,7 @@ def get_timescales(X,t0):
     ts=[]
     for i in np.arange(0,nm):
         ts.append(out.params['t'+str(i)].value)
-    us=model(out.params,np.arange(0,nt))
+    us=pmodel(out.params,np.arange(0,nt))
     usa=xr.DataArray(us, coords=(eofout['u'].time,eofout['u'].mode), dims=('time','mode'))
     return (ts,out,usa,eofout)
 

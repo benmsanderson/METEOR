@@ -27,6 +27,19 @@ def imodel(pars, eofout, F, F0=7.41, y0=1850):
     inm[i:,:,:]=inm[i:,:,:]+dF*Xrs[0:ts,:,:].values
   return inm
 
+def imodel_eof(pars, eofout, F, F0=7.41, y0=1850):
+  nt=len(F)
+  
+  us=pmodel(pars,nt)
+  usa=xr.DataArray(us, coords=(np.arange(y0,nt+y0),eofout['u'].mode), dims=('time','mode'))
+  #Xrs=rmodel(eofout,usa)
+  inm=usa*0.
+  for Ft,i in enumerate(np.arange(0,nt-1)):
+    dF=(F[i+1]-F[i])/F0
+    ts=nt-i
+    inm[i:,:,:]=inm[i:,:,:]+dF*usa[0:ts,:].values
+  return inm
+
 def rmodel(eofout, us):
   eof_synth=eofout.copy()
   eof_synth['u']=us
@@ -99,8 +112,6 @@ def get_timescales(X,t0):
     us=pmodel(out.params,nt)
     usa=xr.DataArray(us, coords=(eofout['u'].time,eofout['u'].mode), dims=('time','mode'))
     return (ts,out,usa,eofout)
-
-    eofout=svds(X,nm)
 
 def recon(eofout):
   u1=eofout['u']

@@ -14,14 +14,27 @@ def make_4xanom(ds_4x,ds_cnt):
 def expotas(x, s1, t1):
   return s1*(1-np.exp(-x/t1))
 
-def imodel(pars, F, F0=7.41):
+def imodel(pars, eofout, F, F0=7.41):
   nt=len(F)
+  inm=pmodel(pars,nt)*0
+  us=pmodel(pars,ts)
+  Xrs=rmodel(pars,eofout,nt)
   for Ft,i in np.arange(0,nt):
     dF=(F[i+1]-F[i])/F0
     ts=nt-i
-    sim=pmodel(pars,ts)
+    inm[i:,:,:]=inm[i,:,:]+Xrs[0:ts,:,:]
+  return inm
+
+def rmodel(pars, eofout, nt):
+  eof_synth=orgeof.copy()
+  eof_synth['u']=us
+  Xrs=recon(eof_synth)
+  return Xrs
+  #makes gridded pulse-response from parameters
+
 
 def pmodel(pars, nt):
+  #makes PC timeseries from parameters
     #nt=len(x)
     x=np.arange(0,nt)
     vals = pars.valuesdict()

@@ -14,8 +14,16 @@ def make_4xanom(ds_4x,ds_cnt):
 def expotas(x, s1, t1):
   return s1*(1-np.exp(-x/t1))
 
-def pmodel(pars, x):
-    nt=len(x)
+def imodel(pars, F, F0=7.41):
+  nt=len(F)
+  for Ft,i in np.arange(0,nt):
+    dF=(F[i+1]-F[i])/F0
+    ts=nt-i
+    sim=pmodel(pars,ts)
+
+def pmodel(pars, nt):
+    #nt=len(x)
+    x=np.arange(0,nt)
     vals = pars.valuesdict()
     nm=len([value for key, value in vals.items() if 't' in key.lower()])
     aout=np.zeros([nt, nm])
@@ -25,8 +33,8 @@ def pmodel(pars, x):
             aout[:,i]=aout[:,i]+expotas(x,vals['s'+str(i)+str(j)],vals['t'+str(j)])
     return aout
 
-def residual(pars, x, nm, data=None):
-    return data-pmodel(pars,x)
+def residual(pars, data=None):
+    return data-pmodel(pars,data.shape[0])
 
 def wgt(X):
     weights = np.cos(np.deg2rad(X.lat))
@@ -68,12 +76,12 @@ def get_timescales(X,t0):
 
     fit_params=makeparams(t0)
 
-    out = lmfit.minimize(residual, fit_params, args=(x_array,nm,), kws={'data': eofout['u']})
+    out = lmfit.minimize(residual, fit_params, args=(), kws={'data': eofout['u']})
     #ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]
     ts=[]
     for i in np.arange(0,nm):
         ts.append(out.params['t'+str(i)].value)
-    us=pmodel(out.params,np.arange(0,nt))
+    us=pmodel(out.params,nt)
     usa=xr.DataArray(us, coords=(eofout['u'].time,eofout['u'].mode), dims=('time','mode'))
     return (ts,out,usa,eofout)
 

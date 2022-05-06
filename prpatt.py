@@ -52,7 +52,7 @@ def svds(X,nm):
     solver = Eof(X,center=False,weights=wgt2(X))
     eofout= {}
 
-    eofout['v']=solver.eofsAsCovariance(neofs=nm)
+    eofout['v']=solver.eofsAsCovariance(neofs=nm,pcscaling=1)
     eofout['u']=solver.pcs(npcs=nm,pcscaling=1)
     eofout['s']=solver.eigenvalues(neigs=nm)
     eofout['weights']=solver.getWeights()
@@ -88,8 +88,8 @@ def recon(eofout):
   nt=u1.shape[0]
   v1f=v1.values.reshape(nm,-1)
   Xr=np.dot(np.dot(u1,np.diag(np.sqrt(s1))),v1f)
-  Xrp=np.reshape(Xr,[u1.shape[0],v1.shape[1],v1.shape[2]])/wgt
-  Xo=xr.DataArray(Xrp, coords=(np.arange(0,nt),v1.lat,v1.lon), dims=('time','lat','lon'))
+  Xrp=np.reshape(Xr,[u1.shape[0],v1.shape[1],v1.shape[2]])
+  Xo=xr.DataArray(Xrp, coords=(u1.time,v1.lat,v1.lon), dims=('time','lat','lon'))
 
   return Xo
 

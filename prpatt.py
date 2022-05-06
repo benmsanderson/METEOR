@@ -24,7 +24,7 @@ def imodel(pars, eofout, F, F0=7.41, y0=1850):
   for Ft,i in enumerate(np.arange(0,nt-1)):
     dF=(F[i+1]-F[i])/F0
     ts=nt-i
-    inm[i:,:,:]=inm[i:,:,:]+Xrs[0:ts,:,:].values
+    inm[i:,:,:]=inm[i:,:,:]+dF*Xrs[0:ts,:,:].values
   return inm
 
 def rmodel(pars, eofout, us, nt):

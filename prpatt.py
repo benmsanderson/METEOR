@@ -1,3 +1,4 @@
+from token import ISNONTERMINAL
 from eofs.xarray import Eof
 import numpy as np
 import lmfit
@@ -7,6 +8,7 @@ from scipy import signal
 
 
 def make_anom(ds_4x,ds_cnt):
+  #makes anomoly timeseries from 4xco2 and PICTRL
     ds_4x_anom=ds_4x-ds_cnt.mean("year")
     ds_4x_anom=ds_4x_anom.rename({'year': 'time'})
     ds_4x_anom=ds_4x_anom.interpolate_na(dim='lat', method='nearest').interpolate_na(dim='lon', method='nearest')
@@ -14,9 +16,11 @@ def make_anom(ds_4x,ds_cnt):
 
 
 def expotas(x, s1, t1):
+  #single exponential decay function
   return s1*(1-np.exp(-x/t1))
 
 def imodel(pars, eofout, F, F0=7.41, y0=1850):
+  #depreciated, reconstructs full grids and sums - very slow
   nt=len(F)
   
   us=pmodel(pars,nt)
@@ -30,6 +34,7 @@ def imodel(pars, eofout, F, F0=7.41, y0=1850):
   return inm
 
 def imodel_eof(pars, F, F0=7.41, y0=1850):
+  #depreciated - loop over forcing vecrtor, quite slow
   nt=len(F)
   vals = pars.valuesdict()
   nm=len([value for key, value in vals.items() if 't' in key.lower()])
@@ -45,6 +50,11 @@ def imodel_eof(pars, F, F0=7.41, y0=1850):
   return inm
 
 def imodel_filter(pars, F, F0=7.41, y0=1850):
+  #takes forcing timeseries as input and convolves with synthetic PC
+  #timeseries generated from pars in response to 4xCO2
+  #outputs a PC timeseries (xarray) corresponding to Forcing
+  #timeseries and 4xCO2 EOFs
+  #assumes default 4xCO2 forcing and output from 1850
   nt=len(F)
   dF=np.append(np.diff(F),0)/F0
   vals = pars.valuesdict()
@@ -59,13 +69,18 @@ def imodel_filter(pars, F, F0=7.41, y0=1850):
 
   return inma
 
+def imodel_filter_scl(pscl, pars, F, F0=7.41, y0=1850):
+  vals = pscl.valuesdict()
+  fscl=vals['a']*F+vals['b']*np.square(F)
+  inma=imodel_filter(pars, fscl, F0=7.41, y0=1850)
+  return inma
 
 def rmodel(eofout, us):
+    #makes gridded field from EOFs and PC timeseries 'us'
   eof_synth=eofout.copy()
   eof_synth['u']=us
   Xrs=recon(eof_synth)
   return Xrs
-  #makes gridded pulse-response from parameters
 
 
 def pmodel(pars, nt):
@@ -89,6 +104,14 @@ def residual_project(pars, f, modewgt, data=None):
     wgtt=np.tile(modewgt.T,(data.shape[0],1))
 
     mdl=imodel_filter(pars,f )
+    rs=(data-mdl)
+    rs=rs*wgtt
+    return rs
+
+def residual_project_scl(pscl, pars, f, modewgt, data=None):
+    wgtt=np.tile(modewgt.T,(data.shape[0],1))
+
+    mdl=imodel_filter_scl(pscl, pars,f )
     rs=(data-mdl)
     rs=rs*wgtt
     return rs
@@ -143,6 +166,11 @@ def get_timescales(X,t0):
     return (ts,out,usa,eofout)
 
 def adjust_timescales(X,Xact,pars,t0,f):
+    scl_params = lmfit.Parameters()
+    scl_params.add('a',value=1,min=0.7,max=1.3)
+    scl_params.add('b',value=0.001,min=0.0,max=0.5)
+
+    
     vals = pars.valuesdict()
     nm=len([value for key, value in vals.items() if 't' in key.lower()])
     nt=X.shape[0]
@@ -153,19 +181,13 @@ def adjust_timescales(X,Xact,pars,t0,f):
     ua=solver.projectField(Xact,neofs=nm,eofscaling=1)
     
     kys=[key for key, value in vals.items()]
-    fit_params=pars
     x_array=np.arange(1,nt+1)
 
     
 
-    out = lmfit.minimize(residual_project, fit_params, args=(f,modewgt,), kws={'data': ua})
+    out = lmfit.minimize(residual_project_scl, scl_params, args=(pars,f,modewgt,), kws={'data': ua})
     #ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]
-    ts=[]
-    for i in np.arange(0,nm):
-        ts.append(out.params['t'+str(i)].value)
-    us=pmodel(out.params,nt)
-    usa=xr.DataArray(us, coords=(eofout['u'].time,eofout['u'].mode), dims=('time','mode'))
-    return (ts,out,usa,eofout)
+    return out
 
 def recon(eofout):
   u1=eofout['u']

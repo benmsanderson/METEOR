@@ -1,2 +1,4 @@
-# prpattern
-Multi-timescale pattern scaling
+# PaIR
+Patterned Impulse Response model
+
+

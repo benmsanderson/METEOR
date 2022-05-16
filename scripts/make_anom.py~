@@ -1,0 +1,39 @@
+#!/usr/bin/env python
+# coding: utf-8
+datadir='/content/drive/MyDrive/colab_4xco2'
+
+
+
+import pickle
+import os
+import numpy as np
+import pandas as pd
+import xarray as xr
+import sys
+
+
+sys.path.append(os.path.join(os.getcwd(), "../", "src"))
+
+from meteor.utils import make_anom
+
+#CMIP6
+ds_4x = xr.open_dataset(datadir+"/abrupt-4xCO2.nc")
+ds_1pc = xr.open_dataset(datadir+"/1pctCO2.nc")
+ds_hist = xr.open_dataset(datadir+"/historical.nc")
+
+ds_cnt = xr.open_dataset(datadir+"/piControl.nc")
+ds_r85 = xr.open_dataset(datadir+"/ssp585.nc")
+ds_r26 = xr.open_dataset(datadir+"/ssp126.nc")
+
+
+
+if 1:
+  ds_4x_anom=make_anom(ds_4x,ds_cnt)
+  ds_4x_anom.to_netcdf(datadir+'/a4xanom.nc')
+  ds_1pc_anom=make_anom(ds_1pc,ds_cnt)
+  ds_1pc_anom.to_netcdf(datadir+'/1pcanom.nc')
+
+else:
+  ds_4x_anom=xr.open_dataset('/content/drive/MyDrive/colab_4xco2/a4xanom.nc')
+  ds_1pc_anom=xr.open_dataset('/content/drive/MyDrive/colab_4xco2/1pcanom.nc')
+

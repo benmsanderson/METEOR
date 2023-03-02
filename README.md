@@ -1,4 +1,3 @@
-# PaIR
-Patterned Impulse Response model
-
+# METEOR
+Multivariate Emulation of Time-Emergent fOrced Response
 

@@ -15,7 +15,7 @@ def make_anom(ds_4x,ds_cnt):
     ds_4x_anom=ds_4x_anom.rename({'year': 'time'})
     ds_4x_anom=ds_4x_anom.interpolate_na(dim='lat', method='nearest').interpolate_na(dim='lon', method='nearest')
     return ds_4x_anom
-
+ 
 
 def expotas(x, s1, t1):
   #a single exponential decay function

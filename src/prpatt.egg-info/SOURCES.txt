@@ -1,0 +1,12 @@
+.gitignore
+README.md
+README.rst
+Read_PDRMIP.ipynb
+mdls.pkl
+setup.cfg
+setup.py
+src/prpatt.egg-info/PKG-INFO
+src/prpatt.egg-info/SOURCES.txt
+src/prpatt.egg-info/dependency_links.txt
+src/prpatt.egg-info/requires.txt
+src/prpatt.egg-info/top_level.txt

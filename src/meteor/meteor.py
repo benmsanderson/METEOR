@@ -11,6 +11,21 @@ import matplotlib.pyplot as plt
 LOGGER = logging.getLogger(__name__)
 
 def read_training_data(get_training_file_from_exp, exp_list):
+    """
+    Reading training data into xarray
+    
+    Parameters
+    ----------
+    get_training_file_from_exp: function
+              Funtion that returns the path to the training
+              file given the experiment name
+    exp_list: list
+              List of experiments to include
+    Returns
+    -------
+    xarray dataset
+         A dataset containing the experiments as an extra dimension
+    """
     # Might need to be rewritten to account for several models in files...
     for i,expt in enumerate(exp_list):
         tmp=xr.open_dataset(get_training_file_from_exp(exp))
@@ -38,7 +53,16 @@ class MeteorPatternScaling:
 
     Attributes
     ----------
-
+    exp_list: list
+             List of experiments included in the pattern scaling
+    daconom : xarray dataset
+             Input data from the experiments belonging to the pattern
+    patternflds: dict
+             Dictionary of with variables for pattern scaling as
+             keys, and their truncation length for PCAs as values
+    od: dict
+        Dictionary with the PCAs and patterns for the various experiments
+        and variables
     """
 
     def __init__(self, name, patternflds, get_training_file_from_exp, exp_list, tmscl=[2,50]):
@@ -63,9 +87,10 @@ class MeteorPatternScaling:
         self.exp_list = exp_list
         self.daconom = read_training_data(get_training_file_from_exp, self.exp_list)
         self.patterflds = patternflds
-        self.od = self._make_pattern_dict()
+        self.od = self._make_pattern_dict(tmscl)
+
         
-    def _make_pattern_dict(self)
+    def _make_pattern_dict(self, tmscl)
         od = dict()
         for j,exp in enumerate(self.exp_list):
             od[exp] = dict()

@@ -30,7 +30,7 @@ checks: $(VENV_DIR)  ## run all the checks
 		echo "\n\n=== pydocstyle ==="; $(VENV_DIR)/bin/pydocstyle src || echo "--- pydocstyle failed ---" >&2; \
 		echo "\n\n=== pylint ==="; $(VENV_DIR)/bin/pylint src || echo "--- pylint failed ---" >&2; \
 		echo "\n\n=== notebook tests ==="; $(VENV_DIR)/bin/pytest notebooks -r a --nbval --sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
-		echo "\n\n=== tests ==="; $(VENV_DIR)/bin/pytest tests -r a --cov=prpatt --cov-report='' \
+		echo "\n\n=== tests ==="; $(VENV_DIR)/bin/pytest tests -r a --cov=meteor --cov-report='' \
 			&& $(VENV_DIR)/bin/coverage report --fail-under=95 || echo "--- tests failed ---" >&2; \
 		echo
 
@@ -84,7 +84,7 @@ test-pypi-install: $(VENV_DIR)  ## test whether installing from PyPI works
 	$(eval TEMPVENV := $(shell mktemp -d))
 	python3 -m venv $(TEMPVENV)
 	$(TEMPVENV)/bin/pip install pip wheel --upgrade
-	$(TEMPVENV)/bin/pip install prpatt --pre
+	$(TEMPVENV)/bin/pip install meteor --pre
 	$(TEMPVENV)/bin/python scripts/test_install.py
 
 test-install: $(VENV_DIR)  ## test installing works

@@ -5,7 +5,7 @@ from setuptools.command.test import test as TestCommand
 
 import versioneer
 
-PACKAGE_NAME = "prpatt"
+PACKAGE_NAME = "meteor"
 AUTHORS = [
     ("Benjamin Sanderson", "benjamin.sanderson@cicero.oslo.no"),
 ]
@@ -70,11 +70,11 @@ REQUIREMENTS_EXTRAS = {
 # no tests/docs in `src` so don't need exclude
 PACKAGES = find_packages(SOURCE_DIR)
 PACKAGE_DIR = {"": SOURCE_DIR}
-#PACKAGE_DATA = {"prpatt": [os.path.join("default_data", "*.txt")]}
+#PACKAGE_DATA = {"meteor": [os.path.join("default_data", "*.txt")]}
 
 # Get the long description from the README file
 with open(README, "r") as f:
-    README_LINES = ["prpatt", "==============", ""]
+    README_LINES = ["meteor", "==============", ""]
     add_line = False
     for line in f:
         if line.strip() == ".. sec-begin-long-description":
@@ -88,7 +88,7 @@ if len(README_LINES) < 3:
     raise RuntimeError("Insufficient description given")
 
 
-class prpatt(TestCommand):
+class meteor(TestCommand):
     def finalize_options(self):
         TestCommand.finalize_options(self)
         self.test_args = []
@@ -101,7 +101,7 @@ class prpatt(TestCommand):
 
 
 cmdclass = versioneer.get_cmdclass()
-cmdclass.update({"test": prpatt})
+cmdclass.update({"test": meteor})
 
 setup(
     name=PACKAGE_NAME,

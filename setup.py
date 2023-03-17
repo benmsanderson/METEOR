@@ -21,6 +21,9 @@ REQUIREMENTS = [
     "python-dotenv",
     "tqdm",
     "matplotlib>=3.4",
+    "xarray",
+    "netcdf4",
+    "h5netcdf",
     "eofs",
     "lmfit"
 ]

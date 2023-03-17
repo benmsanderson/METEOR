@@ -1,4 +1,4 @@
-from prpatt import prpatt
+from meteor import prpatt
 import random
 
 def test_expotas():

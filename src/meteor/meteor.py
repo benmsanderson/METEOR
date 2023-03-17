@@ -110,6 +110,20 @@ class MeteorPatternScaling:
         return od
 
 
+    def predict_from_forcing_profile(self, forc_timeseries, var, exp= "co2x2"):
+        #Add something to account for the forcing strength of the experiment
+        Xf = prpatt.imodel_fileter(self.od[exp][var]['outp'].params,forc)
+        Xsim = prpatt.rmodel(self.od[exp][var]['orgeof'], Xf)
+        return Xsim
+
+    def make_prediction_plot(self, ax, forc_timeseries, var, exp="co2x2"):
+        Xsim = self.predict_from_forcing_profile(forc_timeseries,var,exp)
+        ts_f = Xsim.weighted(prpatt.wgt(self.dacanom[var][exp_list.index[exp],:100,:,:])).mean(('lat','lon'))
+        plt.plot(mean_f_var, ax = ax)
+        
+    #Method to combine forcing timeseries for various components?    
+    
+
     def plot_global_mean_values(self, ax, fld, exp):
       X = self.daconom[fld][self.exps_list.index(exp), :100,:,:]
       ax.plot(prpatt.global_mean(X), label='Original Data')
@@ -142,4 +156,5 @@ class MeteorPatternScaling:
         Xrs.weighted(prpatt.wgt(Xp)).mean(('lat','lon')).plot(color='red', ax=ax)
 
 
+    
         #more methods for how to apply the patternscaling to new data

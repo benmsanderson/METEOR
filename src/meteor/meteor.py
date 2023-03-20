@@ -34,14 +34,14 @@ def read_training_data(get_training_file_from_exp, exp_list):
             dac=tmp
         else:
             dac=xr.concat([dac,tmp],'expt')
-    dac=dac.assign_coords({"expt": self.exp_list})
-    ctrl=expts.index("base")
+    dac=dac.assign_coords({"expt": exp_list})
+    ctrl=exp_list.index("base")
     varis=dac.data_vars
     dacanom=dac
     for var in varis:
-        dacanom[var]=dac[var]-dac[var][ctrl,:,:,:,:].mean(dim='year',skipna=True)
+        dacanom[var]=dac[var].isel(ens=0).drop('ens')-dac[var][ctrl,:,:,:,:].mean(dim='year',skipna=True).isel(ens=0).drop('ens')
     dacanom=dacanom.rename({'year': 'time'})
-
+    return dacanom
 
 class MeteorPatternScaling:
     """
@@ -95,7 +95,7 @@ class MeteorPatternScaling:
         """
         self.exp_list = exp_list
         self.daconom = read_training_data(get_training_file_from_exp, self.exp_list)
-        self.patterflds = patternflds
+        self.patternflds = patternflds
         self.od = self._make_pattern_dict(tmscl)
         self.name = name
 

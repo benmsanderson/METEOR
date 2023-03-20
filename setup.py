@@ -1,5 +1,3 @@
-import os
-
 from setuptools import find_packages, setup
 from setuptools.command.test import test as TestCommand
 
@@ -73,7 +71,7 @@ REQUIREMENTS_EXTRAS = {
 # no tests/docs in `src` so don't need exclude
 PACKAGES = find_packages(SOURCE_DIR)
 PACKAGE_DIR = {"": SOURCE_DIR}
-#PACKAGE_DATA = {"meteor": [os.path.join("default_data", "*.txt")]}
+# PACKAGE_DATA = {"meteor": [os.path.join("default_data", "*.txt")]}
 
 # Get the long description from the README file
 with open(README, "r") as f:
@@ -128,7 +126,7 @@ setup(
     keywords=["emulator", "pattern scaling"],
     packages=PACKAGES,
     package_dir=PACKAGE_DIR,
-    #package_data=PACKAGE_DATA,
+    # package_data=PACKAGE_DATA,
     include_package_data=True,
     install_requires=REQUIREMENTS,
     extras_require=REQUIREMENTS_EXTRAS,

@@ -14,7 +14,7 @@ LOGGER = logging.getLogger(__name__)
 
 def read_training_data(get_training_file_from_exp, exp_list):
     """
-    Reading training data into xarray
+    Read training data into xarray
 
     Parameters
     ----------
@@ -23,6 +23,7 @@ def read_training_data(get_training_file_from_exp, exp_list):
               file given the experiment name
     exp_list: list
               List of experiments to include
+
     Returns
     -------
     xarray dataset
@@ -30,9 +31,8 @@ def read_training_data(get_training_file_from_exp, exp_list):
     """
     # Might need to be rewritten to account for several models in files...
     for i, exp in enumerate(exp_list):
-        print(get_training_file_from_exp(exp))
         tmp = xr.open_dataset(get_training_file_from_exp(exp))
-        if i == 0:
+        if not i:
             dac = tmp
         else:
             dac = xr.concat([dac, tmp], "expt")
@@ -66,22 +66,24 @@ class MeteorPatternScaling:
     patternflds: dict
              Dictionary of with variables for pattern scaling as
              keys, and their truncation length for PCAs as values
-    od: dict
-        Dictionary with the PCAs and patterns for the various experiments
-        and variables. A nested dictionary that with the experiments of the
-        objects. First keyset: The experiments that the pattern is defined by,
-        second keyset: The variables for which patterns are produced.
-        Third keyset: neweof, a synthetic PCA for the data from the calculated
-        response timescales,
-        orgeof, orginal PCA object from the data, and if data allows,
-        outp, the lmfit parameter fit using the original PCA object and timescales
+    pattern_dict: dict
+             Dictionary with the PCAs and patterns for the various
+             experiments and variables. A nested dictionary
+             with patterns for the experiment of the object.
+             First keyset: The experiments that the pattern is defined by,
+             Second keyset: The variables for which patterns are produced.
+             Third keyset: neweof - a synthetic PCA for the data from
+             the calculated response timescales,
+             orgeof -  orginal PCA object from the data, and if data allows,
+             outp - the lmfit parameter fit using the original
+             PCA object and timescales
     name: str
-        Name of the pattern, to be printed on plots etc.
+          Name of the pattern, to be printed on plots etc.
     """
 
     def __init__(
-        self, name, patternflds, get_training_file_from_exp, exp_list, tmscl=[2, 50]
-    ):
+        self, name, patternflds, get_training_file_from_exp, exp_list, tmscl=None
+    ):  # pylint: disable=too-many-arguments
         """
         Initialise MeteorPatternScaling
 
@@ -97,13 +99,21 @@ class MeteorPatternScaling:
         get_training_file_from_exp : function
                     Function that defines how to get find the location
                     of the training data input file for a given experiment
-        exp_list : list
-                   List of experiments to add to the pattern scaling
+        exp_list : dict
+                   Dictionary with experiment names as keys and forcing
+                   for that experiment as values, keys should be str
+                   and values should be float
+        tmscl : list
+                Intial guess for timescales to fit the pattern to if
+                None is sent, [2,50] will be used
         """
-        self.exp_list = exp_list
-        self.daconom = read_training_data(get_training_file_from_exp, self.exp_list)
+        self.exp_list = list(exp_list.keys())
+        self.exp_forc_dict = exp_list
+        self.dacanom = read_training_data(get_training_file_from_exp, self.exp_list)
         self.patternflds = patternflds
-        self.od = self._make_pattern_dict(tmscl)
+        if tmscl is None:
+            tmscl = [2, 50]
+        self.pattern_dict = self._make_pattern_dict(tmscl)
         self.name = name
 
     def _make_pattern_dict(self, tmscl):
@@ -117,35 +127,38 @@ class MeteorPatternScaling:
         tmscl : list
                 Array of initial guesses for timescales for the pattern scaling
                 pattern, all should be ints or floats.
+
         Returns
         -------
         dict
-            A nested dictionary that with the experiments of the objects. First
-            keyset: The experiments that the pattern is defined by, second
-            keyset: The variables for which patterns are produced. Third keyset:
-            neweof, a synthetic PCA for the data from the calculated response timescales,
+            A nested dictionary that with the experiments of the objects.
+            First keyset: The experiments that the pattern is defined by.
+            Second keyset: The variables for which patterns are produced.
+            Third keyset: neweof, a synthetic PCA for the data from the
+            calculated response timescales,
             orgeof, orginal PCA object from the data, and if data allows,
-            outp, the lmfit parameter fit using the original PCA object and timescales
+            outp, the lmfit parameter fit using the original PCA object
+            and timescales
         """
-        od = dict()
+        pattern_dict = {}
         for j, exp in enumerate(self.exp_list):
-            od[exp] = dict()
+            pattern_dict[exp] = {}
             for fld, trnc in self.patternflds.items():
-                od[exp][fld] = dict()
+                pattern_dict[exp][fld] = {}
                 # The :100? Flexible?
-                X = self.daconom[fld][j, :100, :, :]
-                if not np.isnan(np.mean(X)):
+                anomaly_data = self.dacanom[fld][j, :100, :, :]
+                if not np.isnan(np.mean(anomaly_data)):
                     (out, orgeof, neweof) = prpatt.get_timescales(
-                        X, tmscl, trnc
+                        anomaly_data, tmscl, trnc
                     )
 
-                    od[exp][fld]["neweof"] = neweof
-                    od[exp][fld]["orgeof"] = orgeof
-                    od[exp][fld]["outp"] = out
+                    pattern_dict[exp][fld]["neweof"] = neweof
+                    pattern_dict[exp][fld]["orgeof"] = orgeof
+                    pattern_dict[exp][fld]["outp"] = out
                 else:  # pragma: no cover
-                    od[exp][fld]["neweof"] = np.nan
-                    od[exp][fld]["orgeof"] = np.nan
-        return od
+                    pattern_dict[exp][fld]["neweof"] = np.nan
+                    pattern_dict[exp][fld]["orgeof"] = np.nan
+        return pattern_dict
 
     def predict_from_forcing_profile(self, forc_timeseries, fld, exp="co2x2"):
         """
@@ -169,9 +182,11 @@ class MeteorPatternScaling:
         patternfld and exp_lists
         """
         # Add something to account for the forcing strength of the experiment
-        Xf = prpatt.imodel_filter(self.od[exp][fld]["outp"].params, forc_timeseries)
-        Xsim = prpatt.rmodel(self.od[exp][fld]["orgeof"], Xf)
-        return Xsim
+        convolved_pca = prpatt.imodel_filter(
+            self.pattern_dict[exp][fld]["outp"].params, forc_timeseries
+        )
+        predicted = prpatt.rmodel(self.pattern_dict[exp][fld]["orgeof"], convolved_pca)
+        return predicted
 
     def make_prediction_plot(
         self, ax, forc_timeseries, fld, exp="co2x2"
@@ -190,9 +205,9 @@ class MeteorPatternScaling:
         exp : str
             Experiment that defines the stepfunction response for the forcer in question
         """
-        Xsim = self.predict_from_forcing_profile(forc_timeseries, fld, exp)
-        mean_f_var = Xsim.weighted(
-            prpatt.wgt(self.dacanom[fld][self.exp_list.index[exp], :100, :, :])
+        sim_data = self.predict_from_forcing_profile(forc_timeseries, fld, exp)
+        mean_f_var = sim_data.weighted(
+            prpatt.wgt(self.dacanom[fld][self.exp_list.index(exp), :100, :, :])
         ).mean(("lat", "lon"))
         plt.plot(mean_f_var, ax=ax)
 
@@ -211,14 +226,14 @@ class MeteorPatternScaling:
         exp : str
             Experiment for which to plot flobal mean pattern
         """
-        X = self.daconom[fld][self.exps_list.index(exp), :100, :, :]
-        ax.plot(prpatt.global_mean(X), label="Original Data")
+        data = self.dacanom[fld][self.exp_list.index(exp), :100, :, :]
+        ax.plot(prpatt.global_mean(data), label="Original Data")
         ax.plot(
-            prpatt.global_mean(prpatt.recon(self.od[exp][fld]["orgeof"])),
+            prpatt.global_mean(prpatt.recon(self.pattern_dict[exp][fld]["orgeof"])),
             label="EOF reconstruction (t=2)",
         )
         ax.plot(
-            prpatt.global_mean(prpatt.recon(self.od[exp][fld]["neweof"])),
+            prpatt.global_mean(prpatt.recon(self.pattern_dict[exp][fld]["neweof"])),
             label="P-R fit to PCs (t=2)",
         )
         ax.set_xlabel("time (years)")
@@ -239,13 +254,14 @@ class MeteorPatternScaling:
             Maximal number of principal components to show
         """
         comps_to_show = min(comps_to_show, self.patternflds[fld])
-        p, ax = plt.subplots(comps_to_show, 1)
+        plothandle, ax = plt.subplots(comps_to_show, 1)
         plt.set_cmap("bwr")
 
         for i in range(comps_to_show):
-            self.od[exp][fld]["orgeof"]["v"][i, :, :].plot(
+            self.pattern_dict[exp][fld]["orgeof"]["v"][i, :, :].plot(
                 ax=ax[i], cmap="bwr", vmin=-1e-4, vmax=1e-4
             )
+        return plothandle
 
     def plot_reconstructed_globmean(self, ax, fld, exp):  # pragma: no cover
         """
@@ -260,10 +276,16 @@ class MeteorPatternScaling:
         exp : str
             Experiment for which to plot global mean of original data, and pattern fields
         """
-        Xp = self.daconom[fld][self.exp_list.index(exp), :100, :, :]
-        Xrp = prpatt.recon(self.od[exp][fld]["orgeof"])
-        Xrs = prpatt.recon(self.od[exp][fld]["neweof"])
+        raw_data = self.dacanom[fld][self.exp_list.index(exp), :100, :, :]
+        pca_pattern = prpatt.recon(self.pattern_dict[exp][fld]["orgeof"])
+        synthetic_pattern = prpatt.recon(self.pattern_dict[exp][fld]["neweof"])
 
-        Xp.weighted(prpatt.wgt(Xp)).mean(("lat", "lon")).plot(color="cyan", ax=ax)
-        Xrp.weighted(prpatt.wgt(Xp)).mean(("lat", "lon")).plot(color="k", ax=ax)
-        Xrs.weighted(prpatt.wgt(Xp)).mean(("lat", "lon")).plot(color="red", ax=ax)
+        raw_data.weighted(prpatt.wgt(raw_data)).mean(("lat", "lon")).plot(
+            color="cyan", ax=ax
+        )
+        pca_pattern.weighted(prpatt.wgt(raw_data)).mean(("lat", "lon")).plot(
+            color="k", ax=ax
+        )
+        synthetic_pattern.weighted(prpatt.wgt(raw_data)).mean(("lat", "lon")).plot(
+            color="red", ax=ax
+        )

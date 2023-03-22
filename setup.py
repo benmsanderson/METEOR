@@ -23,7 +23,7 @@ REQUIREMENTS = [
     "netcdf4",
     "h5netcdf",
     "eofs",
-    "lmfit"
+    "lmfit",
 ]
 
 REQUIREMENTS_NOTEBOOKS = [
@@ -40,7 +40,12 @@ REQUIREMENTS_TESTS = [
     "xlrd",
 ]
 REQUIREMENTS_DOCS = ["sphinx>=1.4", "sphinx_rtd_theme", "sphinx-click"]
-REQUIREMENTS_DEPLOY = ["twine>=1.11.0", "setuptools>=41.2", "wheel>=0.31.0", 'versioneer-518']
+REQUIREMENTS_DEPLOY = [
+    "twine>=1.11.0",
+    "setuptools>=41.2",
+    "wheel>=0.31.0",
+    "versioneer-518",
+]
 
 REQUIREMENTS_DEV = [
     *[

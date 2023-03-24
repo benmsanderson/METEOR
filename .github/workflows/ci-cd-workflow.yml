@@ -36,7 +36,7 @@ jobs:
         bandit -c .bandit.yml -r src
         flake8 src tests setup.py
         pylint src
-    - name: Build docs
+   # - name: Build docs
       # treat warnings as errors (-W)...
       # ...but not when being nitpicky (-n)
       # run: |

@@ -1,4 +1,4 @@
-ciceroscm
+METEOR
 ==========
 
 A python version of the cicero-scm simple climate model
@@ -24,7 +24,7 @@ Write some text here
 
 Installation
 ------------
-METEOR prpatt cannot be installed using conda or pip yet.
+METEOR cannot be installed using conda or pip yet.
 
 .. sec-end-installation
 

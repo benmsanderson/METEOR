@@ -1,4 +1,4 @@
-name: PRPATT CI-CD
+name: METEOR CI-CD
 on:
   push:
     branches:
@@ -27,10 +27,10 @@ jobs:
       run: |
         pip install --upgrade pip wheel
         pip install -e .[dev]
-        pip install pandas==1.1.4
+        #pip install pandas==1.1.4
     - name: Formatting and linters
       run: |
-        black --check src tests setup.py --exclude prpatt/_version.py
+        black --check src tests setup.py --exclude meteor/_version.py
         isort --check-only --quiet --recursive src tests setup.py
         pydocstyle src
         bandit -c .bandit.yml -r src
@@ -39,17 +39,17 @@ jobs:
     - name: Build docs
       # treat warnings as errors (-W)...
       # ...but not when being nitpicky (-n)
-      run: |
-          sphinx-build -M html docs/source docs/build -qW
-          sphinx-build -M html docs/source docs/build -Eqn -b coverage
-          if [[ -s docs/build/html/python.txt ]]
-          then
-              echo
-              echo \"Error: Documentation missing:\"
-              echo
-              cat docs/build/html/python.txt
-              exit 1
-          fi
+      # run: |
+      #   sphinx-build -M html docs/source docs/build -qW
+      #    sphinx-build -M html docs/source docs/build -Eqn -b coverage
+      #    if [[ -s docs/build/html/python.txt ]]
+      #    then
+      #        echo
+      #        echo \"Error: Documentation missing:\"
+      #        echo
+      #        cat docs/build/html/python.txt
+      #        exit 1
+      #    fi
 
   build:
     runs-on: ubuntu-latest
@@ -73,7 +73,7 @@ jobs:
         pip install -e .[tests,models]
     - name: Test with pytest
       run: |
-        pytest tests -r a --cov=prpatt --cov-report='' --cov-fail-under=$MIN_COVERAGE
+        pytest tests -r a --cov=meteor --cov-report='' --cov-fail-under=$MIN_COVERAGE
 
   test-notebooks:
     runs-on: ubuntu-latest

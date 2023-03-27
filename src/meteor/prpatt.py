@@ -11,7 +11,7 @@ from eofs.xarray import Eof
 
 def make_anom(ds_exp, ds_cnt):
     """
-    Make anomaly timeseries from experiment and control
+    Make anomaly timeseries from experiment relative to control long term average
 
     Parameters
     ----------
@@ -60,7 +60,9 @@ def expotas(time, coeff, decay_time):
 
 def imodel_filter(pars, forc_timeseries, forc_step=7.41, year_0=1850):
     """
-    Convolve synthetic patten scaling with forcing time series
+    Convolve PC timeseries from step function response with 
+    forcing timeseries to produce convolved PC timeseries
+    describing transient climate evolution.
 
     Takes forcing timeseries as input and convolves with
     synthetic PC timeseries generated from input parameters
@@ -114,7 +116,8 @@ def imodel_filter(pars, forc_timeseries, forc_step=7.41, year_0=1850):
 
 def rmodel(eofout, pc_matrix):
     """
-    Reconstruct output from a user defined principal component timeseries
+    Reconstruct gridded, time evolving output from a user 
+    defined principal component timeseries and EOF patterns
 
     Parameters
     ----------
@@ -141,7 +144,10 @@ def rmodel(eofout, pc_matrix):
 
 def pmodel(pars, n_times):
     """
-    Calculate synthetic principal component time series from exponential decay function
+    Calculate synthetic principal component time series associated with
+    a step change in forcing.  Each mode of the (n_mode) PC timeseries is constructed
+    as a sum of (n_tau) exponential decay functions.
+
 
     Parameters
     ----------
@@ -191,8 +197,10 @@ def pmodel(pars, n_times):
 
 def residual(pars, modewgt, data):
     """
-    Calculate weighted residual between fit and model
-    !NB: Ben please check this extra cearfully, not at all sure I understood what this does...
+    Calculate weighted residual between the step function response
+    PC timeseries and the reconstruction of those PC timeseries using
+    the pmodel function.   The contribution of each mode in the combined 
+    residual is weighted by a vector modewgt.
 
     Parameters
     ----------
@@ -285,7 +293,8 @@ def wgt3(array_w_latlontime):
 
 def make_params(tmscl_0, n_modes):
     """
-    Create lmfit parameter object to define an exponential function
+    Create lmfit parameter object to define parameters used by pmodel to create 
+    synthetic step function response PCs. 
 
     Parameters
     ----------
@@ -433,7 +442,12 @@ def global_mean(ds):
 
 def get_timescales(anomaly_data, tmscl_0, n_modes):
     """
-    Calculate optimised model parameters from anomaly matrix
+    Calculate optimised parameters by minimising the residual 
+    between the output of pmodel and the step function PC timeseries 
+    represented in anomaly_data, given initial guesses on the timescales
+    present in the ouput (tmscl_0) and the number of modes retained 
+    in the PCA (n_modes)
+
 
     Find optimised model parameters given model anomaly matrix from
     step function forcing experiment
@@ -491,10 +505,10 @@ def get_timescales(anomaly_data, tmscl_0, n_modes):
 
 def recon(eofout):
     """
-    Reconstruct full dataset given a PCA decompostion
+    Reconstruct full dataset given a PCA decompostion represented
+    in the dictionary format outputted by eof_calculation_wrapper
 
-    Reconstructs a full dataset (time by lat by lon), given a
-    principal component analysis decomposition
+    Output in xarray dataarray format (time by lat by lon)
 
     Parameters
     ----------

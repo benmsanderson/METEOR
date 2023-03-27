@@ -38,6 +38,7 @@ REQUIREMENTS_TESTS = [
     "pytest-cov",
     "pytest>=4.0",
     "xlrd",
+    "importlib-metadata<5.0",
 ]
 REQUIREMENTS_DOCS = ["sphinx>=1.4", "sphinx_rtd_theme", "sphinx-click"]
 REQUIREMENTS_DEPLOY = [

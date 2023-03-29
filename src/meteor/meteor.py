@@ -227,14 +227,15 @@ class MeteorPatternScaling:
             Experiment for which to plot flobal mean pattern
         """
         data = self.dacanom[fld][self.exp_list.index(exp), :100, :, :]
+        trun = self.patternflds[fld]
         ax.plot(prpatt.global_mean(data), label="Original Data")
         ax.plot(
             prpatt.global_mean(prpatt.recon(self.pattern_dict[exp][fld]["orgeof"])),
-            label="EOF reconstruction (t=2)",
+            label="EOF reconstruction (t="+str(trun)+")",
         )
         ax.plot(
             prpatt.global_mean(prpatt.recon(self.pattern_dict[exp][fld]["neweof"])),
-            label="P-R fit to PCs (t=2)",
+            label="P-R fit to PCs (t="+str(trun)+")",
         )
         ax.set_xlabel("time (years)")
         ax.legend()
@@ -259,8 +260,7 @@ class MeteorPatternScaling:
 
         for i in range(comps_to_show):
             self.pattern_dict[exp][fld]["orgeof"]["v"][i, :, :].plot(
-                ax=ax[i], cmap="bwr", vmin=-1e-4, vmax=1e-4
-            )
+                ax=ax[i], cmap="bwr")
         return plothandle
 
     def plot_reconstructed_globmean(self, ax, fld, exp):  # pragma: no cover

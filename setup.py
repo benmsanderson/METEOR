@@ -24,6 +24,7 @@ REQUIREMENTS = [
     "h5netcdf",
     "eofs",
     "lmfit",
+    "ciceroscm",
 ]
 
 REQUIREMENTS_NOTEBOOKS = [

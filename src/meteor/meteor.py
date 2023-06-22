@@ -8,6 +8,7 @@ import numpy as np
 import xarray as xr
 
 from . import prpatt
+from . import scm_forcer_engine
 
 LOGGER = logging.getLogger(__name__)
 
@@ -99,16 +100,16 @@ class MeteorPatternScaling:
         get_training_file_from_exp : function
                     Function that defines how to get find the location
                     of the training data input file for a given experiment
-        exp_list : dict
-                   Dictionary with experiment names as keys and forcing
-                   for that experiment as values, keys should be str
-                   and values should be float
+        exp_list : list
+                   List with experiment names
         tmscl : list
                 Intial guess for timescales to fit the pattern to if
                 None is sent, [2,50] will be used
         """
-        self.exp_list = list(exp_list.keys())
-        self.exp_forc_dict = exp_list
+        self.exp_list = exp_list
+        sefps = scm_forcer_engine.ScmEngineForPatternScaling(None)
+        scaling = sefps.run_to_get_scaling(self.exp_list)
+        self.exp_forc_dict = {exp : scaling[i] for i, exp in enumerate(exp_list) }
         self.dacanom = read_training_data(get_training_file_from_exp, self.exp_list)
         self.patternflds = patternflds
         if tmscl is None:

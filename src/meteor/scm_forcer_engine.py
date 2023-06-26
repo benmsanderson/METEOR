@@ -1,5 +1,5 @@
 """
-SCM_FORCER_ENGINE 
+SCM_FORCER_ENGINE
 
 Module to facility using ciceroscm to create forcing time series
 for pattern scaling
@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 import numpy as np
 import pandas as pd
 from ciceroscm import concentrations_emissions_handler, input_handler
+
 
 def aerosol_priority_mapping(comps):
     """
@@ -42,13 +43,19 @@ def aerosol_priority_mapping(comps):
     for miss in missing_keys:
         if "BC" not in missing_keys:
             aerosols[miss] = "BC"
-            aerosols[list(filter(lambda x: aerosols[x] == miss, aerosols))[0]] = "BC"
+            aerosols[
+                [aermiss for aermiss, value in aerosols.items() if value == miss][0]
+            ] = "BC"
         elif "OC" not in missing_keys:
             aerosols[miss] = "OC"
-            aerosols[list(filter(lambda x: aerosols[x] == miss, aerosols))[0]] = "OC"
+            aerosols[
+                [aermiss for aermiss, value in aerosols.items() if value == miss][0]
+            ] = "OC"
         else:
             aerosols[miss] = "SO2"
-            aerosols[list(filter(lambda x: aerosols[x] == miss, aerosols))[0]] = "SO2"
+            aerosols[
+                [aermiss for aermiss, value in aerosols.items() if value == miss][0]
+            ] = "SO2"
     return aerosols
 
 
@@ -58,6 +65,7 @@ class ScmEngineConfigurations:
     Dataclass for scm engine configurations
     """
 
+    # pylint: disable=too-many-instance-attributes
     gaspam_data: pd.DataFrame
     concentrations_data: pd.DataFrame
     emissions_data: pd.DataFrame
@@ -70,6 +78,11 @@ class ScmEngineConfigurations:
     conc_run: bool = True
 
     def __post_init__(self):
+        """
+        Read in and set sensible defaults for natural emissions,
+        if they are missing, setting concentrations and emissions
+        to flat values around the emission base year
+        """
         if self.nat_ch4_data is None:
             self.nat_ch4_data = pd.DataFrame(
                 data={"CH4": np.ones(self.nyend - self.nystart + 1) * 242.09},
@@ -81,17 +94,19 @@ class ScmEngineConfigurations:
                 index=np.arange(self.nystart, self.nyend + 1),
             )
 
-        self.concentrations_data.loc[self.emstart : self.emstart + 6].iloc[
-            :
-        ] = self.concentrations_data.loc[self.emstart, :]
-        self.emissions_data.loc[self.emstart : self.emstart + 6].iloc[
-            :
-        ] = self.emissions_data.loc[self.emstart, :]
+        # TODO : Possibly take this out or make more flexible
+        if self.conc_run:
+            self.concentrations_data.loc[self.emstart : self.emstart + 6].iloc[
+                :
+            ] = self.concentrations_data.loc[self.emstart, :]
+            self.emissions_data.loc[self.emstart : self.emstart + 6].iloc[
+                :
+            ] = self.emissions_data.loc[self.emstart, :]
 
 
 def run_single_experiment(pamset, input_h):
     """
-    Method to run the concentrations_emissions part of the SCM
+    Run the concentrations_emissions part of the SCM
 
     Parameters
     ----------
@@ -199,7 +214,7 @@ class ScmEngineForPatternScaling:
 
     def run_to_get_scaling(self, exps):
         """
-        Method to get per experiment scaling for a list of experiments
+        Get per experiment scaling for a list of experiments
 
         Parameters
         ----------
@@ -254,7 +269,7 @@ class ScmEngineForPatternScaling:
 
     def run_and_return_per_forcer_results(self, exps):
         """
-        Method to run scm and separate forcing timeseries per
+        Run scm and separate forcing timeseries per
         forcer in the experiment list
 
         Parameters
@@ -277,7 +292,7 @@ class ScmEngineForPatternScaling:
         """
         # TODO : Deal with if co2 experiment is not included
         # TODO : Deal with several experiments for the same component
-        forcing_total = run_single_experiment(asdict(self.cfg), self.input_hn)
+        forcing_total = run_single_experiment(asdict(self.cfg), self.input_h)
         forcing = {}
         comps = [exp.split("x")[0].upper() for exp in exps]
         aerosol_mapping = aerosol_priority_mapping(comps)
@@ -287,7 +302,7 @@ class ScmEngineForPatternScaling:
                 co2_name = exp
                 forcing[exp] = forcing_total["Total_forcing"]
             if exp.split("c")[0].upper() == "SUL":
-                comps[i] == "SO2"
+                comps[i] = "SO2"
 
         for comp, forc_series in forcing_total.items():
             print(comp)
@@ -297,7 +312,6 @@ class ScmEngineForPatternScaling:
                 )
                 forcing[co2_name] = forcing[co2_name] - forc_series
             elif comp in aerosol_mapping:
-                print(f"{comp} in aerosol_mapping with {aerosol_mapping[comp]}")
                 forcing[exps[comps.index(aerosol_mapping[comp])]] = (
                     forcing[exps[comps.index(aerosol_mapping[comp])]] + forc_series
                 )

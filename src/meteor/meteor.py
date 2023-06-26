@@ -63,6 +63,8 @@ class MeteorPatternScaling:
              Dict of experiments included in the pattern scaling
              with the forcing scaling size of the experiments as
              values
+    exp_list : list
+             List of the experiments used for ordering
     daconom : xarray dataset
              Input data from the experiments belonging to the pattern
     patternflds: dict
@@ -101,7 +103,7 @@ class MeteorPatternScaling:
         get_training_file_from_exp : function
                     Function that defines how to get find the location
                     of the training data input file for a given experiment
-        exp_forc_dict : dict
+        exp_list : dict
                    List with experiment names
         tmscl : list
                 Intial guess for timescales to fit the pattern to if
@@ -111,6 +113,7 @@ class MeteorPatternScaling:
         scaling = sefps.run_to_get_scaling(exp_list)
         self.exp_forc_dict = {exp: scaling[i] for i, exp in enumerate(exp_list)}
         self.dacanom = read_training_data(get_training_file_from_exp, exp_list)
+        self.exp_list = exp_list
         self.patternflds = patternflds
         if tmscl is None:
             tmscl = [2, 50]
@@ -185,7 +188,8 @@ class MeteorPatternScaling:
         # Add something to account for the forcing strength of the experiment
         convolved_pca = prpatt.imodel_filter(
             self.pattern_dict[exp][fld]["outp"].params,
-            forc_timeseries / self.exp_forc_dict[exp],
+            forc_timeseries,
+            forc_step=self.exp_forc_dict[exp],
         )
         predicted = prpatt.rmodel(self.pattern_dict[exp][fld]["orgeof"], convolved_pca)
         return predicted
@@ -223,13 +227,10 @@ class MeteorPatternScaling:
             "concentrations_data": concentrations_data,
             "emissions_data": emissions_data,
         }
-        print(emissions_data.index[-1])
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(cfg)
-        forcing_series = sefps.run_and_return_per_forcer_results(
-            list(self.exp_forc_dict.keys())
-        )
+        forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
         predicted = {}
-        for exp in self.exp_forc_dict.keys():
+        for exp in self.exp_list:
             if exp == "base":
                 continue
             for fld in flds:

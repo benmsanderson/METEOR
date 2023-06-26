@@ -2,6 +2,7 @@ import os
 
 import numpy as np
 from ciceroscm import input_handler
+
 from meteor import MeteorPatternScaling
 
 
@@ -37,9 +38,7 @@ def test_meteor_scaling_scm_timseries(test_data_dir):
         os.path.join(test_data_dir, "rcp85_conc_RCMIP.txt")
     )
     ih = input_handler.InputHandler({})
-    em_data = input_handler.read_inputfile(
-        os.path.join(test_data_dir, "rcp85_em_RCMIP.txt")
-    )
+    em_data = ih.read_emissions(os.path.join(test_data_dir, "rcp85_em_RCMIP.txt"))
 
     patterns = canesm_basic_pattern.predict_from_combined_experiment(
         em_data, conc_data, ["pr", "tas"]

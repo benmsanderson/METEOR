@@ -222,7 +222,7 @@ class MeteorPatternScaling:
         cfg = {
             "conc_run": conc_run,
             "nystart": emissions_data.index[0],
-            "emstart": emissions_data.index[0] + 100,
+            "emstart": 2100,
             "nyend": 2100,
             "concentrations_data": concentrations_data,
             "emissions_data": emissions_data,

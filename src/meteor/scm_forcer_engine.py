@@ -27,36 +27,34 @@ def aerosol_priority_mapping(comps):
     dict
         Where aerosol components that don't have direct mappings
         from the forcing experiments are mapped to what component
-        there forcings should be taken from
+        their forcings should be taken from
     """
     aerosols = {"SO4_IND": "SO2", "BMB_AEROS_BC": "BC", "BMB_AEROS_OC": "OC"}
-    missing_keys = list(set(aerosols.values()) - set(comps))
-    if len(missing_keys) == 3:
-        return {
-            "SO4_IND": "CO2",
-            "BMB_AEROS_BC": "CO2",
-            "BMB_AEROS_OC": "CO2",
-            "SO2": "CO2",
-            "BC": "CO2",
-            "OC": "CO2",
-        }
-    for miss in missing_keys:
-        if "BC" not in missing_keys:
-            aerosols[miss] = "BC"
-            aerosols[
-                [aermiss for aermiss, value in aerosols.items() if value == miss][0]
-            ] = "BC"
-        elif "OC" not in missing_keys:
-            aerosols[miss] = "OC"
-            aerosols[
-                [aermiss for aermiss, value in aerosols.items() if value == miss][0]
-            ] = "OC"
-        else:
-            aerosols[miss] = "SO2"
-            aerosols[
-                [aermiss for aermiss, value in aerosols.items() if value == miss][0]
-            ] = "SO2"
+    for aero, keyval in aerosols.items():
+        if keyval not in comps:
+            aerosols[aero] = "CO2"
     return aerosols
+
+
+def rename_component(comp):
+    """
+    Rename components with non_standard names
+
+    Currently just maps SUL to SO2
+
+    Parameters
+    ----------
+    comp : str
+           Name of component to be renamed
+
+    Returns
+    -------
+    str
+       New name of component
+    """
+    if comp == "SUL":
+        return "SO2"
+    return comp
 
 
 @dataclass
@@ -294,7 +292,8 @@ class ScmEngineForPatternScaling:
         # TODO : Deal with several experiments for the same component
         forcing_total = run_single_experiment(asdict(self.cfg), self.input_h)
         forcing = {}
-        comps = [exp.split("x")[0].upper() for exp in exps]
+        comps = [rename_component(exp.split("x")[0].upper()) for exp in exps]
+        print(comps)
         aerosol_mapping = aerosol_priority_mapping(comps)
         for i, exp in enumerate(exps):
             forcing[exp] = np.zeros(len(forcing_total["Total_forcing"]))

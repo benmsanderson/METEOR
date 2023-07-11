@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
-from . import prpatt
+from . import prpatt, scm_forcer_engine
 
 LOGGER = logging.getLogger(__name__)
 
@@ -59,8 +59,12 @@ class MeteorPatternScaling:
 
     Attributes
     ----------
-    exp_list: list
-             List of experiments included in the pattern scaling
+    exp_forc_dict: dict
+             Dict of experiments included in the pattern scaling
+             with the forcing scaling size of the experiments as
+             values
+    exp_list : list
+             List of the experiments used for ordering
     daconom : xarray dataset
              Input data from the experiments belonging to the pattern
     patternflds: dict
@@ -100,16 +104,16 @@ class MeteorPatternScaling:
                     Function that defines how to get find the location
                     of the training data input file for a given experiment
         exp_list : dict
-                   Dictionary with experiment names as keys and forcing
-                   for that experiment as values, keys should be str
-                   and values should be float
+                   List with experiment names
         tmscl : list
                 Intial guess for timescales to fit the pattern to if
                 None is sent, [2,50] will be used
         """
-        self.exp_list = list(exp_list.keys())
-        self.exp_forc_dict = exp_list
-        self.dacanom = read_training_data(get_training_file_from_exp, self.exp_list)
+        sefps = scm_forcer_engine.ScmEngineForPatternScaling(None)
+        scaling = sefps.run_to_get_scaling(exp_list)
+        self.exp_forc_dict = {exp: scaling[i] for i, exp in enumerate(exp_list)}
+        self.dacanom = read_training_data(get_training_file_from_exp, exp_list)
+        self.exp_list = exp_list
         self.patternflds = patternflds
         if tmscl is None:
             tmscl = [2, 50]
@@ -141,7 +145,7 @@ class MeteorPatternScaling:
             and timescales
         """
         pattern_dict = {}
-        for j, exp in enumerate(self.exp_list):
+        for j, exp in enumerate(self.exp_forc_dict.keys()):
             pattern_dict[exp] = {}
             for fld, trnc in self.patternflds.items():
                 pattern_dict[exp][fld] = {}
@@ -183,9 +187,62 @@ class MeteorPatternScaling:
         """
         # Add something to account for the forcing strength of the experiment
         convolved_pca = prpatt.imodel_filter(
-            self.pattern_dict[exp][fld]["outp"].params, forc_timeseries
+            self.pattern_dict[exp][fld]["outp"].params,
+            forc_timeseries,
+            forc_step=self.exp_forc_dict[exp],
         )
         predicted = prpatt.rmodel(self.pattern_dict[exp][fld]["orgeof"], convolved_pca)
+        return predicted
+
+    def predict_from_combined_experiment(
+        self, emissions_data, concentrations_data, flds, conc_run=False
+    ):
+        """
+        Predict the combined patterns for given flds for the given emissions and concentrations
+
+        Parameters
+        ----------
+        emissions_data : pd.DataFrame
+                         Emissions data on the format used by the ciceroscm input_handler
+        concentrations_data : pd.DataFrame
+                         Concentrations data on the format used by the ciceroscm input_handler
+        flds : list
+               Fields for which to calculate patterns
+        conc_run : Bool
+                   Whether experiment should be a concentrations run
+
+        Returns
+        -------
+        dict
+            keys are flds, values are predicted per fld combined patterns
+        """
+        # Setup and run scm-run to get forcing time series per forcing experiment
+        # Run and make predictions per experiment
+        # Combine predictions to full pattern
+        cfg = {
+            "conc_run": conc_run,
+            "nystart": emissions_data.index[0],
+            "emstart": emissions_data.index[0] + 100,
+            "nyend": 2100,
+            "concentrations_data": concentrations_data,
+            "emissions_data": emissions_data,
+        }
+        sefps = scm_forcer_engine.ScmEngineForPatternScaling(cfg)
+        forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
+        predicted = {}
+        for exp in self.exp_list:
+            if exp == "base":
+                continue
+            for fld in flds:
+                if fld not in predicted:
+                    predicted[fld] = self.predict_from_forcing_profile(
+                        forcing_series[exp], fld, exp
+                    )
+                else:
+                    predicted[fld] = predicted[fld] + self.predict_from_forcing_profile(
+                        forcing_series[exp], fld, exp
+                    )
+
         return predicted
 
     def make_prediction_plot(
@@ -231,11 +288,11 @@ class MeteorPatternScaling:
         ax.plot(prpatt.global_mean(data), label="Original Data")
         ax.plot(
             prpatt.global_mean(prpatt.recon(self.pattern_dict[exp][fld]["orgeof"])),
-            label="EOF reconstruction (t="+str(trun)+")",
+            label="EOF reconstruction (t=" + str(trun) + ")",
         )
         ax.plot(
             prpatt.global_mean(prpatt.recon(self.pattern_dict[exp][fld]["neweof"])),
-            label="P-R fit to PCs (t="+str(trun)+")",
+            label="P-R fit to PCs (t=" + str(trun) + ")",
         )
         ax.set_xlabel("time (years)")
         ax.legend()
@@ -260,7 +317,8 @@ class MeteorPatternScaling:
 
         for i in range(comps_to_show):
             self.pattern_dict[exp][fld]["orgeof"]["v"][i, :, :].plot(
-                ax=ax[i], cmap="bwr")
+                ax=ax[i], cmap="bwr"
+            )
         return plothandle
 
     def plot_reconstructed_globmean(self, ax, fld, exp):  # pragma: no cover

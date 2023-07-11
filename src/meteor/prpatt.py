@@ -60,7 +60,7 @@ def expotas(time, coeff, decay_time):
 
 def imodel_filter(pars, forc_timeseries, forc_step=7.41, year_0=1850):
     """
-    Convolve PC timeseries from step function response with 
+    Convolve PC timeseries from step function response with
     forcing timeseries to produce convolved PC timeseries
     describing transient climate evolution.
 
@@ -116,7 +116,7 @@ def imodel_filter(pars, forc_timeseries, forc_step=7.41, year_0=1850):
 
 def rmodel(eofout, pc_matrix):
     """
-    Reconstruct gridded, time evolving output from a user 
+    Reconstruct gridded, time evolving output from a user
     defined principal component timeseries and EOF patterns
 
     Parameters
@@ -199,7 +199,7 @@ def residual(pars, modewgt, data):
     """
     Calculate weighted residual between the step function response
     PC timeseries and the reconstruction of those PC timeseries using
-    the pmodel function.   The contribution of each mode in the combined 
+    the pmodel function.   The contribution of each mode in the combined
     residual is weighted by a vector modewgt.
 
     Parameters
@@ -293,8 +293,8 @@ def wgt3(array_w_latlontime):
 
 def make_params(tmscl_0, n_modes):
     """
-    Create lmfit parameter object to define parameters used by pmodel to create 
-    synthetic step function response PCs. 
+    Create lmfit parameter object to define parameters used by pmodel to create
+    synthetic step function response PCs.
 
     Parameters
     ----------
@@ -442,10 +442,10 @@ def global_mean(ds):
 
 def get_timescales(anomaly_data, tmscl_0, n_modes):
     """
-    Calculate optimised parameters by minimising the residual 
-    between the output of pmodel and the step function PC timeseries 
+    Calculate optimised parameters by minimising the residual
+    between the output of pmodel and the step function PC timeseries
     represented in anomaly_data, given initial guesses on the timescales
-    present in the ouput (tmscl_0) and the number of modes retained 
+    present in the ouput (tmscl_0) and the number of modes retained
     in the PCA (n_modes)
 
 

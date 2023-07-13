@@ -1,6 +1,15 @@
-METEOR
+### METEOR
 Multivariate Emulation of Time-Emergent fOrced Response
 
+
+# Installation
+git clone https://github.com/benmsanderson/METEOR.git
+cd METEOR
+pip install --requirement requirements.txt
+
+
+
+2. From r
 
 PDRMIP_spatial_emulator is working concept
 

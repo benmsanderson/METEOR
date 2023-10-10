@@ -193,7 +193,9 @@ class MeteorPatternScaling:
         )
         predicted = prpatt.rmodel(self.pattern_dict[exp][fld]["orgeof"], convolved_pca)
         return predicted
+    
 
+    
     def predict_from_combined_experiment(
         self, emissions_data, concentrations_data, flds, conc_run=False
     ):

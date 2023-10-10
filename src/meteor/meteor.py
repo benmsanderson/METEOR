@@ -195,7 +195,7 @@ class MeteorPatternScaling:
         return predicted
 
     def predict_from_combined_experiment(
-        self, emissions_data, concentrations_data, flds, conc_run=False
+        self, emissions_data, concentrations_data, flds, conc_run=False, nyend=2100
     ):
         """
         Predict the combined patterns for given flds for the given emissions and concentrations
@@ -222,12 +222,13 @@ class MeteorPatternScaling:
         cfg = {
             "conc_run": conc_run,
             "nystart": emissions_data.index[0],
-            "emstart": 2100,
-            "nyend": 2100,
+            "emstart": nyend,
+            "nyend": nyend,
             "concentrations_data": concentrations_data,
             "emissions_data": emissions_data,
         }
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(cfg)
+        print(sefps)
         forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
         predicted = {}
         for exp in self.exp_list:

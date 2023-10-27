@@ -1,7 +1,7 @@
 """
 SCM_FORCER_ENGINE
 
-Module to facility using ciceroscm to create forcing time series
+Module to facility ciceroscm to create forcing time series
 for pattern scaling
 """
 
@@ -125,7 +125,7 @@ def run_single_experiment(pamset, input_h):
         input_h, pamset
     )
     ce_handler.reset_with_new_pams(pamset)
-    print(pamset)
+    #print(pamset)
     for year in range(pamset["nystart"], pamset["nyend"] + 1):
         ce_handler.emi2conc(year)
         ce_handler.conc2forc(year, 0, 0)
@@ -307,14 +307,16 @@ class ScmEngineForPatternScaling:
         for comp, forc_series in forcing_total.items():
             print(comp)
             if comp in comps:
+                print('incomp')
                 forcing[exps[comps.index(comp)]] = (
                     forcing[exps[comps.index(comp)]] + forc_series
                 )
                 forcing[co2_name] = forcing[co2_name] - forc_series
             elif comp in aerosol_mapping:
+                print('inaer')
                 forcing[exps[comps.index(aerosol_mapping[comp])]] = (
                     forcing[exps[comps.index(aerosol_mapping[comp])]] + forc_series
                 )
                 forcing[co2_name] = forcing[co2_name] - forc_series
 
-        return forcing
+        return forcing,forcing_total

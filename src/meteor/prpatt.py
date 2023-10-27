@@ -95,7 +95,7 @@ def imodel_filter(pars, forc_timeseries, forc_step=7.41, year_0=1850):
     # create the synthetic pulse-response kernel for a unit step function
     # output needs to be n_times in length - long enough for the first timestep of the convolution
     pc_matrix = pmodel(pars, n_times)
-    print(pc_matrix.shape)
+    #print(pc_matrix.shape)
     # make the PC timeseries into an xarray Dataarray
     pc_dataarray = xr.DataArray(
         pc_matrix,
@@ -202,7 +202,7 @@ def fit_timescales(X,a0):
      awgt=awgt/np.mean(awgt)
      ts=(X*awgt).mean('lat').mean('lon').values
      fit_params = make_params(a0)
-     print(ts)
+     #print(ts)
      out = lmfit.minimize(
         lambda x: np.square(ts-expfun(np.arange(0,len(ts)),x)), fit_params,
      )

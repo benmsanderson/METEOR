@@ -5,6 +5,7 @@ import logging
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 from . import prpatt, scm_forcer_engine
@@ -89,7 +90,7 @@ class MeteorPatternScaling:
         self, name, patternflds, get_training_file_from_exp, exp_list, tmscl=None
     ):  # pylint: disable=too-many-arguments
         """
-        Initialise MeteorPatternScaling
+        InitialisePatternScaling
 
         Defining the patternscaling object from lists of experiments
 
@@ -230,7 +231,7 @@ class MeteorPatternScaling:
             "emissions_data": emissions_data,
         }
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(cfg)
-        forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
+        forcing_series,forcing_total = sefps.run_and_return_per_forcer_results(self.exp_list)
         predicted = {}
         for exp in self.exp_list:
             if exp == "base":
@@ -240,12 +241,17 @@ class MeteorPatternScaling:
                     predicted[fld] = self.predict_from_forcing_profile(
                         forcing_series[exp], fld, exp
                     )
+                    predicted[fld]['time']=pd.to_datetime(predicted[fld]['time'],format='%Y')
+                    
+
                 else:
-                    predicted[fld] = predicted[fld] + self.predict_from_forcing_profile(
+                    tmp=self.predict_from_forcing_profile(
                         forcing_series[exp], fld, exp
                     )
+                    tmp['time']=pd.to_datetime(tmp['time'],format='%Y')
+                    predicted[fld] = predicted[fld] + tmp
 
-        return predicted
+        return predicted,forcing_series,forcing_total
 
     def make_prediction_plot(
         self, ax, forc_timeseries, fld, exp="co2x2"

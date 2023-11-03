@@ -195,7 +195,6 @@ class MeteorPatternScaling:
         predicted = prpatt.rmodel(self.pattern_dict[exp][fld]["orgeof"], convolved_pca)
         return predicted
     
-
     
     def predict_from_combined_experiment(
         self, emissions_data, concentrations_data, flds, conc_run=False
@@ -251,7 +250,7 @@ class MeteorPatternScaling:
                     tmp['time']=pd.to_datetime(tmp['time'],format='%Y')
                     predicted[fld] = predicted[fld] + tmp
 
-        return predicted,forcing_series,forcing_total
+        return predicted
 
     def make_prediction_plot(
         self, ax, forc_timeseries, fld, exp="co2x2"

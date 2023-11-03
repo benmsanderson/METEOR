@@ -230,7 +230,7 @@ class MeteorPatternScaling:
             "emissions_data": emissions_data,
         }
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(cfg)
-        forcing_series,forcing_total = sefps.run_and_return_per_forcer_results(self.exp_list)
+        forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
         predicted = {}
         for exp in self.exp_list:
             if exp == "base":

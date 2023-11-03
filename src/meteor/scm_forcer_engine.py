@@ -319,4 +319,4 @@ class ScmEngineForPatternScaling:
                 )
                 forcing[co2_name] = forcing[co2_name] - forc_series
 
-        return forcing,forcing_total
+        return forcing

@@ -24,4 +24,4 @@ ignore-docstrings=yes
 ignore-imports=yes
 
 [FORMAT]
-good-names=i,j,k,ds,ax
+good-names=i,j,k,ds,ax,t,X,a0,ts,na,a0,b,ui,bx,nt

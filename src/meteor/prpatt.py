@@ -4,8 +4,6 @@ PRPATT
 import lmfit
 import numpy as np
 import xarray as xr
-from eofs.xarray import Eof
-from scipy.optimize import minimize
 from scipy.linalg import pinv
 
 # This is a library of functions to provide the backend to the pulse-response logic in METEOR
@@ -95,7 +93,7 @@ def imodel_filter(pars, forc_timeseries, forc_step=7.41, year_0=1850):
     # create the synthetic pulse-response kernel for a unit step function
     # output needs to be n_times in length - long enough for the first timestep of the convolution
     pc_matrix = pmodel(pars, n_times)
-    #print(pc_matrix.shape)
+    # print(pc_matrix.shape)
     # make the PC timeseries into an xarray Dataarray
     pc_dataarray = xr.DataArray(
         pc_matrix,
@@ -182,45 +180,101 @@ def pmodel(pars, n_times):
     # now loop over the EOF modes
     for i in np.arange(0, ntau):
         # first add a constant (defined per mode)
-        aout[:, i] = expotas(
-                time_vector, vals["s" + str(i)], vals["t" + str(i)]
-            )
+        aout[:, i] = expotas(time_vector, vals["s" + str(i)], vals["t" + str(i)])
     return aout
 
-def expfun(t,pars):
-    
+
+def expfun(t, pars):
+    """
+    Calculate the sum of exponential decays
+    defined by timescales and amplitudes given in pars
+    at times t
+
+    Parameters
+    ----------
+    t: np.array
+       times for which to caluclate exonential function
+    pars: lmfit.parameter.Parameters
+          Timescale parameters from keys t0, s0, t1, s1 etc with timescales as
+          and amplitudes as values
+
+    Returns
+    -------
+    np.ndarray
+           Sum of decays
+    """
     vals = pars.valuesdict()
     # this calculates (from parameter names) how many decay timeseries are encoded
     ntau = len([key for key in vals if "t" in key.lower()])
-    out=np.zeros(len(t))
+    out = np.zeros(len(t))
     for i in np.arange(ntau):
-        out=out+expotas(t,vals['s'+str(i)],vals['t'+str(i)])
+        out = out + expotas(t, vals["s" + str(i)], vals["t" + str(i)])
     return out
 
-def fit_timescales(X,a0):
-     awgt=np.cos(X.lat/180*np.pi)
-     awgt=awgt/np.mean(awgt)
-     ts=(X*awgt).mean('lat').mean('lon').values
-     fit_params = make_params(a0)
-     #print(ts)
-     out = lmfit.minimize(
-        lambda x: np.square(ts-expfun(np.arange(0,len(ts)),x)), fit_params,
-     )
 
-     return out
+def fit_timescales(X, a0):
+    """
+    Find best fit timescales for xarray X on lat lon and time
 
-def make_amat(pars,nt):
-    vals=pars.valuesdict()
+    Parameters
+    ----------
+    X : xr.DataArray
+        Data on lat, lon and time
+    a0 : np.ndarray
+         of even length, containing guesses for amplitudes and
+         corresponding timescales at even and odd consecutive
+         placements
+
+    Returns
+    -------
+    lmfit.MinimizerResult
+          The result of minimizing the difference between the global
+          latitudinally weighted mean timeseries of X and a sum of
+          exponential decays over the time series with respect to
+          the amplitudes and timescales of the decays
+    """
+    awgt = np.cos(X.lat / 180 * np.pi)
+    awgt = awgt / np.mean(awgt)
+    ts = (X * awgt).mean("lat").mean("lon").values
+    fit_params = make_params(a0)
+    # print(ts)
+    out = lmfit.minimize(
+        lambda x: np.square(ts - expfun(np.arange(0, len(ts)), x)),
+        fit_params,
+    )
+
+    return out
+
+
+def make_amat(pars, nt):
+    """
+    Make a matrix of timesteps as rows and the various exponential
+    decays as columns
+
+    Parameters
+    ----------
+    pars: lmfit.parameter.Parameters
+          Timescale parameters from keys t0, s0, t1, s1 etc with timescales as
+          and amplitudes as values
+    nt : int
+         Number of timesteps
+
+    Returns
+    -------
+    np.ndarray
+         Matrix with the exponential decay value at the nt timesteps
+        decays along each row for each exponential decay column
+    """
+    vals = pars.valuesdict()
     na = len([key for key in vals if "t" in key.lower()])
-    amat=np.zeros([nt,na])
-    t=np.arange(nt)
+    amat = np.zeros([nt, na])
+    t = np.arange(nt)
     for i in np.arange(na):
-      amat[:,i]= expotas(
-                t, vals["s" + str(i)], vals["t" + str(i)]
-            )
+        amat[:, i] = expotas(t, vals["s" + str(i)], vals["t" + str(i)])
     return amat
 
-def residual(pars, data):
+
+def residual(pars, modewgt, data):
     """
     Calculate weighted residual between the step function response
     PC timeseries and the reconstruction of those PC timeseries using
@@ -294,16 +348,16 @@ def wgt3(array_w_latlontime):
     Calculate cosine weights for an xarray with latitude field on 2d
 
     Parameters
-   ----------
+    ----------
     array_w_latlontime: xarray.DataArray
-                 Array that has latitudinal and longitudinal
-                 dimension
+                  Array that has latitudinal and longitudinal
+                  dimension
 
     Returns
     -------
     xarray.Datarray
-                 2d xarray called weights, with weights per latitude
-                 on logitude by latitude grid
+                  2d xarray called weights, with weights per latitude
+                  on logitude by latitude grid
     """
     weights = wgt(array_w_latlontime)
     weights_3d = (
@@ -323,11 +377,8 @@ def make_params(ain):
 
     Parameters
     ----------
-    tmscl_0 : list
-              Initial guess timescales, values should be int !NB Ben: Is float also ok?
-    n_modes : int
-              Number of modes to include
-
+    ain : list
+          Of even length, initial guess of amplitudes and timescales
     Returns
     -------
     lmfit.Parameters
@@ -338,7 +389,7 @@ def make_params(ain):
     # this creates an lmfit parameter object to define the exponential function
     # t0 is a vector of default timescales
     # this is the number of timescales in the model
-    n_times = int(len(ain)/2)
+    n_times = int(len(ain) / 2)
     # initialise the parameter object
     fit_params = lmfit.Parameters()
     # loop over the timescales
@@ -346,13 +397,14 @@ def make_params(ain):
         # for each timescale, we add a parameter for the decay constant - default t_i
         # at the moment, we allow LMFIT 1 order magnitude limits compared with the default
         fit_params.add(
-            "t" + str(i), value=ain[2*i+1], min=0, max=ain[2*i+1]*10
+            "t" + str(i), value=ain[2 * i + 1], min=0, max=ain[2 * i + 1] * 10
         )
-        
+
         # add a parameter representing the coefficient for the exponential decay with timescale t_i (coeff can be any value)
-        fit_params.add("s" + str(i), value=ain[2*i])
+        fit_params.add("s" + str(i), value=ain[2 * i])
 
     return fit_params
+
 
 def get_time_name(ds):
     """
@@ -429,7 +481,7 @@ def global_mean(ds):
     return (ds * weight).mean(other_dims)
 
 
-def get_timescales(anomaly_data, tmscl_0, n_modes):
+def get_timescales(anomaly_data, n_modes):
     """
     Calculate optimised parameters by minimising the residual
     between the output of pmodel and the step function PC timeseries
@@ -447,8 +499,6 @@ def get_timescales(anomaly_data, tmscl_0, n_modes):
                    Data array with the anomaly between the experiment
                    and control experriment. Assumed to have time
                    as first dimension
-    tmscl_0 : list
-              Timescales guess for fit, values should be int !NB Ben: Is float also ok?
     n_modes : int
               Number of modes to include
 
@@ -459,44 +509,46 @@ def get_timescales(anomaly_data, tmscl_0, n_modes):
         eofout - the EOF structure of the original anomaly data
         eofnew - the EOF structure of the minimised fit
     """
-    n_time = anomaly_data.shape[0]
-    
     # initialise an LMFIT parameter object, with tmscl_0 timescales and
     # n_modes modes
-    ampguess=anomaly_data.mean('lat').mean('lon').mean('time')
-    
+    ampguess = anomaly_data.mean("lat").mean("lon").mean("time")
 
-    tguess=10**(np.arange(n_modes)+1)
-    
-    a0=np.zeros(n_modes*2)
-    for i,t in enumerate(tguess):
-        a0[2*i]=ampguess
-        a0[2*i+1]=t
-        
-    aopt=fit_timescales(anomaly_data,a0)
-    eofout = {}
+    tguess = 10 ** (np.arange(n_modes) + 1)
+
+    a0 = np.zeros(n_modes * 2)
+    for i, t in enumerate(tguess):
+        a0[2 * i] = ampguess
+        a0[2 * i + 1] = t
+
+    aopt = fit_timescales(anomaly_data, a0)
     eofnew = {}
 
-    u_np=make_amat(aopt.params,len(anomaly_data.time))
-    uxr=xr.DataArray(data=u_np,dims=['time','mode'],coords=dict(
-        time=(["time"], anomaly_data.time.data),
-        mode=(["mode"],np.arange(n_modes))
-    ))
+    u_np = make_amat(aopt.params, len(anomaly_data.time))
+    uxr = xr.DataArray(
+        data=u_np,
+        dims=["time", "mode"],
+        coords={
+            "time": (["time"], anomaly_data.time.data),
+            "mode": (["mode"], np.arange(n_modes)),
+        },
+    )
     eofnew["u"] = uxr
-    
-    ui=pinv(u_np)
-    b = np.tensordot(ui, anomaly_data.values, axes = 1)
-    bx=xr.DataArray(data=b,dims=['mode','lat','lon'],coords=dict(
-        lat=(["lat"], anomaly_data.lat.data),
-        lon=(["lon"], anomaly_data.lon.data),
-        mode=(["mode"],np.arange(n_modes))
-    ))
+
+    ui = pinv(u_np)
+    b = np.tensordot(ui, anomaly_data.values, axes=1)
+    bx = xr.DataArray(
+        data=b,
+        dims=["mode", "lat", "lon"],
+        coords={
+            "lat": (["lat"], anomaly_data.lat.data),
+            "lon": (["lon"], anomaly_data.lon.data),
+            "mode": (["mode"], np.arange(n_modes)),
+        },
+    )
     eofnew["v"] = bx
     eofnew["s"] = np.ones(n_modes)
-    
+
     eofnew["weights"] = 1
-    
-    
 
     # return everything
     return (aopt, eofnew, eofnew)

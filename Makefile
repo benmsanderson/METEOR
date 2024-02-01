@@ -97,7 +97,7 @@ test-install: $(VENV_DIR)  ## test installing works
 virtual-environment: $(VENV_DIR)  ## update venv, create a new venv if it doesn't exist make
 	echo "If you want this to be rerun, run make clean first"
 $(VENV_DIR): setup.py setup.cfg
-	[ -d $(VENV_DIR) ] || python3 -m venv $(VENV_DIR)
+	[ -d $(VENV_DIR) ] || python3.9 -m venv $(VENV_DIR)
 	$(VENV_DIR)/bin/pip install --upgrade pip wheel
 	$(VENV_DIR)/bin/pip install -e .[dev]
 	$(VENV_DIR)/bin/jupyter nbextension enable --py widgetsnbextension
@@ -108,7 +108,7 @@ clean: $(VENV_DIR)
 	touch setup.py
 
 first-venv: ## create a new virtual environment for the very first repo setup
-	python3 -m venv $(VENV_DIR)
+	python3.9 -m venv $(VENV_DIR)
 
 	$(VENV_DIR)/bin/pip install --upgrade pip
 	$(VENV_DIR)/bin/pip install versioneer

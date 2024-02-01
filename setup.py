@@ -54,7 +54,7 @@ REQUIREMENTS_DEPLOY = [
 REQUIREMENTS_DEV = [
     *[
         "bandit",
-        "black>=22.3.0",
+        "black>=24.0.0",
         "black-nb",
         "flake8",
         "isort>5",
@@ -128,9 +128,9 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Intended Audience :: Developers",
         "Operating System :: OS Independent",
-        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
     ],
     keywords=["emulator", "pattern scaling"],
     packages=PACKAGES,

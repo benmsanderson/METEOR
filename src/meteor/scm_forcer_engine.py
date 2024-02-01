@@ -96,12 +96,12 @@ class ScmEngineConfigurations:
 
         # TODO : Possibly take this out or make more flexible
         if self.conc_run:
-            self.concentrations_data.loc[self.emstart : self.emstart + 6].iloc[
-                :
-            ] = self.concentrations_data.loc[self.emstart, :]
-            self.emissions_data.loc[self.emstart : self.emstart + 6].iloc[
-                :
-            ] = self.emissions_data.loc[self.emstart, :]
+            self.concentrations_data.loc[self.emstart : self.emstart + 6].iloc[:] = (
+                self.concentrations_data.loc[self.emstart, :]
+            )
+            self.emissions_data.loc[self.emstart : self.emstart + 6].iloc[:] = (
+                self.emissions_data.loc[self.emstart, :]
+            )
 
 
 def run_single_experiment(pamset, input_h):

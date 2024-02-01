@@ -5,6 +5,7 @@ import logging
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 from . import prpatt, scm_forcer_engine
@@ -89,7 +90,7 @@ class MeteorPatternScaling:
         self, name, patternflds, get_training_file_from_exp, exp_list, tmscl=None
     ):  # pylint: disable=too-many-arguments
         """
-        Initialise MeteorPatternScaling
+        Initialise Pattern Scaling object
 
         Defining the patternscaling object from lists of experiments
 
@@ -117,20 +118,14 @@ class MeteorPatternScaling:
         self.patternflds = patternflds
         if tmscl is None:
             tmscl = [2, 50]
-        self.pattern_dict = self._make_pattern_dict(tmscl)
+        self.pattern_dict = self._make_pattern_dict()
         self.name = name
 
-    def _make_pattern_dict(self, tmscl):
+    def _make_pattern_dict(self):
         """
         Make a pattern scale dictionary
 
         Making a pattern scaling dictionary to define the object at initialisation
-
-        Parameters
-        ----------
-        tmscl : list
-                Array of initial guesses for timescales for the pattern scaling
-                pattern, all should be ints or floats.
 
         Returns
         -------
@@ -152,9 +147,7 @@ class MeteorPatternScaling:
                 # The :100? Flexible?
                 anomaly_data = self.dacanom[fld][j, :100, :, :]
                 if not np.isnan(np.mean(anomaly_data)):
-                    (out, orgeof, neweof) = prpatt.get_timescales(
-                        anomaly_data, tmscl, trnc
-                    )
+                    (out, orgeof, neweof) = prpatt.get_timescales(anomaly_data, trnc)
 
                     pattern_dict[exp][fld]["neweof"] = neweof
                     pattern_dict[exp][fld]["orgeof"] = orgeof
@@ -238,10 +231,16 @@ class MeteorPatternScaling:
                     predicted[fld] = self.predict_from_forcing_profile(
                         forcing_series[exp], fld, exp
                     )
+                    predicted[fld]["time"] = pd.to_datetime(
+                        predicted[fld]["time"], format="%Y"
+                    )
+
                 else:
-                    predicted[fld] = predicted[fld] + self.predict_from_forcing_profile(
+                    tmp = self.predict_from_forcing_profile(
                         forcing_series[exp], fld, exp
                     )
+                    tmp["time"] = pd.to_datetime(tmp["time"], format="%Y")
+                    predicted[fld] = predicted[fld] + tmp
 
         return predicted
 

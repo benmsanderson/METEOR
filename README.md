@@ -112,4 +112,4 @@ Tests are located in tests in tests/test-data/ data for testing against fortran 
 When you develop new code, try to think about what can be done to test and validate that your code does what you expect it to do, and try to integrate such tests into the automatic testing scheme.
 
 ## General code flow
-`meteor.py` contains the main control module, prpatt is a library with functions to fit parameters to define synthetic PC timeseries to processes PDRMIP output, as well as functions to run convolve synthetic PCA with a user-defined forcing timeseries. `scm_forcer_engine` provides a wrapper to enable using the ciceroscm simple climate to estimate forcing strength from emissions.
+`meteor.py` contains the main control module, `prpatt.py` is a library with functions to fit parameters to define synthetic PC timeseries to processes PDRMIP output, as well as functions to run convolve synthetic PCA with a user-defined forcing timeseries. `scm_forcer_engine.py` provides a wrapper to enable using the ciceroscm simple climate to estimate forcing strength from emissions. `meteor_plot_utils.py` provides some simple plotting functionality

@@ -11,9 +11,7 @@ from . import prpatt
 LOGGER = logging.getLogger(__name__)
 
 
-def make_prediction_plot(
-    pattern, ax, forc_timeseries, fld, exp="co2x2"
-):  # pragma: no cover
+def make_prediction_plot(pattern, ax, forc_timeseries, fld, exp="co2x2"):
     """
     Make plot with prediction for forcing time series
 
@@ -34,13 +32,13 @@ def make_prediction_plot(
     mean_f_var = sim_data.weighted(
         prpatt.wgt(pattern.dacanom[fld][pattern.exp_list.index(exp), :100, :, :])
     ).mean(("lat", "lon"))
-    plt.plot(mean_f_var, ax=ax)
+    ax.plot(mean_f_var)
 
 
 # Method to combine forcing timeseries for various components?
 
 
-def plot_global_mean_values(pattern, ax, fld, exp):  # pragma: no cover
+def plot_global_mean_values(pattern, ax, fld, exp):
     """
     Make plot of global mean values of pattern
 
@@ -71,7 +69,7 @@ def plot_global_mean_values(pattern, ax, fld, exp):  # pragma: no cover
     ax.set_title(pattern.name)
 
 
-def plot_pca_map(pattern, fld, exp, comps_to_show=20):  # pragma: no cover
+def plot_pca_map(pattern, fld, exp, comps_to_show=20):
     """
     Make maps of principal components
 
@@ -97,7 +95,7 @@ def plot_pca_map(pattern, fld, exp, comps_to_show=20):  # pragma: no cover
     return plothandle
 
 
-def plot_reconstructed_globmean(pattern, ax, fld, exp):  # pragma: no cover
+def plot_reconstructed_globmean(pattern, ax, fld, exp):
     """
     Make plot of global mean values of pattern
 

@@ -33,6 +33,7 @@ REQUIREMENTS_NOTEBOOKS = [
     "ipywidgets",
     "notebook",
     "seaborn",
+    "ipykernel",
 ]
 REQUIREMENTS_TESTS = [
     "codecov",

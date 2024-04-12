@@ -24,6 +24,8 @@ REQUIREMENTS = [
     "xarray",
     "netcdf4",
     "h5netcdf",
+    "zarr",
+    "gcsfs",
     "eofs",
     "lmfit",
     "ciceroscm",

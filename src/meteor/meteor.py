@@ -13,18 +13,19 @@ from . import prpatt, scm_forcer_engine
 LOGGER = logging.getLogger(__name__)
 
 
-def read_training_data(get_training_file_from_exp, exp_list):
+def read_training_data(get_training_data, exp_list, from_file=True):
     """
     Read training data into xarray
 
     Parameters
     ----------
-    get_training_file_from_exp: function
+    get_training_data: function
               Funtion that returns the path to the training
               file given the experiment name
     exp_list: list
               List of experiments to include
-
+    from_file: bool
+               Whehther to get data from file or not
     Returns
     -------
     xarray dataset
@@ -32,7 +33,10 @@ def read_training_data(get_training_file_from_exp, exp_list):
     """
     # Might need to be rewritten to account for several models in files...
     for i, exp in enumerate(exp_list):
-        tmp = xr.open_dataset(get_training_file_from_exp(exp))
+        if from_file:
+            tmp = xr.open_dataset(get_training_data(exp))
+        else:
+            tmp = get_training_data(exp)
         if not i:
             dac = tmp
         else:
@@ -87,7 +91,13 @@ class MeteorPatternScaling:
     """
 
     def __init__(
-        self, name, patternflds, get_training_file_from_exp, exp_list, tmscl=None
+        self,
+        name,
+        patternflds,
+        get_training_file_from_exp,
+        exp_list,
+        tmscl=None,
+        from_file=True,
     ):  # pylint: disable=too-many-arguments
         """
         Initialise Pattern Scaling object
@@ -113,7 +123,9 @@ class MeteorPatternScaling:
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(None)
         scaling = sefps.run_to_get_scaling(exp_list)
         self.exp_forc_dict = {exp: scaling[i] for i, exp in enumerate(exp_list)}
-        self.dacanom = read_training_data(get_training_file_from_exp, exp_list)
+        self.dacanom = read_training_data(
+            get_training_file_from_exp, exp_list, from_file=from_file
+        )
         self.exp_list = exp_list
         self.patternflds = patternflds
         if tmscl is None:

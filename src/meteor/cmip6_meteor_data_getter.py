@@ -104,6 +104,7 @@ def year_mean_monthly_xarray(monthly_xarray):
             ["time", "lat", "lon"],
         ],
         exclude_dims=set(("time",)),
+        dask="allowed",
     )
 
 
@@ -275,7 +276,7 @@ class Cmip6MeteorDataGetter:
         self.df_all, self.models = initialise_dataframe_and_models(
             df_all1, flds=self.flds, exps=self.exps
         )
-        self.gcs = gcsfs.GCSFileSystem(token="anon")
+        self.gcs = gcsfs.GCSFileSystem(token="anon")  # nosec
 
     def _set_fld_exps_dbe(self, flds, exps, dbe):
         """

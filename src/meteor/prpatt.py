@@ -479,7 +479,7 @@ def global_mean(ds):
     weight = np.cos(np.deg2rad(lat))
     weight = weight / weight.mean()
     other_dims = set(ds.dims) - {time_dim_name, "ens"}
-    return (ds * weight).mean(other_dims)
+    return (ds * weight).mean(other_dims, skipna=True)
 
 
 def get_timescales(anomaly_data, n_modes):

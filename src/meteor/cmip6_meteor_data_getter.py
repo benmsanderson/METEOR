@@ -56,8 +56,8 @@ def year_mean_monthly(monthly_data):
         the same as for the monthly_data, except that the first time dimension
         will be 1/12th as long as before including only yearly mean values
     """
-    month_weights = np.repeat(
-        np.array([31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]) / 365.0,
+    month_weights = np.tile(
+        np.array([31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]) / 365.0 * 12.0,
         monthly_data.shape[0] // 12,
     )
     mul_weigths = multiply_along_axis(monthly_data, month_weights, 0)
@@ -92,8 +92,6 @@ def year_mean_monthly_xarray(monthly_xarray):
         fewer entries, corresponding to yearly values, this coordinate now
         also no longer has an associated coordinate as it has changed
     """
-    # result = xr.apply_ufunc(year_mean_monthly, x, input_core_dims=[["time"],], exclude_dims=set(("time",)))
-    # print(result.shape())
     return xr.apply_ufunc(
         year_mean_monthly,
         monthly_xarray,
@@ -345,9 +343,9 @@ class Cmip6MeteorDataGetter:
             return True
         return False
 
-    def get_single_var_mod_data_yearmean(self, exp, fld, model):
+    def get_single_var_mod_data(self, exp, fld, model):
         """
-        Get data for a single variable, model and experiment combination
+        Get mean data for a single variable, model and experiment combination
 
         Parameters
         ----------
@@ -361,7 +359,7 @@ class Cmip6MeteorDataGetter:
         Returns
         -------
         xr.DataArrray
-            Data converted from monthly to yearly mean data and including and extra flat ens dimension
+            Data downloaded from zstore
 
         Raises
         ------
@@ -386,7 +384,27 @@ class Cmip6MeteorDataGetter:
             .zstore
         )
         mapper = self.gcs.get_mapper(zstore_ref)
-        ds = xr.open_zarr(mapper, decode_times=False)
+        return xr.open_zarr(mapper, decode_times=False)
+
+    def get_single_var_mod_data_yearmean(self, exp, fld, model):
+        """
+        Get yearly mean data for a single variable, model and experiment combination
+
+        Parameters
+        ----------
+        exp: str
+            Name of experiment for which you want data
+        fld: str
+            Name of field for which you want data
+        model: str
+            Name of model for which you want data
+
+        Returns
+        -------
+        xr.DataArrray
+            Data converted from monthly to yearly mean data and including and extra flat ens dimension
+        """
+        ds = self.get_single_var_mod_data(exp, fld, model)
         var_yearly = year_mean_monthly_xarray(ds[fld])
         var_yearly = var_yearly.assign_coords(
             {"time": np.arange(len(ds.time.values) // 12)}
@@ -420,8 +438,13 @@ class Cmip6MeteorDataGetter:
             exp_mapper = cmip6_to_meteor_exp_remapper
         fld_values = []
         for fld in self.flds:
-            fld_values.append(
-                self.get_single_var_mod_data_yearmean(exp_mapper[exp], fld, model)
-            )
+            if exp in exp_mapper:
+                fld_values.append(
+                    self.get_single_var_mod_data_yearmean(exp_mapper[exp], fld, model)
+                )
+            else:
+                fld_values.append(
+                    self.get_single_var_mod_data_yearmean(exp, fld, model)
+                )
         training_data = make_xarray_with_correct_dims(self.flds, fld_values)
         return training_data

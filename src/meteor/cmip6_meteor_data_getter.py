@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-cmip6_to_meteor_exp_remapper = {"base": "piControl", "co2x4": "abrupt-4xCO2"}
+cmip6_to_meteor_exp_remapper = {"base": "piControl", "co2x4": "abrupt-4xCO2", "co2x8": "abrupt-4xCO2", "co2x16": "abrupt-4xCO2"}
 
 
 def multiply_along_axis(array_a, array_b, axis):
@@ -322,7 +322,7 @@ class Cmip6MeteorDataGetter:
             List of available models. They have full data for the dataGetters flds and
             experiment combinations for at least one ensemble member.
         """
-        return self.models
+        return self.models.copy()
 
     def check_if_model_has_data(self, model):
         """

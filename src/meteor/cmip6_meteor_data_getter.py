@@ -7,7 +7,12 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-cmip6_to_meteor_exp_remapper = {"base": "piControl", "co2x4": "abrupt-4xCO2", "co2x8": "abrupt-4xCO2", "co2x16": "abrupt-4xCO2"}
+cmip6_to_meteor_exp_remapper = {
+    "base": "piControl",
+    "co2x4": "abrupt-4xCO2",
+    "co2x8": "abrupt-4xCO2",
+    "co2x16": "abrupt-4xCO2",
+}
 
 
 def multiply_along_axis(array_a, array_b, axis):
@@ -384,7 +389,7 @@ class Cmip6MeteorDataGetter:
             .zstore
         )
         mapper = self.gcs.get_mapper(zstore_ref)
-        return xr.open_zarr(mapper, decode_times=False)
+        return xr.open_zarr(mapper, decode_times=False).sortby("time")
 
     def get_single_var_mod_data_yearmean(self, exp, fld, model):
         """

@@ -16,8 +16,9 @@ from meteor.cmip6_meteor_data_getter import multiply_along_axis
 # ,
 #
 # 'CMIP',
-exps = ["abrupt-4xCO2", "historical", "ssp245"] #"piControl", 
-data_getter = Cmip6MeteorDataGetter(flds=['tas'], exps=exps, dbe=['CMIP','CMIP','ScenarioMIP']) #'CMIP', 
+exps_to_show = ["abrupt-4xCO2", "historical", "ssp245"]
+exps = ["abrupt-4xCO2", "historical", "ssp245", "piControl"]
+data_getter = Cmip6MeteorDataGetter(flds=['tas'], exps=exps, dbe=['CMIP','CMIP','ScenarioMIP', 'CMIP']) #'CMIP', 
 models_total = data_getter.get_models_avail()
 print(models_total)
 to_remove = ['CNRM-CM6-1', 'CNRM-CM6-1-HR','EC-Earth3-CC', 'EC-Earth3-Veg']#, 'CNRM-CM6-1-HR', "CNRM-ESM2-1"]

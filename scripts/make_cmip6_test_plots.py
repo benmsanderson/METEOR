@@ -3,6 +3,7 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import xarray as xr
+from dataclasses import asdict, dataclass
 
 from functools import partial
 from ciceroscm import input_handler
@@ -10,6 +11,7 @@ from ciceroscm import input_handler
 from meteor import MeteorPatternScaling
 from meteor import prpatt
 from meteor import Cmip6MeteorDataGetter
+from meteor import scm_forcer_engine
 
 
 cscm_data_dir = "/mnt/c/Users/masan/Downloads/Input_for_scenarios/"
@@ -27,8 +29,35 @@ flds = ["tas", "pr"]
 conc_data = input_handler.read_inputfile(
     os.path.join(cscm_data_dir, "ssp245_conc_RCMIP.txt")
 )
-ih = input_handler.InputHandler({})
-em_data = ih.read_emissions(os.path.join(cscm_data_dir, "ssp245_em_RCMIP.txt"))
+ih_temp = input_handler.InputHandler({})
+em_data = ih_temp.read_emissions(os.path.join(cscm_data_dir, "ssp245_em_RCMIP.txt"))
+
+cfg = {
+    "conc_run": False,
+    "nystart": em_data.index[0],
+    "emstart": em_data.index[0] + 100,
+    "nyend": 2100,
+    "concentrations_data": conc_data,
+    "emissions_data": em_data,
+    }
+sefps = scm_forcer_engine.ScmEngineForPatternScaling(cfg)
+print(asdict(sefps.cfg)['nat_n2o_data'])
+#sys.exit(4)
+ih = input_handler.InputHandler(asdict(sefps.cfg))
+#forcing_series = sefps.run_and_return_per_forcer_results(['base', 'co2x4'])
+#print(forcing_series)
+#plt.plot(range(em_data.index[0], 2101), forcing_series['co2x4'])
+#plt.xlim(1750,1900)
+#plt.savefig("Forcing_timeseries.png")
+forc_orig =  scm_forcer_engine.run_single_experiment(asdict(sefps.cfg), ih)
+print(forc_orig)
+for comp, values in forc_orig.items():
+    if np.abs(values[-1]) > 0.1:
+        plt.plot(range(em_data.index[0], 2101), values, label=comp)
+plt.legend()
+plt.savefig(f"Forcing_timeseries_components.png")
+#sys.exit(4)
+
 """
 models_total = data_getter.get_models_avail()
 print(models_total)
@@ -88,3 +117,5 @@ for i, model in enumerate(models):
     #print(model_basic_pattern.exp_forc_dict)
 plt.savefig("CanESM5_NorESM2_ssp245_pred.png")
 #plt.savefig(filename)
+
+

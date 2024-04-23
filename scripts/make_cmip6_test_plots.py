@@ -22,7 +22,7 @@ cscm_data_dir = "/mnt/c/Users/masan/Downloads/Input_for_scenarios/"
 # 'CMIP',
 data_getter = Cmip6MeteorDataGetter(exps=["piControl", "abrupt-4xCO2", "historical", "ssp245"], dbe=['CMIP','CMIP','CMIP', 'ScenarioMIP'])
 models = data_getter.models
-models = ["CanESM5", "NorESM2-LM"]
+models = ["CanESM5", "IPSL-CM6A-LR"]
 flds = ["tas", "pr"]
 
 #For predictions: 
@@ -87,11 +87,12 @@ for i, model in enumerate(models):
     # Build pattern 
     model_basic_pattern = MeteorPatternScaling(
         f"cmip6-{model}-basic",
-        {"tas": 2, "pr": 10},
+        {"tas": 2, "pr": 4},
         partial(data_getter.make_meteor_training_data, model=model),
         from_file=False,
         exp_list=["base", "co2x4"],
         )
+    sys.exit(4)
     print(model_basic_pattern.exp_forc_dict)
     #sys.exit(4)
     # Predict for ssp

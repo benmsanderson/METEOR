@@ -453,3 +453,33 @@ class Cmip6MeteorDataGetter:
                 )
         training_data = make_xarray_with_correct_dims(self.flds, fld_values)
         return training_data
+
+    def make_meteor_training_data_composite(self, exps, model):
+        """
+        Make xr.dataset with data and format used for meteor
+
+        Parameters
+        ----------
+        exps : list
+            Lists with experiments to be glued together, should be ordered
+            the same order as the experiments are meant to be concatenated
+        model : str
+            Name of model for which to find and format training data
+        Returns
+        -------
+        xr.Dataset
+            Dataset with yearly data on the format usable for METEOR
+        """
+        fld_values = []
+        for fld in self.flds:
+            value = None
+            for exp in exps:
+                if value is None:
+                    value = self.get_single_var_mod_data_yearmean(exp, fld, model)
+                else:
+                    value = xr.concat(
+                        [value, self.get_single_var_mod_data_yearmean(exp, fld, model)],
+                        dim="year",
+                    )
+            fld_values.append(value)
+        return make_xarray_with_correct_dims(self.flds, fld_values)

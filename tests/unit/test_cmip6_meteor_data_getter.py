@@ -36,3 +36,11 @@ def test_get_unique_models():
     test_training = data_getter.make_meteor_training_data("base", "CanESM5")
     print(test_training)
     assert isinstance(test_training, xr.Dataset)
+
+    data_getter_2 = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        exps=["historical", "ssp370"], dbe=["CMIP", "ScenarioMIP"]
+    )
+    test_composite = data_getter_2.make_meteor_training_data_composite(
+        ["historical", "ssp370"], model="CanESM5"
+    )
+    assert test_composite.sizes["year"] == 251

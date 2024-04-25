@@ -98,6 +98,7 @@ class MeteorPatternScaling:
         exp_list,
         tmscl=None,
         from_file=True,
+        ssp_input=None
     ):  # pylint: disable=too-many-arguments
         """
         Initialise Pattern Scaling object
@@ -131,6 +132,8 @@ class MeteorPatternScaling:
         if tmscl is None:
             tmscl = [2, 50]
         self.pattern_dict = self._make_pattern_dict()
+        if "xanom" in "-".join(exp_list):
+            self._add_patterns_for_residual_exp(ssp_input) 
         self.name = name
 
     def _make_pattern_dict(self):
@@ -156,6 +159,8 @@ class MeteorPatternScaling:
             pattern_dict[exp] = {}
             for fld, trnc in self.patternflds.items():
                 pattern_dict[exp][fld] = {}
+                if exp.split("x")=="anom":
+                    continue
                 # The :100? Flexible?
                 anomaly_data = self.dacanom[fld][j, :100, :, :]
                 if not np.isnan(np.mean(anomaly_data)):
@@ -168,6 +173,14 @@ class MeteorPatternScaling:
                     pattern_dict[exp][fld]["neweof"] = np.nan
                     pattern_dict[exp][fld]["orgeof"] = np.nan
         return pattern_dict
+
+    def _add_patterns_for_residual_exp(self, ssp_input):
+        """
+        Add patterns for an experiment predicted from residual
+        """
+        if "-".join(self.exp_list).count("xanom") != 1:
+            LOGGER.error("Adding a residual pattern can only be done for a MeteorPatternScaling instance with exactly one xanom experiment")
+
 
     def predict_from_forcing_profile(
         self, forc_timeseries, fld, exp="co2x2", year_0=1850

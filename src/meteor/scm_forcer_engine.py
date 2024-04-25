@@ -238,12 +238,15 @@ class ScmEngineForPatternScaling:
         for i, exp in enumerate(exps):
             run_dict_exp = run_dict.copy()
             if exp == "base":
-                scaling[i] = 0
                 continue
             species = exp.split("x")[0].upper()
             if species == "SUL":
                 species = "SO2"
-            multiplicator = int(exp.split("x")[1])
+            multiplicator = exp.split("x")[1]
+            if multiplicator == "anom":
+                scaling[i] = 1
+                continue
+            multiplicator = int(multiplicator)
             em_here = self.cfg.emissions_data.copy()
             conc_here = self.cfg.concentrations_data.copy()
 

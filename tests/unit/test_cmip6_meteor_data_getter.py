@@ -44,3 +44,5 @@ def test_get_unique_models():
         ["historical", "ssp370"], model="CanESM5"
     )
     assert test_composite.sizes["year"] == 251
+    print(test_composite["year"].values)
+    assert False

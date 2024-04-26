@@ -169,7 +169,9 @@ class MeteorPatternScaling:
                     pattern_dict[exp][fld]["orgeof"] = np.nan
         return pattern_dict
 
-    def predict_from_forcing_profile(self, forc_timeseries, fld, exp="co2x2", year_0=1850):
+    def predict_from_forcing_profile(
+        self, forc_timeseries, fld, exp="co2x2", year_0=1850
+    ):
         """
         Make prediction from experiment and a forcing profile
 
@@ -181,6 +183,8 @@ class MeteorPatternScaling:
             Variable to make prediction for
         exp : str
             Experiment that defines the stepfunction response for the forcer in question
+        year_0 : int
+            Start year of forcing timeseries
 
         Returns
         -------
@@ -194,13 +198,18 @@ class MeteorPatternScaling:
         convolved_pca = prpatt.imodel_filter(
             self.pattern_dict[exp][fld]["outp"].params,
             forc_timeseries,
-            forc_step=self.exp_forc_dict[exp],year_0=year_0
+            forc_step=self.exp_forc_dict[exp],
+            year_0=year_0,
         )
         predicted = prpatt.rmodel(self.pattern_dict[exp][fld]["orgeof"], convolved_pca)
         return predicted
 
     def predict_from_combined_experiment(
-        self, emissions_data, concentrations_data, flds, conc_run=False,
+        self,
+        emissions_data,
+        concentrations_data,
+        flds,
+        conc_run=False,
     ):
         """
         Predict the combined patterns for given flds for the given emissions and concentrations
@@ -241,7 +250,7 @@ class MeteorPatternScaling:
             for fld in flds:
                 if fld not in predicted:
                     predicted[fld] = self.predict_from_forcing_profile(
-                        forcing_series[exp], fld, exp, year_0=cfg['nystart']
+                        forcing_series[exp], fld, exp, year_0=cfg["nystart"]
                     )
                     predicted[fld]["time"] = pd.to_datetime(
                         predicted[fld]["time"], format="%Y"
@@ -249,7 +258,7 @@ class MeteorPatternScaling:
 
                 else:
                     tmp = self.predict_from_forcing_profile(
-                        forcing_series[exp], fld, exp, year_0=cfg['nystart']
+                        forcing_series[exp], fld, exp, year_0=cfg["nystart"]
                     )
                     tmp["time"] = pd.to_datetime(tmp["time"], format="%Y")
                     predicted[fld] = predicted[fld] + tmp

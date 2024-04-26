@@ -178,9 +178,25 @@ class MeteorPatternScaling:
         """
         Add patterns for an experiment predicted from residual
         """
-        if "-".join(self.exp_list).count("xanom") != 1:
+        anom_exps = [exp for exp in self.exp_list if "xanom" in exp]
+        if len(anom_exps) != 1:
             LOGGER.error("Adding a residual pattern can only be done for a MeteorPatternScaling instance with exactly one xanom experiment")
-
+        exp = anom_exps[0]
+        if ssp_input is None:
+            ssp_input = {
+                "emstart": 1850, 
+                "nystart": 1750,
+                "conc_run": False,    
+                         }
+        elif "nystart" not in ssp_input:
+            ssp_input["nystart"] = 1750
+        sefps = scm_forcer_engine.ScmEngineForPatternScaling(ssp_input)
+        forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
+        forcing_of_residual = forcing_series[exp]
+        forcing_series[exp] = None
+        predicted_without = self._predict_combined_experiment_from_forcer_series(forcing_series, self.patternflds.keys(), ssp_input["nystart"])#[100:, :, :]
+        print(predicted_without)
+        print(type(predicted_without))
 
     def predict_from_forcing_profile(
         self, forc_timeseries, fld, exp="co2x2", year_0=1850
@@ -256,14 +272,43 @@ class MeteorPatternScaling:
         }
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(cfg)
         forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
+        predicted = self._predict_combined_experiment_from_forcer_series(forcing_series, flds, cfg["nystart"])
+        return predicted
+
+    def _predict_combined_experiment_from_forcer_series(
+        self,
+        forcing_series,
+        flds,
+        nystart
+    ):
+        """
+        Predict the combined patterns for given flds for the given experiment split forcing series
+
+        Parameters
+        ----------
+        forcing series : dict
+                        Dictionary including the forcing time series
+                        per forcer experiment.
+        flds : list
+               Fields for which to calculate patterns
+        nystart : int
+                   Whether ex
+
+        Returns
+        -------
+        dict
+            keys are flds, values are predicted per fld combined patterns
+        """
         predicted = {}
         for exp in self.exp_list:
             if exp == "base":
                 continue
+            if forcing_series[exp] is None:
+                continue
             for fld in flds:
                 if fld not in predicted:
                     predicted[fld] = self.predict_from_forcing_profile(
-                        forcing_series[exp], fld, exp, year_0=cfg["nystart"]
+                        forcing_series[exp], fld, exp, year_0=nystart
                     )
                     predicted[fld]["time"] = pd.to_datetime(
                         predicted[fld]["time"], format="%Y"
@@ -271,9 +316,8 @@ class MeteorPatternScaling:
 
                 else:
                     tmp = self.predict_from_forcing_profile(
-                        forcing_series[exp], fld, exp, year_0=cfg["nystart"]
+                        forcing_series[exp], fld, exp, year_0=nystart
                     )
                     tmp["time"] = pd.to_datetime(tmp["time"], format="%Y")
                     predicted[fld] = predicted[fld] + tmp
-
         return predicted

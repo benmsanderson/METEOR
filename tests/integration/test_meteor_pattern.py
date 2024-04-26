@@ -98,3 +98,4 @@ def test_sulfate_from_residual_functionality(test_data_dir):
     assert "sulxanom" in canesm_anomsulf_pattern.pattern_dict
     assert "tas" in canesm_anomsulf_pattern.pattern_dict["co2x4"]
     assert "outp" in canesm_anomsulf_pattern.pattern_dict["sulxanom"]["pr"]
+    assert False

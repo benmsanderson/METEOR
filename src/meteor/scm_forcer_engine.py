@@ -27,7 +27,7 @@ def aerosol_priority_mapping(comps):
     dict
         Where aerosol components that don't have direct mappings
         from the forcing experiments are mapped to what component
-        there forcings should be taken from
+        their forcings should be taken from
     """
     aerosols = {"SO4_IND": "SO2", "BMB_AEROS_BC": "BC", "BMB_AEROS_OC": "OC"}
     missing_keys = list(set(aerosols.values()) - set(comps))
@@ -102,7 +102,6 @@ class ScmEngineConfigurations:
             self.emissions_data.loc[self.emstart : self.emstart + 6].iloc[:] = (
                 self.emissions_data.loc[self.emstart, :]
             )
-
 
 def run_single_experiment(pamset, input_h):
     """

@@ -92,6 +92,7 @@ for i, model in enumerate(models):
         from_file=False,
         exp_list=["base", "co2x4"],
         )
+    sys.exit(4)
     print(model_basic_pattern.exp_forc_dict)
     #sys.exit(4)
     # Predict for ssp

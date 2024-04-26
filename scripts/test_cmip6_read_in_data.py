@@ -16,8 +16,10 @@ from meteor.cmip6_meteor_data_getter import multiply_along_axis
 # ,
 #
 # 'CMIP',
-exps = ["abrupt-4xCO2", "historical", "ssp245"] #"piControl", 
-data_getter = Cmip6MeteorDataGetter(flds=['tas'], exps=exps, dbe=['CMIP','CMIP','ScenarioMIP']) #'CMIP', 
+fld = 'tas'
+exps_to_show = ["abrupt-4xCO2", "historical", "ssp245"]
+exps = ["abrupt-4xCO2", "historical", "ssp245", "piControl"]
+data_getter = Cmip6MeteorDataGetter(flds=[fld], exps=exps, dbe=['CMIP','CMIP','ScenarioMIP', 'CMIP']) #'CMIP', 
 models_total = data_getter.get_models_avail()
 print(models_total)
 to_remove = ['CNRM-CM6-1', 'CNRM-CM6-1-HR','EC-Earth3-CC', 'EC-Earth3-Veg']#, 'CNRM-CM6-1-HR', "CNRM-ESM2-1"]
@@ -36,21 +38,23 @@ for k in range(np.ceil(tot_mod_num/4.).astype('int')):
     filename = f"test_input_data_cmip6_{'_'.join(models)}.png"
     if os.path.exists(filename):
         continue
-    fig, axs = plt.subplots(nrows=len(models), ncols=len(exps), sharey=True)
+    fig, axs = plt.subplots(nrows=len(models), ncols=len(exps_to_show), sharey=True)
     #years_total = np.arange(1750, 2101)
     #years_hist = np.arange(1850, 2015)
     #years_ssp = np.arange(2015, 2101)
     for i, model in enumerate(models):
         # Build pattern
-        print(model) 
-        for j, exp in enumerate(exps):
-            glob_mean = prpatt.global_mean(data_getter.make_meteor_training_data(exp, model)['tas']).values[0]
+        print(model)
+        zero_val = np.mean(prpatt.global_mean(data_getter.get_single_var_mod_data_yearmean("piControl", fld, model)).values)
+        for j, exp in enumerate(exps_to_show):
+
+            glob_mean = prpatt.global_mean(data_getter.make_meteor_training_data(exp, model)[fld]).values[0]
             print(exp)
             years = np.arange(len(glob_mean))
             months = np.linspace(years[0], years[-1]+11/12., num = len(years)*12)
-            monthly_glob_mean = prpatt.global_mean(data_getter.get_single_var_mod_data(exp, 'tas', model))['tas'].values
-            axs[i,j].plot(months, monthly_glob_mean, label="monthly")
-            axs[i, j].plot(years,glob_mean, label ="glob_mean")
+            monthly_glob_mean = prpatt.global_mean(data_getter.get_single_var_mod_data(exp, fld, model))[fld].values
+            axs[i,j].plot(months, monthly_glob_mean - zero_val, label="monthly")
+            axs[i, j].plot(years,glob_mean - zero_val, label ="glob_mean")
             #axs[i,j].plot(years, prpatt.global_mean(full_data_yearly).values[0], label="yearmean_single")
             #axs[i,j].plot(years, year_mean_monthly_1d(monthly_glob_mean), label="mean_of_monthly")
             if i == 0:

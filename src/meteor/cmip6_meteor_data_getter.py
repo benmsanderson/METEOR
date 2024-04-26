@@ -135,8 +135,8 @@ def make_xarray_with_correct_dims(fld_names, fld_values):
 
 
 def initialise_dataframe_and_models(
-    df_all1, flds, exps
-):  # pylint: disable=too-many-locals
+    df_all1, flds, exps, mdl_skipmbrs=None
+):  # pylint: disable=too-many-locals, too-many-branches
     """
     Intialise a dataframe with complete data for the first full data ensemble
     member from a cmip6 data list
@@ -150,7 +150,10 @@ def initialise_dataframe_and_models(
         of names of fields
     exps: list
         of names of experiments
-
+    mdl_skipmbrs : dict
+        of models and a list of ensemble members to skip for that model. If none
+        is sent, it defaults to skipping NorESM2-Lm which has insufficient data
+        for pr for the historical experiment even though there is a file
     Returns
     -------
     list
@@ -162,6 +165,8 @@ def initialise_dataframe_and_models(
     mdls1.sort()
     df_all = []
     cnames = df_all1[0][0].columns
+    if mdl_skipmbrs is None:
+        mdl_skipmbrs = {"NorESM2-LM": ["r1i1p1f1"]}
     for i in range(len(exps)):
         # tmp = []
         # for fld in flds:
@@ -186,11 +191,14 @@ def initialise_dataframe_and_models(
                         members[mmb] = members[mmb] + 1
                     else:
                         members[mmb] = 1
-
         for member, value in members.items():
+            if mdl in mdl_skipmbrs:
+                if member in mdl_skipmbrs[mdl]:
+                    continue
             if value == combinations:
                 sufficient_data = True
                 mmb = member
+                break
         # is there at least 1 run per experiment,with all fields?
         if sufficient_data:
             # point to the entry for 1st run, first variable for each expt

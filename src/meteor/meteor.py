@@ -213,7 +213,7 @@ class MeteorPatternScaling:
         exp : str
             Experiment that defines the stepfunction response for the forcer in question
         year_0 : int
-            Year when experiment starts
+            Start year of forcing timeseries
 
         Returns
         -------
@@ -308,7 +308,11 @@ class MeteorPatternScaling:
             for fld in flds:
                 if fld not in predicted:
                     predicted[fld] = self.predict_from_forcing_profile(
+<<<<<<< HEAD
                         forcing_series[exp], fld, exp, year_0=nystart
+=======
+                        forcing_series[exp], fld, exp, year_0=cfg["nystart"]
+>>>>>>> clean-and-add-cmip6
                     )
                     predicted[fld]["time"] = pd.to_datetime(
                         predicted[fld]["time"], format="%Y"
@@ -316,7 +320,11 @@ class MeteorPatternScaling:
 
                 else:
                     tmp = self.predict_from_forcing_profile(
+<<<<<<< HEAD
                         forcing_series[exp], fld, exp, year_0=nystart
+=======
+                        forcing_series[exp], fld, exp, year_0=cfg["nystart"]
+>>>>>>> clean-and-add-cmip6
                     )
                     tmp["time"] = pd.to_datetime(tmp["time"], format="%Y")
                     predicted[fld] = predicted[fld] + tmp

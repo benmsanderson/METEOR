@@ -197,6 +197,26 @@ class MeteorPatternScaling:
         predicted_without = self._predict_combined_experiment_from_forcer_series(forcing_series, self.patternflds.keys(), ssp_input["nystart"])#[100:, :, :]
         print(predicted_without)
         print(type(predicted_without))
+        for fld in self.patternflds.keys():
+            residual = self.dacanom[fld] - predicted_without[fld]
+            gmanom = prpatt.global_mean(residual)
+            opt=minimize(rmse_gm,[5,50],args=(gmanom,fcg_aer),bounds=((1, 10), (10, 100)))
+            timcon[i][fld]=opt.x
+            #make exponential decay timeseries with the optimized time constants
+            pmat=make_pmat(500,timcon[i][fld])
+            #convolve the aerosol forcing difference timeseries with the timeseries
+            timvec=np.apply_along_axis(lambda m: np.convolve(m, fcg_aer.diff('time'), mode='full'), axis=1, arr=pmat)[:,100:len(fcg_aer)+100]
+            nt=len(residual.time)
+        #invert time convolution of the aerosol-pulse response matrix
+        piv=pinv(timvec[:,:nt])
+        #project the time inverse metrix onto the aerosol anomaly map, and convert to xarray to get the spatial patterns associated with each decay mode
+        tmp=np.tensordot(piv, aerdata[i][fld][0,:,:,:], (0,0))
+        apat[i][fld]=xr.DataArray(data=tmp,dims=["mode","lat","lon"],coords=dict(mode=[0,1],lat=aerdata[i][fld].lat,lon=aerdata[i][fld].lon))
+        #get product of the spatial patterns and the pulse response curves to reconstruct the aerosol response
+        tmp=np.tensordot(apat[i][fld],timvec[:,:nt],(0,0))
+        aerrecon[i][fld]=xr.DataArray(data=tmp,dims=["lat","lon","time"],coords=dict(time=aerdata[i][fld].time,lat=aerdata[i][fld].lat,lon=aerdata[i][fld].lon))
+        #add the aerosol and ghg responses to produce the complete gridded emualted response
+        allrecon[i][fld]=aerrecon[i][fld]+pattern_ghg[i][fld]
 
     def predict_from_forcing_profile(
         self, forc_timeseries, fld, exp="co2x2", year_0=1850

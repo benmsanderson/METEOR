@@ -552,7 +552,7 @@ def get_timescales(anomaly_data, n_modes):
     eofnew["weights"] = 1
 
     # return everything
-    return (aopt, eofnew, eofnew)
+    return (aopt, eofnew)
 
 
 def recon(eofout):

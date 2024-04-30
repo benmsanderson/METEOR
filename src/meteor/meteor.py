@@ -159,13 +159,10 @@ class MeteorPatternScaling:
                 # The :100? Flexible?
                 anomaly_data = self.dacanom[fld][j, :100, :, :]
                 if not np.isnan(np.mean(anomaly_data)):
-                    (out, orgeof, neweof) = prpatt.get_timescales(anomaly_data, trnc)
-
-                    pattern_dict[exp][fld]["neweof"] = neweof
+                    (out, orgeof) = prpatt.get_timescales(anomaly_data, trnc)
                     pattern_dict[exp][fld]["orgeof"] = orgeof
                     pattern_dict[exp][fld]["outp"] = out
                 else:  # pragma: no cover
-                    pattern_dict[exp][fld]["neweof"] = np.nan
                     pattern_dict[exp][fld]["orgeof"] = np.nan
         return pattern_dict
 

@@ -58,11 +58,7 @@ def plot_global_mean_values(pattern, ax, fld, exp):
     ax.plot(prpatt.global_mean(data), label="Original Data")
     ax.plot(
         prpatt.global_mean(prpatt.recon(pattern.pattern_dict[exp][fld]["orgeof"])),
-        label="EOF reconstruction (t=" + str(trun) + ")",
-    )
-    ax.plot(
-        prpatt.global_mean(prpatt.recon(pattern.pattern_dict[exp][fld]["neweof"])),
-        label="P-R fit to PCs (t=" + str(trun) + ")",
+        label="Reconstruction (t=" + str(trun) + ")",
     )
     ax.set_xlabel("time (years)")
     ax.legend()
@@ -112,14 +108,9 @@ def plot_reconstructed_globmean(pattern, ax, fld, exp):
     """
     raw_data = pattern.dacanom[fld][pattern.exp_list.index(exp), :100, :, :]
     pca_pattern = prpatt.recon(pattern.pattern_dict[exp][fld]["orgeof"])
-    synthetic_pattern = prpatt.recon(pattern.pattern_dict[exp][fld]["neweof"])
-
     raw_data.weighted(prpatt.wgt(raw_data)).mean(("lat", "lon")).plot(
         color="cyan", ax=ax
     )
     pca_pattern.weighted(prpatt.wgt(raw_data)).mean(("lat", "lon")).plot(
         color="k", ax=ax
-    )
-    synthetic_pattern.weighted(prpatt.wgt(raw_data)).mean(("lat", "lon")).plot(
-        color="red", ax=ax
     )

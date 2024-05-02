@@ -116,15 +116,15 @@ def imodel_filter(pars, forc_timeseries, forc_step=7.41, year_0=1850):
     return inma
 
 
-def rmodel(eofout, pc_matrix):
+def rmodel(pattern_full, pc_matrix):
     """
     Reconstruct gridded, time evolving output from a user
     defined principal component timeseries and EOF patterns
 
     Parameters
     ----------
-    eofout : dict
-             Dictionary of empirical orthogonal function
+    pattern_full : dict
+             Dictionary temporal and spatial pattern
     pc_matrix : xarray.DataArray
              Data array of principal component timeseries
 
@@ -136,11 +136,11 @@ def rmodel(eofout, pc_matrix):
     # reconstruct step function output from EOFs and a user-defined PC timeseries 'pc_matrix'
     # first create the synthetic EOF xarray structure
     # we copy the original EOFs and PCs from the raw data (we will keep the spatial patterns)
-    eof_synth = eofout.copy()
+    pattern_synth = pattern_full.copy()
     # now replace the PC matrix 'u' with the user defined vlaue
-    eof_synth["u"] = pc_matrix
+    pattern_synth["u"] = pc_matrix
     # now call recon function to reconstruct the original data from the Xarray EOF dataset
-    recon_data = recon(eof_synth)
+    recon_data = recon(pattern_synth)
     return recon_data
 
 
@@ -507,8 +507,9 @@ def get_timescales(anomaly_data, n_modes):
     -------
     list
         Elements are: out - the result of the lmfit fitting,
-        eofout - the EOF structure of the original anomaly data
-        eofnew - the EOF structure of the minimised fit
+        pattern - a dictionary containing the pattern in terms of
+        the temporal part, u, which has a timeseries per mode, and
+        a spatial part, v, which has a spatial pattern for each model
     """
     # initialise an LMFIT parameter object, with tmscl_0 timescales and
     # n_modes modes
@@ -522,7 +523,7 @@ def get_timescales(anomaly_data, n_modes):
         a0[2 * i + 1] = t
 
     aopt = fit_timescales(anomaly_data, a0)
-    eofnew = {}
+    pattern = {}
 
     u_np = make_amat(aopt.params, len(anomaly_data.time))
     uxr = xr.DataArray(
@@ -533,7 +534,7 @@ def get_timescales(anomaly_data, n_modes):
             "mode": (["mode"], np.arange(n_modes)),
         },
     )
-    eofnew["u"] = uxr
+    pattern["u"] = uxr
 
     ui = pinv(u_np)
     b = np.tensordot(ui, anomaly_data.values, axes=1)
@@ -546,13 +547,9 @@ def get_timescales(anomaly_data, n_modes):
             "mode": (["mode"], np.arange(n_modes)),
         },
     )
-    eofnew["v"] = bx
-    eofnew["s"] = np.ones(n_modes)
-
-    eofnew["weights"] = 1
-
+    pattern["v"] = bx
     # return everything
-    return (aopt, eofnew)
+    return (aopt, pattern)
 
 
 def recon(eofout):
@@ -565,10 +562,10 @@ def recon(eofout):
     Parameters
     ----------
     eofout : dict
-             Dictionary, containing 4 keys, u, s, v  and wgt
-             which are the principal components, eigenvalues,
-             empirical orthogonal function patterns and
-             defined spatial weights respectively.
+             Dictionary, containing 2 keys, u and v
+             which are timeseries for the pulse response,
+             per mode and the corresponding
+             spatial patterns.
 
     Returns
     -------
@@ -576,31 +573,27 @@ def recon(eofout):
            Reconstructed field in space and time as xarray
     """
     # Define matrices based on dictionary input:
-    pc_matrix = eofout["u"]  # size n_time by n_modes
-    eigenvalue_matrix = eofout["s"]  # size n_modes
-    eof_pattern = eofout["v"]  # size n_pixels by n_modes
-    # area_wgt is the area weighting matrix,
-    area_wgt = eofout["weights"]  # size n_pixels
+    mode_timescales = eofout["u"]  # size n_time by n_modes
+    pattern_per_mode = eofout["v"]  # size n_pixels by n_modes
     # number of modes
-    n_modes = eof_pattern.shape[0]
+    n_modes = pattern_per_mode.shape[0]
     # reshape v1 into a 2d matrix
-    eof_pattern_2d = eof_pattern.values.reshape(n_modes, -1)
+    pattern_2d = pattern_per_mode.values.reshape(n_modes, -1)
     # compute reconstruceted field (unweighted) as dot product
-    recon_unweighted = np.dot(
-        np.dot(pc_matrix, np.diag(eigenvalue_matrix)), eof_pattern_2d
-    )
+    recon_unweighted = np.dot(mode_timescales, pattern_2d)
     # compute reconstruceted field (weighted) as dot product
-    recon_weighted = (
-        np.reshape(
-            recon_unweighted,
-            [pc_matrix.shape[0], eof_pattern.shape[1], eof_pattern.shape[2]],
-        )
-        / area_wgt
+    recon_weighted = np.reshape(
+        recon_unweighted,
+        [
+            mode_timescales.shape[0],
+            pattern_per_mode.shape[1],
+            pattern_per_mode.shape[2],
+        ],
     )
     # convert reconstructed field to xarray and return
     recon_xarray = xr.DataArray(
         recon_weighted,
-        coords=(pc_matrix.time, eof_pattern.lat, eof_pattern.lon),
+        coords=(mode_timescales.time, pattern_per_mode.lat, pattern_per_mode.lon),
         dims=("time", "lat", "lon"),
     )
     return recon_xarray

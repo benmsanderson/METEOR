@@ -81,9 +81,9 @@ class MeteorPatternScaling:
              with patterns for the experiment of the object.
              First keyset: The experiments that the pattern is defined by,
              Second keyset: The variables for which patterns are produced.
-             Third keyset: neweof - a synthetic PCA for the data from
-             the calculated response timescales,
-             orgeof -  orginal PCA object from the data, and if data allows,
+             Third keyset:
+             pattern_full - pattern of impulse response timeseries and spatial
+             patterns per mode
              outp - the lmfit parameter fit using the original
              PCA object and timescales
     name: str
@@ -148,11 +148,8 @@ class MeteorPatternScaling:
             A nested dictionary that with the experiments of the objects.
             First keyset: The experiments that the pattern is defined by.
             Second keyset: The variables for which patterns are produced.
-            Third keyset: neweof, a synthetic PCA for the data from the
-            calculated response timescales,
-            orgeof, orginal PCA object from the data, and if data allows,
-            outp, the lmfit parameter fit using the original PCA object
-            and timescales
+            Third keyset: pattern split in temporal and spatial part per mode,
+            and if data allows, outp, the lmfit parameter fit of timescales
         """
         pattern_dict = {}
         for j, exp in enumerate(self.exp_forc_dict.keys()):
@@ -164,14 +161,11 @@ class MeteorPatternScaling:
                 # The :100? Flexible?
                 anomaly_data = self.dacanom[fld][j, :100, :, :]
                 if not np.isnan(np.mean(anomaly_data)):
-                    (out, orgeof, neweof) = prpatt.get_timescales(anomaly_data, trnc)
-
-                    pattern_dict[exp][fld]["neweof"] = neweof
-                    pattern_dict[exp][fld]["orgeof"] = orgeof
+                    (out, pattern_full) = prpatt.get_timescales(anomaly_data, trnc)
+                    pattern_dict[exp][fld]["pattern_full"] = pattern_full
                     pattern_dict[exp][fld]["outp"] = out
                 else:  # pragma: no cover
-                    pattern_dict[exp][fld]["neweof"] = np.nan
-                    pattern_dict[exp][fld]["orgeof"] = np.nan
+                    pattern_dict[exp][fld]["pattern_full"] = np.nan
         return pattern_dict
 
     def _add_patterns_for_residual_exp(self, ssp_input):
@@ -250,7 +244,9 @@ class MeteorPatternScaling:
             forc_step=self.exp_forc_dict[exp],
             year_0=year_0,
         )
-        predicted = prpatt.rmodel(self.pattern_dict[exp][fld]["orgeof"], convolved_pca)
+        predicted = prpatt.rmodel(
+            self.pattern_dict[exp][fld]["pattern_full"], convolved_pca
+        )
         return predicted
 
     def predict_from_combined_experiment(

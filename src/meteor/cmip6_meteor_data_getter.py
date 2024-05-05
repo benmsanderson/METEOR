@@ -485,13 +485,17 @@ class Cmip6MeteorDataGetter:
                 if value is None:
                     value = self.get_single_var_mod_data_yearmean(exp, fld, model)
                 else:
-                    next_dataset = self.get_single_var_mod_data_yearmean(exp, fld, model)
-                    start_year = value['year'].values[-1] + 1
+                    next_dataset = self.get_single_var_mod_data_yearmean(
+                        exp, fld, model
+                    )
+                    start_year = value["year"].values[-1] + 1
                     end_year_plus = start_year + next_dataset.sizes["year"]
                     print(next_dataset.sizes["year"])
                     print(len(range(start_year, end_year_plus)))
                     print(range(start_year, end_year_plus))
-                    next_dataset = next_dataset.assign_coords({"year" : np.arange(start_year, end_year_plus)})
+                    next_dataset = next_dataset.assign_coords(
+                        {"year": np.arange(start_year, end_year_plus)}
+                    )
                     value = xr.concat(
                         [value, next_dataset],
                         dim="year",

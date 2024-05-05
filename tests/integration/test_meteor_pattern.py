@@ -2,6 +2,7 @@ import os
 from functools import partial
 
 import numpy as np
+import pytest
 from ciceroscm import input_handler
 
 from meteor import Cmip6MeteorDataGetter, MeteorPatternScaling
@@ -72,30 +73,38 @@ def test_pattern_from_cmip6(test_data_dir):
     )
     assert set(patterns.keys()) == set(["pr", "tas"])
 
+
 def test_sulfate_from_residual_functionality(test_data_dir):
-    datagetter = Cmip6MeteorDataGetter(exps=["piControl", "abrupt-4xCO2", "historical", "ssp245"], dbe=["CMIP", "CMIP", "CMIP", "ScenarioMIP"])
+    datagetter = Cmip6MeteorDataGetter(
+        exps=["piControl", "abrupt-4xCO2", "historical", "ssp245"],
+        dbe=["CMIP", "CMIP", "CMIP", "ScenarioMIP"],
+    )
     training_data = {
-        "base": datagetter.make_meteor_training_data("base", "CanESM5"), 
+        "base": datagetter.make_meteor_training_data("base", "CanESM5"),
         "co2x4": datagetter.make_meteor_training_data("co2x4", "CanESM5"),
-        "sulxanom": datagetter.make_meteor_training_data_composite(["historical", "ssp245"], "CanESM5"),
-        "bcxanom": datagetter.make_meteor_training_data_composite(["historical", "ssp245"], "CanESM5")           
-        }
+        "sulxanom": datagetter.make_meteor_training_data_composite(
+            ["historical", "ssp245"], "CanESM5"
+        ),
+        "bcxanom": datagetter.make_meteor_training_data_composite(
+            ["historical", "ssp245"], "CanESM5"
+        ),
+    }
+    with pytest.raises(RuntimeError):
+        canesm_anomsulf_pattern = MeteorPatternScaling(
+            "cmip6-CanESM5-anomsulf",
+            {"tas": 2, "pr": 2},
+            lambda key: training_data[key],
+            from_file=False,
+            exp_list=["base", "co2x4", "sulxanom", "bcxanom"],
+        )
     canesm_anomsulf_pattern = MeteorPatternScaling(
         "cmip6-CanESM5-anomsulf",
         {"tas": 2, "pr": 2},
         lambda key: training_data[key],
         from_file=False,
-        exp_list=["base", "co2x4", "sulxanom", "bcxanom"],    
+        exp_list=["base", "co2x4", "sulxanom"],
     )
-    canesm_anomsulf_pattern = MeteorPatternScaling(
-        "cmip6-CanESM5-anomsulf",
-        {"tas": 2, "pr": 2},
-        lambda key: training_data[key],
-        from_file=False,
-        exp_list=["base", "co2x4", "sulxanom"],    
-    )
-    assert canesm_anomsulf_pattern .name == "cmip6-CanESM5-anomsulf"
+    assert canesm_anomsulf_pattern.name == "cmip6-CanESM5-anomsulf"
     assert "sulxanom" in canesm_anomsulf_pattern.pattern_dict
     assert "tas" in canesm_anomsulf_pattern.pattern_dict["co2x4"]
     assert "outp" in canesm_anomsulf_pattern.pattern_dict["sulxanom"]["pr"]
-    assert False

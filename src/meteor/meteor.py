@@ -98,7 +98,7 @@ class MeteorPatternScaling:
         exp_list,
         tmscl=None,
         from_file=True,
-        ssp_input=None
+        ssp_input=None,
     ):  # pylint: disable=too-many-arguments
         """
         Initialise Pattern Scaling object
@@ -133,7 +133,7 @@ class MeteorPatternScaling:
             tmscl = [2, 50]
         self.pattern_dict = self._make_pattern_dict()
         if "xanom" in "-".join(exp_list):
-            self._add_patterns_for_residual_exp(ssp_input) 
+            self._add_patterns_for_residual_exp(ssp_input)
         self.name = name
 
     def _make_pattern_dict(self):
@@ -156,7 +156,7 @@ class MeteorPatternScaling:
             pattern_dict[exp] = {}
             for fld, trnc in self.patternflds.items():
                 pattern_dict[exp][fld] = {}
-                if exp.split("x")=="anom":
+                if exp.split("x") == "anom":
                     continue
                 # The :100? Flexible?
                 anomaly_data = self.dacanom[fld][j, :100, :, :]
@@ -168,49 +168,58 @@ class MeteorPatternScaling:
                     pattern_dict[exp][fld]["pattern_full"] = np.nan
         return pattern_dict
 
-    def _add_patterns_for_residual_exp(self, ssp_input):
+    def _add_patterns_for_residual_exp(
+        self, ssp_input
+    ):  # pylint: disable=too-many-locals
         """
         Add patterns for an experiment predicted from residual
         """
         anom_exps = [exp for exp in self.exp_list if "xanom" in exp]
         if len(anom_exps) != 1:
-            LOGGER.error("Adding a residual pattern can only be done for a MeteorPatternScaling instance with exactly one xanom experiment")
+            LOGGER.error(
+                "Adding a residual pattern can only be done for a MeteorPatternScaling instance with exactly one xanom experiment"
+            )
+            raise RuntimeError(
+                "MeteorPatternScaling objects can only handle a single xanom experiment"
+            )
         exp = anom_exps[0]
+        exp_index = self.exp_list.index(exp)
         if ssp_input is None:
             ssp_input = {
-                "emstart": 1850, 
+                "emstart": 1850,
                 "nystart": 1750,
-                "conc_run": False,    
-                         }
+                "nyend": 2100,
+                "conc_run": False,
+            }
         elif "nystart" not in ssp_input:
             ssp_input["nystart"] = 1750
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(ssp_input)
+        start_index = ssp_input["emstart"] - ssp_input["nystart"]
+        em_len = ssp_input["nyend"] - ssp_input["emstart"] + 1
         forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
-        forcing_of_residual = forcing_series[exp]
+        forcing_of_residual = xr.DataArray(
+            data=forcing_series[exp][start_index:],
+            coords={"time": np.ndarray(len(forcing_series[exp][start_index:]))},
+        )
         forcing_series[exp] = None
-        predicted_without = self._predict_combined_experiment_from_forcer_series(forcing_series, self.patternflds.keys(), ssp_input["nystart"])#[100:, :, :]
-        print(predicted_without)
-        print(type(predicted_without))
+        predicted_without = self._predict_combined_experiment_from_forcer_series(
+            forcing_series, self.patternflds.keys(), ssp_input["nystart"]
+        )  # [100:, :, :]
         for fld in self.patternflds.keys():
-            residual = self.dacanom[fld] - predicted_without[fld]
-            gmanom = prpatt.global_mean(residual)
-            opt=minimize(rmse_gm,[5,50],args=(gmanom,fcg_aer),bounds=((1, 10), (10, 100)))
-            timcon[i][fld]=opt.x
-            #make exponential decay timeseries with the optimized time constants
-            pmat=make_pmat(500,timcon[i][fld])
-            #convolve the aerosol forcing difference timeseries with the timeseries
-            timvec=np.apply_along_axis(lambda m: np.convolve(m, fcg_aer.diff('time'), mode='full'), axis=1, arr=pmat)[:,100:len(fcg_aer)+100]
-            nt=len(residual.time)
-        #invert time convolution of the aerosol-pulse response matrix
-        piv=pinv(timvec[:,:nt])
-        #project the time inverse metrix onto the aerosol anomaly map, and convert to xarray to get the spatial patterns associated with each decay mode
-        tmp=np.tensordot(piv, aerdata[i][fld][0,:,:,:], (0,0))
-        apat[i][fld]=xr.DataArray(data=tmp,dims=["mode","lat","lon"],coords=dict(mode=[0,1],lat=aerdata[i][fld].lat,lon=aerdata[i][fld].lon))
-        #get product of the spatial patterns and the pulse response curves to reconstruct the aerosol response
-        tmp=np.tensordot(apat[i][fld],timvec[:,:nt],(0,0))
-        aerrecon[i][fld]=xr.DataArray(data=tmp,dims=["lat","lon","time"],coords=dict(time=aerdata[i][fld].time,lat=aerdata[i][fld].lat,lon=aerdata[i][fld].lon))
-        #add the aerosol and ghg responses to produce the complete gridded emualted response
-        allrecon[i][fld]=aerrecon[i][fld]+pattern_ghg[i][fld]
+            predicted_without_fld = predicted_without[fld].isel(
+                time=slice(start_index, start_index + em_len)
+            )
+            predicted_without_fld = predicted_without_fld.assign_coords(
+                time=np.arange(em_len)
+            )
+            residual = (
+                self.dacanom[fld][exp_index, :em_len, :, :] - predicted_without_fld
+            )
+            (out, pattern_full) = prpatt.get_timescales_from_anomaly(
+                residual, forcing_of_residual
+            )
+            self.pattern_dict[exp][fld]["pattern_full"] = pattern_full
+            self.pattern_dict[exp][fld]["outp"] = out
 
     def predict_from_forcing_profile(
         self, forc_timeseries, fld, exp="co2x2", year_0=1850
@@ -288,14 +297,13 @@ class MeteorPatternScaling:
         }
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(cfg)
         forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
-        predicted = self._predict_combined_experiment_from_forcer_series(forcing_series, flds, cfg["nystart"])
+        predicted = self._predict_combined_experiment_from_forcer_series(
+            forcing_series, flds, cfg["nystart"]
+        )
         return predicted
 
     def _predict_combined_experiment_from_forcer_series(
-        self,
-        forcing_series,
-        flds,
-        nystart
+        self, forcing_series, flds, nystart
     ):
         """
         Predict the combined patterns for given flds for the given experiment split forcing series

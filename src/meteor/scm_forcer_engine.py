@@ -103,6 +103,7 @@ class ScmEngineConfigurations:
                 self.emissions_data.loc[self.emstart, :]
             )
 
+
 def run_single_experiment(pamset, input_h):
     """
     Run the concentrations_emissions part of the SCM

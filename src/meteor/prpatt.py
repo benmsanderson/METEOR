@@ -513,21 +513,21 @@ def get_timescales(anomaly_data, n_modes):
     """
     # initialise an LMFIT parameter object, with tmscl_0 timescales and
     # n_modes modes
-    #our first guess for amplitude is just the mean of the 2d field
+    # our first guess for amplitude is just the mean of the 2d field
     ampguess = anomaly_data.mean("lat").mean("lon").mean("time")
-    #our time guess is 1,10,100 etc years 
+    # our time guess is 1,10,100 etc years
     tguess = 10 ** (np.arange(n_modes) + 1)
-    #initialise the initial guess vector
+    # initialise the initial guess vector
     a0 = np.zeros(n_modes * 2)
     for i, t in enumerate(tguess):
         a0[2 * i] = ampguess
         a0[2 * i + 1] = t
-    #fit the timescales using lmfit to fit global mean of the anomaly data
+    # fit the timescales using lmfit to fit global mean of the anomaly data
     aopt = fit_timescales(anomaly_data, a0)
     pattern = {}
-    #make the u matrix of exponential decays corresponding to the fitted timescales
+    # make the u matrix of exponential decays corresponding to the fitted timescales
     u_np = make_amat(aopt.params, len(anomaly_data.time))
-    #make it into an 2d xarray object, time by mode
+    # make it into an 2d xarray object, time by mode
     uxr = xr.DataArray(
         data=u_np,
         dims=["time", "mode"],
@@ -536,13 +536,13 @@ def get_timescales(anomaly_data, n_modes):
             "mode": (["mode"], np.arange(n_modes)),
         },
     )
-    #store the u matrix in the pattern dictionary
+    # store the u matrix in the pattern dictionary
     pattern["u"] = uxr
-    #now calculate the penrose inverse of U
+    # now calculate the penrose inverse of U
     ui = pinv(u_np)
-    #now calculate the pattern/v matrix by taking the dot product of the penrose inverse of u with the anomaly data
+    # now calculate the pattern/v matrix by taking the dot product of the penrose inverse of u with the anomaly data
     b = np.tensordot(ui, anomaly_data.values, axes=1)
-    #make an xarray object of the pattern matrix
+    # make an xarray object of the pattern matrix
     bx = xr.DataArray(
         data=b,
         dims=["mode", "lat", "lon"],
@@ -552,7 +552,7 @@ def get_timescales(anomaly_data, n_modes):
             "mode": (["mode"], np.arange(n_modes)),
         },
     )
-    #store the pattern matrix in the pattern dictionary
+    # store the pattern matrix in the pattern dictionary
     pattern["v"] = bx
     # return everything
     return (aopt, pattern)
@@ -603,4 +603,3 @@ def recon(pattern):
         dims=("time", "lat", "lon"),
     )
     return recon_xarray
-

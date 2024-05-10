@@ -90,7 +90,7 @@ class ScmEngineConfigurations:
             )
         if self.nat_n2o_data is None:
             self.nat_n2o_data = pd.DataFrame(
-                data={"N2O": np.ones(self.nyend - self.nystart + 1) * 242.09},
+                data={"N2O": np.ones(self.nyend - self.nystart + 1) * 11.7027},
                 index=np.arange(self.nystart, self.nyend + 1),
             )
 

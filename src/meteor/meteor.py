@@ -13,18 +13,19 @@ from . import prpatt, scm_forcer_engine
 LOGGER = logging.getLogger(__name__)
 
 
-def read_training_data(get_training_file_from_exp, exp_list):
+def read_training_data(get_training_data, exp_list, from_file=True):
     """
     Read training data into xarray
 
     Parameters
     ----------
-    get_training_file_from_exp: function
+    get_training_data: function
               Funtion that returns the path to the training
               file given the experiment name
     exp_list: list
               List of experiments to include
-
+    from_file: bool
+               Whehther to get data from file or not
     Returns
     -------
     xarray dataset
@@ -32,7 +33,10 @@ def read_training_data(get_training_file_from_exp, exp_list):
     """
     # Might need to be rewritten to account for several models in files...
     for i, exp in enumerate(exp_list):
-        tmp = xr.open_dataset(get_training_file_from_exp(exp))
+        if from_file:
+            tmp = xr.open_dataset(get_training_data(exp))
+        else:
+            tmp = get_training_data(exp)
         if not i:
             dac = tmp
         else:
@@ -77,9 +81,9 @@ class MeteorPatternScaling:
              with patterns for the experiment of the object.
              First keyset: The experiments that the pattern is defined by,
              Second keyset: The variables for which patterns are produced.
-             Third keyset: neweof - a synthetic PCA for the data from
-             the calculated response timescales,
-             orgeof -  orginal PCA object from the data, and if data allows,
+             Third keyset:
+             pattern_full - pattern of impulse response timeseries and spatial
+             patterns per mode
              outp - the lmfit parameter fit using the original
              PCA object and timescales
     name: str
@@ -87,7 +91,13 @@ class MeteorPatternScaling:
     """
 
     def __init__(
-        self, name, patternflds, get_training_file_from_exp, exp_list, tmscl=None
+        self,
+        name,
+        patternflds,
+        get_training_file_from_exp,
+        exp_list,
+        tmscl=None,
+        from_file=True,
     ):  # pylint: disable=too-many-arguments
         """
         Initialise Pattern Scaling object
@@ -113,7 +123,9 @@ class MeteorPatternScaling:
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(None)
         scaling = sefps.run_to_get_scaling(exp_list)
         self.exp_forc_dict = {exp: scaling[i] for i, exp in enumerate(exp_list)}
-        self.dacanom = read_training_data(get_training_file_from_exp, exp_list)
+        self.dacanom = read_training_data(
+            get_training_file_from_exp, exp_list, from_file=from_file
+        )
         self.exp_list = exp_list
         self.patternflds = patternflds
         if tmscl is None:
@@ -133,11 +145,8 @@ class MeteorPatternScaling:
             A nested dictionary that with the experiments of the objects.
             First keyset: The experiments that the pattern is defined by.
             Second keyset: The variables for which patterns are produced.
-            Third keyset: neweof, a synthetic PCA for the data from the
-            calculated response timescales,
-            orgeof, orginal PCA object from the data, and if data allows,
-            outp, the lmfit parameter fit using the original PCA object
-            and timescales
+            Third keyset: pattern split in temporal and spatial part per mode,
+            and if data allows, outp, the lmfit parameter fit of timescales
         """
         pattern_dict = {}
         for j, exp in enumerate(self.exp_forc_dict.keys()):
@@ -145,19 +154,23 @@ class MeteorPatternScaling:
             for fld, trnc in self.patternflds.items():
                 pattern_dict[exp][fld] = {}
                 # The :100? Flexible?
+                # anomaly_data is the time x lat x lon data for variable fld and expt j
+
                 anomaly_data = self.dacanom[fld][j, :100, :, :]
                 if not np.isnan(np.mean(anomaly_data)):
-                    (out, orgeof, neweof) = prpatt.get_timescales(anomaly_data, trnc)
-
-                    pattern_dict[exp][fld]["neweof"] = neweof
-                    pattern_dict[exp][fld]["orgeof"] = orgeof
+                    # now call get timescales to the fitted timescales and compute the patterns
+                    # out is the lmfit object
+                    # pattern_full is the pattern of impulse response timeseries and spatial patterns per mode
+                    (out, pattern_full) = prpatt.get_timescales(anomaly_data, trnc)
+                    pattern_dict[exp][fld]["pattern_full"] = pattern_full
                     pattern_dict[exp][fld]["outp"] = out
                 else:  # pragma: no cover
-                    pattern_dict[exp][fld]["neweof"] = np.nan
-                    pattern_dict[exp][fld]["orgeof"] = np.nan
+                    pattern_dict[exp][fld]["pattern_full"] = np.nan
         return pattern_dict
 
-    def predict_from_forcing_profile(self, forc_timeseries, fld, exp="co2x2"):
+    def predict_from_forcing_profile(
+        self, forc_timeseries, fld, exp="co2x2", year_0=1850
+    ):
         """
         Make prediction from experiment and a forcing profile
 
@@ -169,6 +182,8 @@ class MeteorPatternScaling:
             Variable to make prediction for
         exp : str
             Experiment that defines the stepfunction response for the forcer in question
+        year_0 : int
+            Start year of forcing timeseries
 
         Returns
         -------
@@ -183,12 +198,19 @@ class MeteorPatternScaling:
             self.pattern_dict[exp][fld]["outp"].params,
             forc_timeseries,
             forc_step=self.exp_forc_dict[exp],
+            year_0=year_0,
         )
-        predicted = prpatt.rmodel(self.pattern_dict[exp][fld]["orgeof"], convolved_pca)
+        predicted = prpatt.rmodel(
+            self.pattern_dict[exp][fld]["pattern_full"], convolved_pca
+        )
         return predicted
 
     def predict_from_combined_experiment(
-        self, emissions_data, concentrations_data, flds, conc_run=False
+        self,
+        emissions_data,
+        concentrations_data,
+        flds,
+        conc_run=False,
     ):
         """
         Predict the combined patterns for given flds for the given emissions and concentrations
@@ -229,7 +251,7 @@ class MeteorPatternScaling:
             for fld in flds:
                 if fld not in predicted:
                     predicted[fld] = self.predict_from_forcing_profile(
-                        forcing_series[exp], fld, exp
+                        forcing_series[exp], fld, exp, year_0=cfg["nystart"]
                     )
                     predicted[fld]["time"] = pd.to_datetime(
                         predicted[fld]["time"], format="%Y"
@@ -237,7 +259,7 @@ class MeteorPatternScaling:
 
                 else:
                     tmp = self.predict_from_forcing_profile(
-                        forcing_series[exp], fld, exp
+                        forcing_series[exp], fld, exp, year_0=cfg["nystart"]
                     )
                     tmp["time"] = pd.to_datetime(tmp["time"], format="%Y")
                     predicted[fld] = predicted[fld] + tmp

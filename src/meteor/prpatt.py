@@ -116,15 +116,15 @@ def imodel_filter(pars, forc_timeseries, forc_step=7.41, year_0=1850):
     return inma
 
 
-def rmodel(eofout, pc_matrix):
+def rmodel(pattern_full, pc_matrix):
     """
     Reconstruct gridded, time evolving output from a user
     defined principal component timeseries and EOF patterns
 
     Parameters
     ----------
-    eofout : dict
-             Dictionary of empirical orthogonal function
+    pattern_full : dict
+             Dictionary temporal and spatial pattern
     pc_matrix : xarray.DataArray
              Data array of principal component timeseries
 
@@ -136,11 +136,11 @@ def rmodel(eofout, pc_matrix):
     # reconstruct step function output from EOFs and a user-defined PC timeseries 'pc_matrix'
     # first create the synthetic EOF xarray structure
     # we copy the original EOFs and PCs from the raw data (we will keep the spatial patterns)
-    eof_synth = eofout.copy()
+    pattern_synth = pattern_full.copy()
     # now replace the PC matrix 'u' with the user defined vlaue
-    eof_synth["u"] = pc_matrix
+    pattern_synth["u"] = pc_matrix
     # now call recon function to reconstruct the original data from the Xarray EOF dataset
-    recon_data = recon(eof_synth)
+    recon_data = recon(pattern_synth)
     return recon_data
 
 
@@ -479,7 +479,7 @@ def global_mean(ds):
     weight = np.cos(np.deg2rad(lat))
     weight = weight / weight.mean()
     other_dims = set(ds.dims) - {time_dim_name, "ens"}
-    return (ds * weight).mean(other_dims)
+    return (ds * weight).mean(other_dims, skipna=True)
 
 
 def get_timescales(anomaly_data, n_modes):
@@ -507,24 +507,27 @@ def get_timescales(anomaly_data, n_modes):
     -------
     list
         Elements are: out - the result of the lmfit fitting,
-        eofout - the EOF structure of the original anomaly data
-        eofnew - the EOF structure of the minimised fit
+        pattern - a dictionary containing the pattern in terms of
+        the temporal part, u, which has a timeseries per mode, and
+        a spatial part, v, which has a spatial pattern for each model
     """
     # initialise an LMFIT parameter object, with tmscl_0 timescales and
     # n_modes modes
+    # our first guess for amplitude is just the mean of the 2d field
     ampguess = anomaly_data.mean("lat").mean("lon").mean("time")
-
+    # our time guess is 1,10,100 etc years
     tguess = 10 ** (np.arange(n_modes) + 1)
-
+    # initialise the initial guess vector
     a0 = np.zeros(n_modes * 2)
     for i, t in enumerate(tguess):
         a0[2 * i] = ampguess
         a0[2 * i + 1] = t
-
+    # fit the timescales using lmfit to fit global mean of the anomaly data
     aopt = fit_timescales(anomaly_data, a0)
-    eofnew = {}
-
+    pattern = {}
+    # make the u matrix of exponential decays corresponding to the fitted timescales
     u_np = make_amat(aopt.params, len(anomaly_data.time))
+    # make it into an 2d xarray object, time by mode
     uxr = xr.DataArray(
         data=u_np,
         dims=["time", "mode"],
@@ -533,10 +536,13 @@ def get_timescales(anomaly_data, n_modes):
             "mode": (["mode"], np.arange(n_modes)),
         },
     )
-    eofnew["u"] = uxr
-
+    # store the u matrix in the pattern dictionary
+    pattern["u"] = uxr
+    # now calculate the penrose inverse of U
     ui = pinv(u_np)
+    # now calculate the pattern/v matrix by taking the dot product of the penrose inverse of u with the anomaly data
     b = np.tensordot(ui, anomaly_data.values, axes=1)
+    # make an xarray object of the pattern matrix
     bx = xr.DataArray(
         data=b,
         dims=["mode", "lat", "lon"],
@@ -546,16 +552,13 @@ def get_timescales(anomaly_data, n_modes):
             "mode": (["mode"], np.arange(n_modes)),
         },
     )
-    eofnew["v"] = bx
-    eofnew["s"] = np.ones(n_modes)
-
-    eofnew["weights"] = 1
-
+    # store the pattern matrix in the pattern dictionary
+    pattern["v"] = bx
     # return everything
-    return (aopt, eofnew, eofnew)
+    return (aopt, pattern)
 
 
-def recon(eofout):
+def recon(pattern):
     """
     Reconstruct full dataset given a PCA decompostion represented
     in the dictionary format outputted by eof_calculation_wrapper
@@ -564,11 +567,11 @@ def recon(eofout):
 
     Parameters
     ----------
-    eofout : dict
-             Dictionary, containing 4 keys, u, s, v  and wgt
-             which are the principal components, eigenvalues,
-             empirical orthogonal function patterns and
-             defined spatial weights respectively.
+    pattern : dict
+             Dictionary, containing 2 keys, u and v
+             which are timeseries for the pulse response,
+             per mode and the corresponding
+             spatial patterns.
 
     Returns
     -------
@@ -576,205 +579,27 @@ def recon(eofout):
            Reconstructed field in space and time as xarray
     """
     # Define matrices based on dictionary input:
-    pc_matrix = eofout["u"]  # size n_time by n_modes
-    eigenvalue_matrix = eofout["s"]  # size n_modes
-    eof_pattern = eofout["v"]  # size n_pixels by n_modes
-    # area_wgt is the area weighting matrix,
-    area_wgt = eofout["weights"]  # size n_pixels
+    mode_timescales = pattern["u"]  # size n_time by n_modes
+    pattern_per_mode = pattern["v"]  # size n_pixels by n_modes
     # number of modes
-    n_modes = eof_pattern.shape[0]
+    n_modes = pattern_per_mode.shape[0]
     # reshape v1 into a 2d matrix
-    eof_pattern_2d = eof_pattern.values.reshape(n_modes, -1)
+    pattern_2d = pattern_per_mode.values.reshape(n_modes, -1)
     # compute reconstruceted field (unweighted) as dot product
-    recon_unweighted = np.dot(
-        np.dot(pc_matrix, np.diag(eigenvalue_matrix)), eof_pattern_2d
-    )
+    recon_unweighted = np.dot(mode_timescales, pattern_2d)
     # compute reconstruceted field (weighted) as dot product
-    recon_weighted = (
-        np.reshape(
-            recon_unweighted,
-            [pc_matrix.shape[0], eof_pattern.shape[1], eof_pattern.shape[2]],
-        )
-        / area_wgt
+    recon_weighted = np.reshape(
+        recon_unweighted,
+        [
+            mode_timescales.shape[0],
+            pattern_per_mode.shape[1],
+            pattern_per_mode.shape[2],
+        ],
     )
     # convert reconstructed field to xarray and return
     recon_xarray = xr.DataArray(
         recon_weighted,
-        coords=(pc_matrix.time, eof_pattern.lat, eof_pattern.lon),
+        coords=(mode_timescales.time, pattern_per_mode.lat, pattern_per_mode.lon),
         dims=("time", "lat", "lon"),
     )
     return recon_xarray
-
-
-# def imodel_filter_scl(pscl, pars, F, F0=7.41, y0=1850):
-#     """
-#     Apply a quadratic scaling to forcing before convolving
-
-#     Apply a quadratic scaling to the original forcing timeseries
-#     before convolving to make predictions. Allows for simple
-#     nonlinearities in the pattern response to forcing.
-
-
-#     Parameters
-#     ----------
-#     pscl : lmfit.parameter.Parameters
-#            Quadratic fit scale parameters
-#     pars : lmfit.parameter.Parameters
-#            Pattern scaling parameters
-#     F : np.ndarray
-#            Array of forcing timeseries to convolve with
-#     F0 : float
-#            Size of forcing in the step function experiment
-#     y0 : int
-#            First year of timeseries
-
-#     Returns
-#     -------
-#     xr.Dataarray
-#            Outputted convolution principal component timeseries
-#     """
-#     # isolate scaling parameters dictionary (pscl)
-#     print(type(pscl))
-#     vals = pscl.valuesdict()
-#     # produce quadratically scaled forcing timeseries
-#     fscl = vals["a"] * F + vals["b"] * np.square(F)
-#     # now run the convolution model with the transformed forcing timeseries
-#     inma = imodel_filter(pars, fscl, F0=F0, y0=y0)
-#     return inma
-
-# def residual_project_scl(pscl, pars, forc_timeseries, modewgt, data):
-#     """
-#     Get residual from quadratic forcing adjustment fit
-#     !NB: Ben please check this extra cearfully, not at all sure I understood what this does...
-
-#     Parameters
-#     ----------
-#     pscl : lmfit.parameter.Parameters
-#            Quadratic fit scale parameters
-#     pars : lmfit.parameter.Parameters
-#            Pattern scaling parameters
-#     forc_timseries : np.ndarray
-#            Array of forcing timeseries to convolve with
-#     modewgt : np.ndarray
-#            Principal component weights
-#     data : xr.DataArray
-#            PC timeseries for convolved response/target simulation
-
-#     Returns
-#     -------
-#         xr.DataArray
-#            Weighted residual between model and synthetic prediction fit
-#     """
-#     # this is used in fitting the quadratic forcing adjustment parameters pscl
-#     # data here is a PC timeseries for the convolved response/target simulation (size time by n_modes)
-#     # the function returns the weighted (by mode) residual of the convolved PC timeseries, compared with truth
-#     # modewgt is the weighting given to each of the modes in the PC timeseries
-
-#     # firstly, we tile the weight vector to be the same shape as data
-#     wgtt = np.tile(modewgt.T, (data.shape[0], 1))
-#     # fnow we call imodel_filter_scl to produce synthetic PC timeseries for the convolved data, with quadratic scaling
-#     mdl = imodel_filter_scl(pscl, pars, forc_timeseries)
-#     # calc difference with the data (here the data is the actual target simulation, projected onto the EOFs)
-#     residual = data - mdl
-#     # weight by mode variance
-#     residual = residual * wgtt
-#     return residual
-
-# def get_patterns_pinv(X,tsp):
-#     #depreciated - this does a penrose inverse to calculate the patterns associated with a basis set defined by a non-orthogonal set of exponential timeseries
-#     n_times=X.shape[0]
-#     x_array=np.arange(1,n_times+1)
-
-#     u0=np.empty([n_times, len(tsp)])
-#     for i,ts in enumerate(tsp):
-#         tmp=expotas(x_array,1,ts)
-#         u0[:,i]=tmp/np.mean(tmp)
-
-#     #u1[:,-1]=u0[:,-1]-np.dot(np.dot(u0[:,-1],u0[:,:-1]),np.linalg.pinv(u0[:,:-1]))
-#     v1f=np.dot(np.linalg.pinv(u0),X.values.reshape(n_times,-1))
-#     v1=np.reshape(v1f,(len(tsp),X.shape[1],X.shape[2]))
-
-#     #Xr=np.reshape(np.dot(u1,v1f),X.shape)
-#     va=xr.DataArray(v1, coords=(np.array(tsp),X.lat,X.lon), dims=('mode','lat','lon'))
-
-#     return va,u1
-
-
-# def imodel(pars, eofout, F, F0=7.41, y0=1850):
-#   #depreciated, reconstructs full grids and sums - very slow
-#   n_times=len(F)
-
-#   pc_matrix=pmodel(pars,n_times)
-#   usa=xr.DataArray(pc_matrix, coords=(np.arange(y0,n_times+y0),eofout['u'].mode), dims=('time','mode'))
-#   Xrs=rmodel(eofout,usa)
-#   inm=Xrs*0.
-#   for Ft,i in enumerate(np.arange(0,n_times-1)):
-#     dF=(F[i+1]-F[i])/F0
-#     ts=n_times-i
-#     inm[i:,:,:]=inm[i:,:,:]+dF*Xrs[0:ts,:,:].values
-#   return inm
-
-
-# def imodel_eof(pars, F, F0=7.41, y0=1850):
-#   #depreciated - loop over forcing vecrtor, quite slow
-#   n_times=len(F)
-#   vals = pars.valuesdict()
-#   n_modes=len([value for key, value in vals.items() if 'c' in key.lower()])
-#   pc_matrix=pmodel(pars,n_times)
-#   usa=xr.DataArray(pc_matrix, coords=(np.arange(y0,n_times+y0),np.arange(0,n_modes)), dims=('time','mode'))
-#   #Xrs=rmodel(eofout,usa)
-#   inm=usa*0.
-#   for Ft,i in enumerate(np.arange(0,n_times-1)):
-#     dF=(F[i+1]-F[i])/F0
-#     ts=n_times-i
-#     inm[i:,:]=inm[i:,:]+dF*usa[0:ts,:].values
-#   return inm
-
-# def residual_project(pars, f, modewgt, data=None):
-#     #this is used in fitting the exponential parameters used in pmodel
-#     #the function returns the weighted residual of the synthetic PC timeseries, compared with truth
-#     #modewgt is the weighting given to each of the modes in the PC timeseries
-
-#     wgtt=np.tile(modewgt.T,(data.shape[0],1))
-
-#     mdl=imodel_filter(pars,f )
-#     rs=(data-mdl)
-#     rs=rs*wgtt
-#     return rs
-
-# def gresid(pars,data=None):
-#     tmp=pmodel(pars,len(data)).squeeze()
-#     return tmp-data
-
-# def global_timescales(t0,data=None):
-#     pars=make_params(t0,1)
-#     tms=global_mean(data).squeeze()
-#     out=lmfit.minimize(gresid, pars, kws={'data': tms})
-#     ts=[]
-#     for i in np.arange(0,len(t0)):
-#         ts.append(out.params['t'+str(i)].value)
-#     return ts
-
-# def adjust_timescales(X,Xact,pars,t0,f):
-#     #this code performs the adjustment of the fitted timescales
-#     scl_params = lmfit.Parameters()
-#     scl_params.add('a',value=1,min=0.7,max=1.3)
-#     scl_params.add('b',value=0.001,min=0.0,max=0.5)
-
-
-#     vals = pars.valuesdict()
-#     n_modes=len([value for key, value in vals.items() if 't' in key.lower()])
-#     n_times=X.shape[0]
-#     solver = Eof(X,center=False,weights=wgt2(X))
-#     eofout=eof_calculation_wrapper(X,n_modes)
-#     modewgt=np.sqrt(eofout['s'])
-
-#     ua=solver.projectField(Xact,neofs=n_modes,eofscaling=1)
-
-#     kys=[key for key, value in vals.items()]
-#     x_array=np.arange(1,n_times+1)
-
-
-#     out = lmfit.minimize(residual_project_scl, scl_params, args=(pars,f,modewgt,), kws={'data': ua})
-#     #ts=[out.params['t1'].value,out.params['t2'].value,out.params['t3'].value]
-#     return out

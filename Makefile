@@ -100,7 +100,7 @@ $(VENV_DIR): setup.py setup.cfg
 	[ -d $(VENV_DIR) ] || python3.9 -m venv $(VENV_DIR)
 	$(VENV_DIR)/bin/pip install --upgrade pip wheel
 	$(VENV_DIR)/bin/pip install -e .[dev]
-	$(VENV_DIR)/bin/jupyter nbextension enable --py widgetsnbextension
+	##Comment out $(VENV_DIR)/bin/jupyter nbextension enable --py widgetsnbextension
 
 
 	touch $(VENV_DIR)

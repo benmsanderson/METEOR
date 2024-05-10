@@ -57,12 +57,10 @@ def plot_global_mean_values(pattern, ax, fld, exp):
     trun = pattern.patternflds[fld]
     ax.plot(prpatt.global_mean(data), label="Original Data")
     ax.plot(
-        prpatt.global_mean(prpatt.recon(pattern.pattern_dict[exp][fld]["orgeof"])),
-        label="EOF reconstruction (t=" + str(trun) + ")",
-    )
-    ax.plot(
-        prpatt.global_mean(prpatt.recon(pattern.pattern_dict[exp][fld]["neweof"])),
-        label="P-R fit to PCs (t=" + str(trun) + ")",
+        prpatt.global_mean(
+            prpatt.recon(pattern.pattern_dict[exp][fld]["pattern_full"])
+        ),
+        label="Reconstruction (t=" + str(trun) + ")",
     )
     ax.set_xlabel("time (years)")
     ax.legend()
@@ -89,7 +87,7 @@ def plot_pca_map(pattern, fld, exp, comps_to_show=20):
     plt.set_cmap("bwr")
 
     for i in range(comps_to_show):
-        pattern.pattern_dict[exp][fld]["orgeof"]["v"][i, :, :].plot(
+        pattern.pattern_dict[exp][fld]["pattern_full"]["v"][i, :, :].plot(
             ax=ax[i], cmap="bwr"
         )
     return plothandle
@@ -111,15 +109,10 @@ def plot_reconstructed_globmean(pattern, ax, fld, exp):
         Experiment for which to plot global mean of original data, and pattern fields
     """
     raw_data = pattern.dacanom[fld][pattern.exp_list.index(exp), :100, :, :]
-    pca_pattern = prpatt.recon(pattern.pattern_dict[exp][fld]["orgeof"])
-    synthetic_pattern = prpatt.recon(pattern.pattern_dict[exp][fld]["neweof"])
-
+    pca_pattern = prpatt.recon(pattern.pattern_dict[exp][fld]["pattern_full"])
     raw_data.weighted(prpatt.wgt(raw_data)).mean(("lat", "lon")).plot(
         color="cyan", ax=ax
     )
     pca_pattern.weighted(prpatt.wgt(raw_data)).mean(("lat", "lon")).plot(
         color="k", ax=ax
-    )
-    synthetic_pattern.weighted(prpatt.wgt(raw_data)).mean(("lat", "lon")).plot(
-        color="red", ax=ax
     )

@@ -1,9 +1,10 @@
 import os
+from functools import partial
 
 import numpy as np
 from ciceroscm import input_handler
 
-from meteor import MeteorPatternScaling
+from meteor import Cmip6MeteorDataGetter, MeteorPatternScaling
 
 
 def test_meteor_scaling(test_data_dir):
@@ -34,6 +35,32 @@ def test_meteor_scaling_scm_timseries(test_data_dir):
     assert "base" in canesm_basic_pattern.pattern_dict
     assert "tas" in canesm_basic_pattern.pattern_dict["co2x2"]
     assert "outp" in canesm_basic_pattern.pattern_dict["co2x2"]["pr"]
+    conc_data = input_handler.read_inputfile(
+        os.path.join(test_data_dir, "rcp85_conc_RCMIP.txt")
+    )
+    ih = input_handler.InputHandler({})
+    em_data = ih.read_emissions(os.path.join(test_data_dir, "rcp85_em_RCMIP.txt"))
+
+    patterns = canesm_basic_pattern.predict_from_combined_experiment(
+        em_data, conc_data, ["pr", "tas"]
+    )
+    assert set(patterns.keys()) == set(["pr", "tas"])
+
+
+def test_pattern_from_cmip6(test_data_dir):
+
+    datagetter = Cmip6MeteorDataGetter()
+    canesm_basic_pattern = MeteorPatternScaling(
+        "cmip6-CanESM5-basic",
+        {"tas": 2, "pr": 10},
+        partial(datagetter.make_meteor_training_data, model="CanESM5"),
+        from_file=False,
+        exp_list=["base", "co2x4"],
+    )
+    assert canesm_basic_pattern.name == "cmip6-CanESM5-basic"
+    assert "base" in canesm_basic_pattern.pattern_dict
+    assert "tas" in canesm_basic_pattern.pattern_dict["co2x4"]
+    assert "outp" in canesm_basic_pattern.pattern_dict["co2x4"]["pr"]
     conc_data = input_handler.read_inputfile(
         os.path.join(test_data_dir, "rcp85_conc_RCMIP.txt")
     )

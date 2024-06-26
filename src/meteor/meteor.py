@@ -163,7 +163,8 @@ class MeteorPatternScaling:
                 if not np.isnan(np.mean(anomaly_data)):
                     (out, pattern_full) = prpatt.get_timescales(anomaly_data, trnc)
                     pattern_dict[exp][fld]["pattern_full"] = pattern_full
-                    pattern_dict[exp][fld]["outp"] = out
+                    pattern_dict[exp][fld]["outp"] = out.params
+                    print(out)
                 else:  # pragma: no cover
                     pattern_dict[exp][fld]["pattern_full"] = np.nan
         return pattern_dict
@@ -198,8 +199,8 @@ class MeteorPatternScaling:
         em_len = ssp_input["nyend"] - ssp_input["emstart"] + 1
         forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
         forcing_of_residual = xr.DataArray(
-            data=forcing_series[exp][start_index:],
-            coords={"time": np.ndarray(len(forcing_series[exp][start_index:]))},
+            data=forcing_series[exp][start_index:].copy(),
+            coords={"time": np.arange(len(forcing_series[exp][start_index:]))},
         )
         forcing_series[exp] = None
         predicted_without = self._predict_combined_experiment_from_forcer_series(
@@ -220,6 +221,15 @@ class MeteorPatternScaling:
             )
             self.pattern_dict[exp][fld]["pattern_full"] = pattern_full
             self.pattern_dict[exp][fld]["outp"] = out
+            print(out)
+            print(self.pattern_dict.keys())
+            print(self.pattern_dict["co2x4"][fld]["outp"])
+            # print(out.params)
+            # print(forcing_of_residual)
+            # print(prpatt.global_mean(residual))
+            # sys.exit(4)
+            # print(residual.shape)
+            # print(prpatt.global_mean(residual))
 
     def predict_from_forcing_profile(
         self, forc_timeseries, fld, exp="co2x2", year_0=1850
@@ -248,7 +258,7 @@ class MeteorPatternScaling:
         """
         # Add something to account for the forcing strength of the experiment
         convolved_pca = prpatt.imodel_filter(
-            self.pattern_dict[exp][fld]["outp"].params,
+            self.pattern_dict[exp][fld]["outp"],
             forc_timeseries,
             forc_step=self.exp_forc_dict[exp],
             year_0=year_0,

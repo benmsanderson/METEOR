@@ -745,7 +745,6 @@ def get_timescales_from_anomaly(residual_anom, fcg_aer, n_modes=2):
 
 
 def recon(pattern):
-
     """
     Reconstruct full dataset given a PCA decompostion represented
     in the dictionary format outputted by eof_calculation_wrapper

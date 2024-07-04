@@ -159,8 +159,13 @@ class MeteorPatternScaling:
                 if exp.split("x") == "anom":
                     continue
                 # The :100? Flexible?
+                # anomaly_data is the time x lat x lon data for variable fld and expt j
+
                 anomaly_data = self.dacanom[fld][j, :100, :, :]
                 if not np.isnan(np.mean(anomaly_data)):
+                    # now call get timescales to the fitted timescales and compute the patterns
+                    # out is the lmfit object
+                    # pattern_full is the pattern of impulse response timeseries and spatial patterns per mode
                     (out, pattern_full) = prpatt.get_timescales(anomaly_data, trnc)
                     pattern_dict[exp][fld]["pattern_full"] = pattern_full
                     pattern_dict[exp][fld]["outp"] = out.params

@@ -26,7 +26,7 @@ def test_aerosol_priority_mapping():
     assert aer2["SO4_IND"] == "BC"
     assert aer2["SO4_DIR"] == "BC"
     aer3 = scm_forcer_engine.aerosol_priority_mapping(
-        ["CO2", "BC", "SO2"], bc_oc_to_CO2=False
+        ["CO2", "BC", "SO2"], bc_oc_to_co2=False
     )
     assert set(aer3.keys()) == set(
         ["SO4_IND", "SO4_DIR", "BMB_AEROS_BC", "BMB_AEROS_OC", "OC"]
@@ -35,7 +35,7 @@ def test_aerosol_priority_mapping():
     assert aer3["SO4_IND"] == "SO2"
     assert aer3["BMB_AEROS_OC"] == "BC"
     aer4 = scm_forcer_engine.aerosol_priority_mapping(
-        ["CO2", "OC", "SO2"], bc_oc_to_CO2=False
+        ["CO2", "OC", "SO2"], bc_oc_to_co2=False
     )
     assert set(aer4.keys()) == set(
         ["SO4_IND", "SO4_DIR", "BMB_AEROS_BC", "BMB_AEROS_OC", "BC"]

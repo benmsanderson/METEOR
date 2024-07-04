@@ -164,7 +164,6 @@ class MeteorPatternScaling:
                     (out, pattern_full) = prpatt.get_timescales(anomaly_data, trnc)
                     pattern_dict[exp][fld]["pattern_full"] = pattern_full
                     pattern_dict[exp][fld]["outp"] = out.params
-                    print(out)
                 else:  # pragma: no cover
                     pattern_dict[exp][fld]["pattern_full"] = np.nan
         return pattern_dict
@@ -221,15 +220,6 @@ class MeteorPatternScaling:
             )
             self.pattern_dict[exp][fld]["pattern_full"] = pattern_full
             self.pattern_dict[exp][fld]["outp"] = out
-            print(out)
-            print(self.pattern_dict.keys())
-            print(self.pattern_dict["co2x4"][fld]["outp"])
-            # print(out.params)
-            # print(forcing_of_residual)
-            # print(prpatt.global_mean(residual))
-            # sys.exit(4)
-            # print(residual.shape)
-            # print(prpatt.global_mean(residual))
 
     def predict_from_forcing_profile(
         self, forc_timeseries, fld, exp="co2x2", year_0=1850
@@ -334,6 +324,7 @@ class MeteorPatternScaling:
             keys are flds, values are predicted per fld combined patterns
         """
         predicted = {}
+
         for exp in self.exp_list:
             if exp == "base":
                 continue

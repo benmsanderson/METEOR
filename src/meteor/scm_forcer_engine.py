@@ -55,8 +55,6 @@ def aerosol_priority_mapping(
             "OC": "CO2",
         }
     for miss in missing_keys:
-        print(miss)
-        print([aermiss for aermiss, value in aerosols.items() if value == miss][0])
         if "BC" not in missing_keys:
             aerosols[miss] = "BC"
             for aermiss, value in aerosols.items():
@@ -72,7 +70,6 @@ def aerosol_priority_mapping(
             for aermiss, value in aerosols.items():
                 if value == miss:
                     aerosols[aermiss] = "SO2"
-        print(aerosols)
     if bc_oc_to_co2:
         carbon_aerosols = ["BC", "OC", "BMB_AEROS_BC", "BMB_AEROS_OC"]
         for carbon_aerosol in carbon_aerosols:
@@ -325,7 +322,6 @@ class ScmEngineForPatternScaling:
                 co2_name = exp
                 forcing[exp] = forcing_total["Total_forcing"]
             if exp.split("x")[0].upper() == "SUL":
-                print("I should be here")
                 comps[i] = "SO2"
         aerosol_mapping = aerosol_priority_mapping(comps)
         for comp, forc_series in forcing_total.items():
@@ -333,7 +329,9 @@ class ScmEngineForPatternScaling:
                 forcing[exps[comps.index(comp)]] = (
                     forcing[exps[comps.index(comp)]] + forc_series
                 )
-                forcing[co2_name] = forcing[co2_name] - forc_series
+                forcing[co2_name] = (  # pylint: disable=possibly-used-before-assignment
+                    forcing[co2_name] - forc_series
+                )
             elif comp in aerosol_mapping:
                 forcing[exps[comps.index(aerosol_mapping[comp])]] = (
                     forcing[exps[comps.index(aerosol_mapping[comp])]] + forc_series

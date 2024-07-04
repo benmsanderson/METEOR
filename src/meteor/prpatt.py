@@ -341,13 +341,9 @@ def proj_gm(tauvec, gmanom, fcg_aer):
         pd.Timedelta(gmanom["time"][0].values - fcg_aer["time"][0].values)
         / pd.Timedelta("365.2425 days")
     )
-    print(timediff)
     timvec = np.apply_along_axis(
         lambda m: np.convolve(m, fcg_aer.diff("time"), mode="full"), axis=1, arr=pmat
     )[:, timediff : len(fcg_aer) + timediff]
-    print(timvec.shape)
-    print(len(gmanom["time"]))
-    print(gmanom.shape)
     projvec = np.dot(
         np.dot(gmanom[:], pinv(timvec[:, : len(gmanom["time"])])),
         timvec[:, : len(gmanom["time"])],
@@ -630,8 +626,6 @@ def get_timescales(anomaly_data, n_modes):
 
     aopt = fit_timescales(anomaly_data, a0)
     pattern = {}
-    print(aopt)
-    print(aopt.params)
     # sys.exit(4)
     u_np = make_amat(aopt.params, len(anomaly_data.time))
     uxr = xr.DataArray(
@@ -726,7 +720,7 @@ def get_timescales_from_anomaly(residual_anom, fcg_aer, n_modes=2):
     # convolve the aerosol forcing difference timeseries with the timeseries
     timvec = np.apply_along_axis(
         lambda m: np.convolve(m, fcg_aer.diff("time"), mode="full"), axis=1, arr=pmat
-    )[:, 100 : len(fcg_aer) + 100]
+    )[:, : len(fcg_aer)]
     # invert time convolution of the aerosol-pulse response matrix
     # project the time inverse matrix onto the aerosol anomaly map,
     # and convert to xarray to get the spatial patterns associated with each decay mode

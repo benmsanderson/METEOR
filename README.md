@@ -30,6 +30,8 @@ make virtual-environment
 The notebooks folder provides simple working examples to run the model within a Jupyter environment, and plot example output.  Installation instructions for installing Jupyterlab can be found at https://jupyter.org/install
 <code>METEOR_single_model_pattern_example.ipynb</code> produces a single pattern using CanESM2 data for the base and co2x2 experiments in PDRMIP, using input data text files stored in the <code>tests/test-data</code> folder
 <code>CMIP6_test.ipynb</code> provides demonstration of the cmip6_meteor_data_getter functionality to get data as xarrays directly from the CMIP6 zarrstore to use in pattern making and predictions. Currently it also demonstrates a couple of approaches to modelling aerosol forcing from residuals.
+<code>CMIP6_demo_with_residual.ipynb</code> demonstrates how to levarage the inbuilt aerosol forcing from residuals using the cmip6_meteor_data_getter functionality to get data in a minimal way.
+
 
 ## scripts
 This folder contains example scripts and an example notebook, which might not work out of the box, but require data. 
@@ -73,7 +75,7 @@ git commit -m "A small message to describe the changes"
 git push
 ```
 
-(The last one is to push the changes to the github version. The first time youi do this on a new branch you will need to set where to push to, but how to do that will be suggested when you just do git push)
+(The last one is to push the changes to the github version. The first time you do this on a new branch you will need to set where to push to, but how to do that will be suggested when you just do git push)
 * To get new changes that have happened on the main branch is always good before you commit. To do so do:
 ```
 git checkout main

@@ -35,13 +35,13 @@ The notebooks folder provides simple working examples to run the model within a 
 
 ## scripts
 This folder contains example scripts and an example notebook, which might not work out of the box, but require data. 
-<code>test_install.py<code> is a test installation script that should work
-<code>test_cmip6_read_indata.py<code> demonstrates the cmip6_meteor_data_getter functionality only to make plots of cmip6 input data for a comprehensive list of models. Depending on the specs on your laptop you may
+<code>test_install.py</code> is a test installation script that should work
+<code>test_cmip6_read_indata.py</code> demonstrates the cmip6_meteor_data_getter functionality only to make plots of cmip6 input data for a comprehensive list of models. Depending on the specs on your laptop you may
 run into memory issues for some of the higher resolution models, but otherwise it should work.
-<code>make_pattern_4xco2_plots.py<code> is a script demonstrating pattern generation from piControl and abrupt-4xco2 experiments using the cmip6datagetter for inputs, should work anywhere.
-<code>make_cmip6_test_plots.py<code> is a similar script, but used for testing, so might not be a good one to look at for a random user.
-<code>make_noresm_test.py<code> is a more comprehensive test script which relays on locally available data, which you would need to download if not run on cicero's internal servers.
-<code>METEOR_multi_model_pattern_example.ipynb<code> is a notebook which similarly relays on locally available data and which produces patterns and plots for four models (CanESM2, GISS-E2-R, NorESM1 and MIROC5) and three different PDRMIP experiments (base, co2x2 and sulx5).
+<code>make_pattern_4xco2_plots.py</code> is a script demonstrating pattern generation from piControl and abrupt-4xco2 experiments using the cmip6datagetter for inputs, should work anywhere.
+<code>make_cmip6_test_plots.py</code> is a similar script, but used for testing, so might not be a good one to look at for a random user.
+<code>make_noresm_test.py</code> is a more comprehensive test script which relays on locally available data, which you would need to download if not run on cicero's internal servers.
+<code>METEOR_multi_model_pattern_example.ipynb</code> is a notebook which similarly relays on locally available data and which produces patterns and plots for four models (CanESM2, GISS-E2-R, NorESM1 and MIROC5) and three different PDRMIP experiments (base, co2x2 and sulx5).
 
 ## Development
 * To start developing make sure you have a github account and that you are part of the ciceroOslo team.

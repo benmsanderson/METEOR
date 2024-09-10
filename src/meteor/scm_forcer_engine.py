@@ -13,7 +13,9 @@ import pandas as pd
 from ciceroscm import concentrations_emissions_handler, input_handler
 
 
-def aerosol_priority_mapping(comps):
+def aerosol_priority_mapping(
+    comps, bc_oc_to_co2=True
+):  # pylint: disable=too-many-branches
     """
     Produce aerosol mapping
 
@@ -21,19 +23,31 @@ def aerosol_priority_mapping(comps):
     ----------
     comps : list
             List of the components that have forcing experiments
+    bc_oc_to_co2 : bool
+        Whether to model bc and oc as CO2 if experiments for them
+        specifically are not available. Default for this is true
+        assuming that CO2 timescales are more appropriate than
+        SO2 in modelling them, but can easily be set to False to
+        invoce the opposite behaviour
 
     Returns
     -------
     dict
         Where aerosol components that don't have direct mappings
         from the forcing experiments are mapped to what component
-        there forcings should be taken from
+        their forcings should be taken from
     """
-    aerosols = {"SO4_IND": "SO2", "BMB_AEROS_BC": "BC", "BMB_AEROS_OC": "OC"}
+    aerosols = {
+        "SO4_IND": "SO2",
+        "SO4_DIR": "SO2",
+        "BMB_AEROS_BC": "BC",
+        "BMB_AEROS_OC": "OC",
+    }
     missing_keys = list(set(aerosols.values()) - set(comps))
     if len(missing_keys) == 3:
         return {
             "SO4_IND": "CO2",
+            "SO4_DIR": "CO2",
             "BMB_AEROS_BC": "CO2",
             "BMB_AEROS_OC": "CO2",
             "SO2": "CO2",
@@ -43,19 +57,23 @@ def aerosol_priority_mapping(comps):
     for miss in missing_keys:
         if "BC" not in missing_keys:
             aerosols[miss] = "BC"
-            aerosols[
-                [aermiss for aermiss, value in aerosols.items() if value == miss][0]
-            ] = "BC"
+            for aermiss, value in aerosols.items():
+                if value == miss:
+                    aerosols[aermiss] = "BC"
         elif "OC" not in missing_keys:
             aerosols[miss] = "OC"
-            aerosols[
-                [aermiss for aermiss, value in aerosols.items() if value == miss][0]
-            ] = "OC"
+            for aermiss, value in aerosols.items():
+                if value == miss:
+                    aerosols[aermiss] = "OC"
         else:
             aerosols[miss] = "SO2"
-            aerosols[
-                [aermiss for aermiss, value in aerosols.items() if value == miss][0]
-            ] = "SO2"
+            for aermiss, value in aerosols.items():
+                if value == miss:
+                    aerosols[aermiss] = "SO2"
+    if bc_oc_to_co2:
+        carbon_aerosols = ["BC", "OC", "BMB_AEROS_BC", "BMB_AEROS_OC"]
+        for carbon_aerosol in carbon_aerosols:
+            aerosols[carbon_aerosol] = "CO2"
     return aerosols
 
 
@@ -238,12 +256,15 @@ class ScmEngineForPatternScaling:
         for i, exp in enumerate(exps):
             run_dict_exp = run_dict.copy()
             if exp == "base":
-                scaling[i] = 0
                 continue
             species = exp.split("x")[0].upper()
             if species == "SUL":
                 species = "SO2"
-            multiplicator = int(exp.split("x")[1])
+            multiplicator = exp.split("x")[1]
+            if multiplicator == "anom":
+                scaling[i] = 1
+                continue
+            multiplicator = int(multiplicator)
             em_here = self.cfg.emissions_data.copy()
             conc_here = self.cfg.concentrations_data.copy()
 
@@ -295,25 +316,23 @@ class ScmEngineForPatternScaling:
         forcing_total = run_single_experiment(asdict(self.cfg), self.input_h)
         forcing = {}
         comps = [exp.split("x")[0].upper() for exp in exps]
-        aerosol_mapping = aerosol_priority_mapping(comps)
         for i, exp in enumerate(exps):
             forcing[exp] = np.zeros(len(forcing_total["Total_forcing"]))
             if exp.split("x")[0].upper() == "CO2":
                 co2_name = exp
                 forcing[exp] = forcing_total["Total_forcing"]
-            if exp.split("c")[0].upper() == "SUL":
+            if exp.split("x")[0].upper() == "SUL":
                 comps[i] = "SO2"
-
+        aerosol_mapping = aerosol_priority_mapping(comps)
         for comp, forc_series in forcing_total.items():
-            print(comp)
             if comp in comps:
-                print("incomp")
                 forcing[exps[comps.index(comp)]] = (
                     forcing[exps[comps.index(comp)]] + forc_series
                 )
-                forcing[co2_name] = forcing[co2_name] - forc_series
+                forcing[co2_name] = (  # pylint: disable=possibly-used-before-assignment
+                    forcing[co2_name] - forc_series
+                )
             elif comp in aerosol_mapping:
-                print("inaer")
                 forcing[exps[comps.index(aerosol_mapping[comp])]] = (
                     forcing[exps[comps.index(aerosol_mapping[comp])]] + forc_series
                 )

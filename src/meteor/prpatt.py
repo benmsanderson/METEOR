@@ -2,12 +2,18 @@
 PRPATT
 """
 
+import logging
+
 import lmfit
 import numpy as np
+import pandas as pd
 import xarray as xr
 from scipy.linalg import pinv
+from scipy.optimize import minimize
 
 # This is a library of functions to provide the backend to the pulse-response logic in METEOR
+
+LOGGER = logging.getLogger(__name__)
 
 
 def make_anom(ds_exp, ds_cnt):
@@ -243,7 +249,6 @@ def fit_timescales(X, a0):
         lambda x: np.square(ts - expfun(np.arange(0, len(ts)), x)),
         fit_params,
     )
-
     return out
 
 
@@ -256,7 +261,7 @@ def make_amat(pars, nt):
     ----------
     pars: lmfit.parameter.Parameters
           Timescale parameters from keys t0, s0, t1, s1 etc with timescales as
-          and amplitudes as values
+          t0, t1 etc and amplitudes s0, s1 etc...
     nt : int
          Number of timesteps
 
@@ -273,6 +278,103 @@ def make_amat(pars, nt):
     for i in np.arange(na):
         amat[:, i] = expotas(t, vals["s" + str(i)], vals["t" + str(i)])
     return amat
+
+
+def make_pmat(tauvec, nt):
+    """
+    Make a matrix of timesteps as columns and exponential
+    decays as rows
+
+    Parameters
+    ----------
+    nt : int
+         Number of timesteps
+    tauvec : np.ndarray
+        Vector of timescales
+
+    Returns
+    -------
+    np.ndarray
+         Matrix with the exponential decay value at the nt timesteps
+        decays along each column for each exponential decay row
+    """
+    # TODO: Combine this with make_amat
+    out = np.zeros((len(tauvec), nt))
+    for i, t in enumerate(tauvec):
+        out[i, :] = expotas(np.arange(nt), 1, t)
+    return out
+
+
+def proj_gm(tauvec, gmanom, fcg_aer):
+    """
+    Make projection of the global mean anomaly onto timevectors of
+    the exponential responses convolved with the derivative of the
+    aerosol forcing timeseries
+
+    Leveraging the make_pmat to make a matix of exponential responses
+    for the tauvec and convolving that with the derivative of the
+    aerosol forcing, we the get a timevector for the forcing decay (T).
+    We the project that onto the global mean anomaly of the time series
+    (G) as T^-1 G T
+
+    Parameters
+    ----------
+    tauvec : np.ndarray
+        Vector of timescales
+    gmanom : xarray.DataArray
+        Global mean of residual between result from other forcers
+        and input data
+    fcg_aer : xarray.DataArray
+        Timeseries of aerosol forcing
+
+    Returns
+    -------
+    np.ndarray
+        Projection of the global mean anomaly onto timevectors of
+        the exponential responses convolved with the derivative
+        of the aerosol forcing timeseries
+    """
+    # TODO: 500 or len(gmanom['time'])? Think 500 is actually alright possibly max
+    # TODO: Timediff now assumes Gregorian calendar, maybe allow for others?
+    pmat = make_pmat(tauvec, 500)
+    timediff = round(
+        pd.Timedelta(gmanom["time"][0].values - fcg_aer["time"][0].values)
+        / pd.Timedelta("365.2425 days")
+    )
+    timvec = np.apply_along_axis(
+        lambda m: np.convolve(m, fcg_aer.diff("time"), mode="full"), axis=1, arr=pmat
+    )[:, timediff : len(fcg_aer) + timediff]
+    projvec = np.dot(
+        np.dot(gmanom[:], pinv(timvec[:, : len(gmanom["time"])])),
+        timvec[:, : len(gmanom["time"])],
+    )
+    return projvec
+
+
+def rmse_gm(tauvec, gmanom, fcg_aer):
+    """
+    Calculate root mean square error between projection of
+    global mean time series as described above and global
+    mean timeseries
+
+    Parameters
+    ----------
+    tauvec : np.ndarray
+        Vector of timescales
+    gmanom : xarray.DataArray
+        Global mean of residual between result from other forcers
+        and input data
+    fcg_aer : xarray.DataArray
+        Timeseries of aerosol forcing
+
+    Returns
+    -------
+    float
+        Root mean square error
+    """
+    projvec = proj_gm(tauvec, gmanom, fcg_aer)
+    err = projvec - gmanom
+    return np.sum(err**2)
 
 
 def residual(pars, modewgt, data):
@@ -556,6 +658,90 @@ def get_timescales(anomaly_data, n_modes):
     pattern["v"] = bx
     # return everything
     return (aopt, pattern)
+
+
+def get_timescales_from_anomaly(residual_anom, fcg_aer, n_modes=2):
+    """
+    Calculate optimised parameters by minimising the residual
+    between the output of pmodel and the step function PC timeseries
+    represented in anomaly_data, given initial guesses on the timescales
+    present in the ouput (tmscl_0) and the number of modes retained
+    in the PCA (n_modes)
+
+
+    Find optimised model parameters given model anomaly matrix from
+    step function forcing experiment
+
+    Parameters
+    ----------
+    residual_anom : xarray.DataArray
+        Data array with the residual between the experiment
+        predicted from abrupt change experiments and anomaly
+        experiment. Assumed to have time as first dimension
+    fcg_aer : np.ndarray
+        Timeseries of aerosol forcing
+    n_modes : Number of modes to fit
+
+    Returns
+    -------
+    list
+        Elements are: out - the result of the lmfit fitting,
+        pattern - a dictionary containing the pattern in terms of
+        the temporal part, u, which has a timeseries per mode, and
+        a spatial part, v, which has a spatial pattern for each model
+    """
+    if n_modes != 2:
+        LOGGER.warning(
+            "n_modes different from 2 is currently not supported for residual"
+        )
+        n_modes = 2
+    nt = len(residual_anom.time)
+    pattern = {}
+    gmanom = global_mean(residual_anom)
+    # TODO: Are all amplitudes = 1 a valid assumption?
+    # TODO: Modify this to fit to nmodes different from 2?
+    bounds = [(1, 10), (10, 100)]
+    opt = minimize(
+        rmse_gm, [5, 50], args=(gmanom, fcg_aer), bounds=(bounds[0], bounds[1])
+    )
+    params = lmfit.Parameters()
+
+    for i in range(n_modes):
+        params.add(f"t{i}", value=opt.x[i], min=bounds[i][0], max=bounds[i][1])
+        params.add(f"s{i}", value=1, min=0.9, max=1.1)
+
+    # make exponential decay timeseries with the optimized time constants
+    # TODO: Check: nt here used to be 500, but I think this is more correct
+    pmat = make_pmat(opt.x, nt)
+
+    uxr = xr.DataArray(
+        data=pmat.T,
+        dims=["time", "mode"],
+        coords={
+            "time": (["time"], residual_anom.time.data),
+            "mode": (["mode"], np.arange(n_modes)),
+        },
+    )
+    pattern["u"] = uxr
+    # convolve the aerosol forcing difference timeseries with the timeseries
+    timvec = np.apply_along_axis(
+        lambda m: np.convolve(m, fcg_aer.diff("time"), mode="full"), axis=1, arr=pmat
+    )[:, : len(fcg_aer)]
+    # invert time convolution of the aerosol-pulse response matrix
+    # project the time inverse matrix onto the aerosol anomaly map,
+    # and convert to xarray to get the spatial patterns associated with each decay mode
+    tmp = np.tensordot(pinv(timvec[:, :nt]), residual_anom[:, :, :], (0, 0))
+    bx = xr.DataArray(
+        data=tmp,
+        dims=["mode", "lat", "lon"],
+        coords={
+            "lat": (["lat"], residual_anom.lat.data),
+            "lon": (["lon"], residual_anom.lon.data),
+            "mode": (["mode"], np.arange(n_modes)),
+        },
+    )
+    pattern["v"] = bx
+    return (params, pattern)
 
 
 def recon(pattern):

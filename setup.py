@@ -28,7 +28,7 @@ REQUIREMENTS = [
     "gcsfs",
     "eofs",
     "lmfit",
-    "ciceroscm",
+    "ciceroscm>=1.1.2",
 ]
 
 REQUIREMENTS_NOTEBOOKS = [

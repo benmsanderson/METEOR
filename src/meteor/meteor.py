@@ -98,6 +98,7 @@ class MeteorPatternScaling:
         exp_list,
         tmscl=None,
         from_file=True,
+        ssp_input=None,
     ):  # pylint: disable=too-many-arguments
         """
         Initialise Pattern Scaling object
@@ -131,6 +132,8 @@ class MeteorPatternScaling:
         if tmscl is None:
             tmscl = [2, 50]
         self.pattern_dict = self._make_pattern_dict()
+        if "xanom" in "-".join(exp_list):
+            self._add_patterns_for_residual_exp(ssp_input)
         self.name = name
 
     def _make_pattern_dict(self):
@@ -153,6 +156,8 @@ class MeteorPatternScaling:
             pattern_dict[exp] = {}
             for fld, trnc in self.patternflds.items():
                 pattern_dict[exp][fld] = {}
+                if exp.split("x") == "anom":
+                    continue
                 # The :100? Flexible?
                 # anomaly_data is the time x lat x lon data for variable fld and expt j
 
@@ -163,10 +168,63 @@ class MeteorPatternScaling:
                     # pattern_full is the pattern of impulse response timeseries and spatial patterns per mode
                     (out, pattern_full) = prpatt.get_timescales(anomaly_data, trnc)
                     pattern_dict[exp][fld]["pattern_full"] = pattern_full
-                    pattern_dict[exp][fld]["outp"] = out
+                    pattern_dict[exp][fld]["outp"] = out.params
                 else:  # pragma: no cover
                     pattern_dict[exp][fld]["pattern_full"] = np.nan
         return pattern_dict
+
+    def _add_patterns_for_residual_exp(
+        self, ssp_input
+    ):  # pylint: disable=too-many-locals
+        """
+        Add patterns for an experiment predicted from residual
+        """
+        anom_exps = [exp for exp in self.exp_list if "xanom" in exp]
+        if len(anom_exps) != 1:
+            LOGGER.error(
+                "Adding a residual pattern can only be done for a MeteorPatternScaling instance with exactly one xanom experiment"
+            )
+            raise RuntimeError(
+                "MeteorPatternScaling objects can only handle a single xanom experiment"
+            )
+        exp = anom_exps[0]
+        exp_index = self.exp_list.index(exp)
+        if ssp_input is None:
+            ssp_input = {
+                "emstart": 1850,
+                "nystart": 1750,
+                "nyend": 2100,
+                "conc_run": False,
+            }
+        elif "nystart" not in ssp_input:
+            ssp_input["nystart"] = 1750
+        sefps = scm_forcer_engine.ScmEngineForPatternScaling(ssp_input)
+        start_index = ssp_input["emstart"] - ssp_input["nystart"]
+        em_len = ssp_input["nyend"] - ssp_input["emstart"] + 1
+        forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
+        forcing_of_residual = xr.DataArray(
+            data=forcing_series[exp][start_index:].copy(),
+            coords={"time": np.arange(len(forcing_series[exp][start_index:]))},
+        )
+        forcing_series[exp] = None
+        predicted_without = self._predict_combined_experiment_from_forcer_series(
+            forcing_series, self.patternflds.keys(), ssp_input["nystart"]
+        )  # [100:, :, :]
+        for fld in self.patternflds.keys():
+            predicted_without_fld = predicted_without[fld].isel(
+                time=slice(start_index, start_index + em_len)
+            )
+            predicted_without_fld = predicted_without_fld.assign_coords(
+                time=np.arange(em_len)
+            )
+            residual = (
+                self.dacanom[fld][exp_index, :em_len, :, :] - predicted_without_fld
+            )
+            (out, pattern_full) = prpatt.get_timescales_from_anomaly(
+                residual, forcing_of_residual
+            )
+            self.pattern_dict[exp][fld]["pattern_full"] = pattern_full
+            self.pattern_dict[exp][fld]["outp"] = out
 
     def predict_from_forcing_profile(
         self, forc_timeseries, fld, exp="co2x2", year_0=1850
@@ -195,7 +253,7 @@ class MeteorPatternScaling:
         """
         # Add something to account for the forcing strength of the experiment
         convolved_pca = prpatt.imodel_filter(
-            self.pattern_dict[exp][fld]["outp"].params,
+            self.pattern_dict[exp][fld]["outp"],
             forc_timeseries,
             forc_step=self.exp_forc_dict[exp],
             year_0=year_0,
@@ -244,14 +302,43 @@ class MeteorPatternScaling:
         }
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(cfg)
         forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
+        predicted = self._predict_combined_experiment_from_forcer_series(
+            forcing_series, flds, cfg["nystart"]
+        )
+        return predicted
+
+    def _predict_combined_experiment_from_forcer_series(
+        self, forcing_series, flds, nystart
+    ):
+        """
+        Predict the combined patterns for given flds for the given experiment split forcing series
+
+        Parameters
+        ----------
+        forcing series : dict
+                        Dictionary including the forcing time series
+                        per forcer experiment.
+        flds : list
+               Fields for which to calculate patterns
+        nystart : int
+                   Whether ex
+
+        Returns
+        -------
+        dict
+            keys are flds, values are predicted per fld combined patterns
+        """
         predicted = {}
+
         for exp in self.exp_list:
             if exp == "base":
+                continue
+            if forcing_series[exp] is None:
                 continue
             for fld in flds:
                 if fld not in predicted:
                     predicted[fld] = self.predict_from_forcing_profile(
-                        forcing_series[exp], fld, exp, year_0=cfg["nystart"]
+                        forcing_series[exp], fld, exp, year_0=nystart
                     )
                     predicted[fld]["time"] = pd.to_datetime(
                         predicted[fld]["time"], format="%Y"
@@ -259,9 +346,8 @@ class MeteorPatternScaling:
 
                 else:
                     tmp = self.predict_from_forcing_profile(
-                        forcing_series[exp], fld, exp, year_0=cfg["nystart"]
+                        forcing_series[exp], fld, exp, year_0=nystart
                     )
                     tmp["time"] = pd.to_datetime(tmp["time"], format="%Y")
                     predicted[fld] = predicted[fld] + tmp
-
         return predicted

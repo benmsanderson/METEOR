@@ -135,7 +135,7 @@ def make_xarray_with_correct_dims(fld_names, fld_values):
 
 
 def initialise_dataframe_and_models(
-    df_all1, flds, exps, mdl_skipmbrs=None
+    df_all1, flds, exps, mdl_skipmbrs=None, verbose=True
 ):  # pylint: disable=too-many-locals, too-many-branches
     """
     Intialise a dataframe with complete data for the first full data ensemble
@@ -175,42 +175,38 @@ def initialise_dataframe_and_models(
         df_all.append(tmp)
 
     mdls = []
+
     n = 0
     combinations = len(flds) * len(exps)
     for mdl in mdls1:
+      
         members = {}
         # Test that one ensemble member has all data:
         sufficient_data = False
         for i in range(len(exps)):
             # find first variable for expt/model
             for j in range(len(flds)):
+                ii=exps.index('historical')
+                hist_tmp = df_all1[ii][j].query("source_id=='" + mdl + "' & experiment_id == 'historical'")
+                hmb = hist_tmp.member_id.unique()
                 tmp = df_all1[i][j].query("source_id=='" + mdl + "'")
                 mmbs = tmp.member_id.unique()
-                for mmb in mmbs:
-                    if mmb in members:
-                        members[mmb] = members[mmb] + 1
+                if len(mmbs)>0 and len(hmb)>0:
+                    if hmb[0] in mmbs:
+                        mmb = hmb[0]
                     else:
-                        members[mmb] = 1
-        for member, value in members.items():
-            if mdl in mdl_skipmbrs:
-                if member in mdl_skipmbrs[mdl]:
-                    continue
-            if value == combinations:
-                sufficient_data = True
-                mmb = member
-                break
-        # is there at least 1 run per experiment,with all fields?
-        if sufficient_data:
-            # point to the entry for 1st run, first variable for each expt
-            for i in range(len(exps)):
-                for j in range(len(flds)):
+                        mmb = mmbs[0]
                     tt = df_all1[i][j].query(
-                        f"source_id=='{mdl}' & table_id == 'Amon' and member_id=='{mmb}'"
-                    )
+                            f"source_id=='{mdl}' & member_id=='{mmb}'"
+                        )
                     df_all[i][j].loc[n] = tt.values[0]
+                else:
+                    mmb=-1
+                    df_all[i][j].loc[n] = np.nan
             # add model to final list
-            mdls.append(mdl)
-            n = n + 1
+        mdls.append(mdl)
+        n = n + 1
+
     return df_all, mdls
 
 

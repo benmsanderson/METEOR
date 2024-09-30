@@ -177,6 +177,7 @@ def initialise_dataframe_and_models(
 
     mdls = []
 
+    n = 0
     for mdl in mdls1:
 
         # Test that one ensemble member has all data:
@@ -212,6 +213,7 @@ def initialise_dataframe_and_models(
 
         if sufficient_data:
             mdls.append(mdl)
+            n = n + 1
             #print(f"Model {mdl} has full data")
         else:
             0

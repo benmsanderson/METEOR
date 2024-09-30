@@ -187,9 +187,12 @@ def initialise_dataframe_and_models(
         for i in range(len(exps)):
             # find first variable for expt/model
             for j in range(len(flds)):
-                ii=exps.index('historical')
-                hist_tmp = df_all1[ii][j].query("source_id=='" + mdl + "' & experiment_id == 'historical'")
-                hmb = hist_tmp.member_id.unique()
+                if 'historical' in exps:
+                    ii=exps.index('historical')
+                    hist_tmp = df_all1[ii][j].query("source_id=='" + mdl + "' & experiment_id == 'historical'")
+                    hmb = hist_tmp.member_id.unique()
+                else:
+                    hmb = []
                 tmp = df_all1[i][j].query("source_id=='" + mdl + "'")
                 mmbs = tmp.member_id.unique()
                 if len(mmbs)>0 and len(hmb)>0:

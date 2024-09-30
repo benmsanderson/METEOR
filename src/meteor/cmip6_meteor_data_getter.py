@@ -12,7 +12,7 @@ cmip6_to_meteor_exp_remapper = {
     "co2x4": "abrupt-4xCO2",
     "co2x8": "abrupt-4xCO2",
     "co2x16": "abrupt-4xCO2",
-    "1pc": "1pctCO2"
+    "1pc": "1pctCO2",
 }
 
 
@@ -180,35 +180,35 @@ def initialise_dataframe_and_models(
     n = 0
     combinations = len(flds) * len(exps)
     for mdl in mdls1:
-      
+
         members = {}
         # Test that one ensemble member has all data:
         sufficient_data = True
         for i in range(len(exps)):
             # find first variable for expt/model
             for j in range(len(flds)):
-                if 'historical' in exps:
-                    ii=exps.index('historical')
-                    hist_tmp = df_all1[ii][j].query("source_id=='" + mdl + "' & experiment_id == 'historical'")
+                if "historical" in exps:
+                    ii = exps.index("historical")
+                    hist_tmp = df_all1[ii][j].query(
+                        "source_id=='" + mdl + "' & experiment_id == 'historical'"
+                    )
                     hmb = hist_tmp.member_id.unique()
                 else:
                     hmb = []
                 tmp = df_all1[i][j].query("source_id=='" + mdl + "'")
                 mmbs = tmp.member_id.unique()
-                if len(mmbs)>0:
-                    if len(hmb)>0:
+                if len(mmbs) > 0:
+                    if len(hmb) > 0:
                         if hmb[0] in mmbs:
                             mmb = hmb[0]
                         else:
                             mmb = mmbs[0]
                     else:
                         mmb = mmbs[0]
-                    tt = df_all1[i][j].query(
-                            f"source_id=='{mdl}' & member_id=='{mmb}'"
-                        )
+                    tt = df_all1[i][j].query(f"source_id=='{mdl}' & member_id=='{mmb}'")
                     df_all[i][j].loc[n] = tt.values[0]
                 else:
-                    mmb=-1
+                    mmb = -1
                     df_all[i][j].loc[n] = None
                     sufficient_data = False
             # add model to final list
@@ -219,7 +219,6 @@ def initialise_dataframe_and_models(
             print(f"Model {mdl} has full data")
         else:
             print(f"Model {mdl} has insufficient data")
-
 
     return df_all, mdls
 
@@ -412,7 +411,7 @@ class Cmip6MeteorDataGetter:
             fld = None
         else:
             mapper = self.gcs.get_mapper(zstore_ref)
-            fld=xr.open_zarr(mapper, decode_times=False).sortby("time")
+            fld = xr.open_zarr(mapper, decode_times=False).sortby("time")
         return fld
 
     def get_single_var_mod_data_yearmean(self, exp, fld, model):
@@ -437,14 +436,14 @@ class Cmip6MeteorDataGetter:
         if ds is None:
             return None
         else:
-                var_yearly = year_mean_monthly_xarray(ds[fld])
-                var_yearly = var_yearly.assign_coords(
-                    {"time": np.arange(len(ds.time.values) // 12)}
-                ).rename({"time": "year"})
-                var_yearly = var_yearly.expand_dims(
-                    dim={"ens": np.array([1])}
-                )  # .assign_coords({'ens':1})
-                return var_yearly
+            var_yearly = year_mean_monthly_xarray(ds[fld])
+            var_yearly = var_yearly.assign_coords(
+                {"time": np.arange(len(ds.time.values) // 12)}
+            ).rename({"time": "year"})
+            var_yearly = var_yearly.expand_dims(
+                dim={"ens": np.array([1])}
+            )  # .assign_coords({'ens':1})
+            return var_yearly
 
     def make_meteor_training_data(self, exp, model, exp_mapper=None):
         """
@@ -509,9 +508,9 @@ class Cmip6MeteorDataGetter:
                     )
                     start_year = value["year"].values[-1] + 1
                     end_year_plus = start_year + next_dataset.sizes["year"]
-                    #print(next_dataset.sizes["year"])
-                    #print(len(range(start_year, end_year_plus)))
-                    #print(range(start_year, end_year_plus))
+                    # print(next_dataset.sizes["year"])
+                    # print(len(range(start_year, end_year_plus)))
+                    # print(range(start_year, end_year_plus))
                     next_dataset = next_dataset.assign_coords(
                         {"year": np.arange(start_year, end_year_plus)}
                     )

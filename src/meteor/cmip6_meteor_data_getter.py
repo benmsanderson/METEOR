@@ -195,9 +195,12 @@ def initialise_dataframe_and_models(
                     hmb = []
                 tmp = df_all1[i][j].query("source_id=='" + mdl + "'")
                 mmbs = tmp.member_id.unique()
-                if len(mmbs)>0 and len(hmb)>0:
-                    if hmb[0] in mmbs:
-                        mmb = hmb[0]
+                if len(mmbs)>0:
+                    if len(hmb)>0:
+                        if hmb[0] in mmbs:
+                            mmb = hmb[0]
+                        else:
+                            mmb = mmbs[0]
                     else:
                         mmb = mmbs[0]
                     tt = df_all1[i][j].query(

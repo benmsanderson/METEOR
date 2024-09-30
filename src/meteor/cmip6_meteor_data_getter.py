@@ -136,7 +136,7 @@ def make_xarray_with_correct_dims(fld_names, fld_values):
 
 
 def initialise_dataframe_and_models(
-    df_all1, flds, exps, mdl_skipmbrs=None, verbose=True
+    df_all1, flds, exps, mdl_skipmbrs=None
 ):  # pylint: disable=too-many-locals, too-many-branches
     """
     Intialise a dataframe with complete data for the first full data ensemble
@@ -196,13 +196,11 @@ def initialise_dataframe_and_models(
                 tmp = df_all1[i][j].query("source_id=='" + mdl + "'")
                 mmbs = tmp.member_id.unique()
                 if len(mmbs) > 0:
+                    mmb=mmbs[0]
                     if len(hmb) > 0:
                         if hmb[0] in mmbs:
                             mmb = hmb[0]
-                        else:
-                            mmb = mmbs[0]
-                    else:
-                        mmb = mmbs[0]
+
                     tt = df_all1[i][j].query(f"source_id=='{mdl}' & member_id=='{mmb}'")
                     df_all[i][j].loc[n] = tt.values[0]
                 else:
@@ -215,9 +213,6 @@ def initialise_dataframe_and_models(
             mdls.append(mdl)
             n = n + 1
             # print(f"Model {mdl} has full data")
-        else:
-            0
-            # print(f"Model {mdl} has insufficient data")
 
     return df_all, mdls
 
@@ -407,10 +402,9 @@ class Cmip6MeteorDataGetter:
 
         if zstore_ref is np.nan:
             raise KeyError(f"No zstore ref for {model}")
-            fld = None
-        else:
-            mapper = self.gcs.get_mapper(zstore_ref)
-            fld = xr.open_zarr(mapper, decode_times=False).sortby("time")
+        
+        mapper = self.gcs.get_mapper(zstore_ref)
+        fld = xr.open_zarr(mapper, decode_times=False).sortby("time")
         return fld
 
     def get_single_var_mod_data_yearmean(self, exp, fld, model):

@@ -214,10 +214,10 @@ def initialise_dataframe_and_models(
         if sufficient_data:
             mdls.append(mdl)
             n = n + 1
-            #print(f"Model {mdl} has full data")
+            # print(f"Model {mdl} has full data")
         else:
             0
-            #print(f"Model {mdl} has insufficient data")
+            # print(f"Model {mdl} has insufficient data")
 
     return df_all, mdls
 

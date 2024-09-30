@@ -192,14 +192,13 @@ def initialise_dataframe_and_models(
                     )
                     hmb = hist_tmp.member_id.unique()
                 else:
-                    hmb = []
+                    hmb = ["zzzzzzzz"]  # dummy value to avoid another if statement
                 tmp = df_all1[i][j].query("source_id=='" + mdl + "'")
                 mmbs = tmp.member_id.unique()
                 if len(mmbs) > 0:
-                    mmb=mmbs[0]
-                    if len(hmb) > 0:
-                        if hmb[0] in mmbs:
-                            mmb = hmb[0]
+                    mmb = mmbs[0]
+                    if hmb[0] in mmbs:
+                        mmb = hmb[0]
 
                     tt = df_all1[i][j].query(f"source_id=='{mdl}' & member_id=='{mmb}'")
                     df_all[i][j].loc[n] = tt.values[0]
@@ -402,7 +401,7 @@ class Cmip6MeteorDataGetter:
 
         if zstore_ref is np.nan:
             raise KeyError(f"No zstore ref for {model}")
-        
+
         mapper = self.gcs.get_mapper(zstore_ref)
         fld = xr.open_zarr(mapper, decode_times=False).sortby("time")
         return fld
@@ -428,15 +427,15 @@ class Cmip6MeteorDataGetter:
         ds = self.get_single_var_mod_data(exp, fld, model)
         if ds is None:
             return None
-        else:
-            var_yearly = year_mean_monthly_xarray(ds[fld])
-            var_yearly = var_yearly.assign_coords(
-                {"time": np.arange(len(ds.time.values) // 12)}
-            ).rename({"time": "year"})
-            var_yearly = var_yearly.expand_dims(
-                dim={"ens": np.array([1])}
-            )  # .assign_coords({'ens':1})
-            return var_yearly
+
+        var_yearly = year_mean_monthly_xarray(ds[fld])
+        var_yearly = var_yearly.assign_coords(
+            {"time": np.arange(len(ds.time.values) // 12)}
+        ).rename({"time": "year"})
+        var_yearly = var_yearly.expand_dims(
+            dim={"ens": np.array([1])}
+        )  # .assign_coords({'ens':1})
+        return var_yearly
 
     def make_meteor_training_data(self, exp, model, exp_mapper=None):
         """

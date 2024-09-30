@@ -178,7 +178,7 @@ def initialise_dataframe_and_models(
     mdls = []
 
     n = 0
-    for mdl in mdls1:
+    for mdl in mdls1:  # pylint: disable=too-many-nested-blocks
 
         # Test that one ensemble member has all data:
         sufficient_data = True
@@ -192,13 +192,14 @@ def initialise_dataframe_and_models(
                     )
                     hmb = hist_tmp.member_id.unique()
                 else:
-                    hmb = ["zzzzzzzz"]  # dummy value to avoid another if statement
+                    hmb = []
                 tmp = df_all1[i][j].query("source_id=='" + mdl + "'")
                 mmbs = tmp.member_id.unique()
                 if len(mmbs) > 0:
                     mmb = mmbs[0]
-                    if hmb[0] in mmbs:
-                        mmb = hmb[0]
+                    if len(hmb) > 0:
+                        if hmb[0] in mmbs:
+                            mmb = hmb[0]
 
                     tt = df_all1[i][j].query(f"source_id=='{mdl}' & member_id=='{mmb}'")
                     df_all[i][j].loc[n] = tt.values[0]

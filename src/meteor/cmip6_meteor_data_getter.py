@@ -12,6 +12,7 @@ cmip6_to_meteor_exp_remapper = {
     "co2x4": "abrupt-4xCO2",
     "co2x8": "abrupt-4xCO2",
     "co2x16": "abrupt-4xCO2",
+    "1pc": "1pctCO2"
 }
 
 
@@ -182,7 +183,7 @@ def initialise_dataframe_and_models(
       
         members = {}
         # Test that one ensemble member has all data:
-        sufficient_data = False
+        sufficient_data = True
         for i in range(len(exps)):
             # find first variable for expt/model
             for j in range(len(flds)):
@@ -202,10 +203,17 @@ def initialise_dataframe_and_models(
                     df_all[i][j].loc[n] = tt.values[0]
                 else:
                     mmb=-1
-                    df_all[i][j].loc[n] = np.nan
+                    df_all[i][j].loc[n] = None
+                    sufficient_data = False
             # add model to final list
-        mdls.append(mdl)
-        n = n + 1
+
+        if sufficient_data:
+            mdls.append(mdl)
+            n = n + 1
+            print(f"Model {mdl} has full data")
+        else:
+            print(f"Model {mdl} has insufficient data")
+
 
     return df_all, mdls
 
@@ -392,8 +400,14 @@ class Cmip6MeteorDataGetter:
             .loc[self.models.index(model)]
             .zstore
         )
-        mapper = self.gcs.get_mapper(zstore_ref)
-        return xr.open_zarr(mapper, decode_times=False).sortby("time")
+
+        if zstore_ref is np.nan:
+            raise KeyError(f"No zstore ref for {model}")
+            fld = None
+        else:
+            mapper = self.gcs.get_mapper(zstore_ref)
+            fld=xr.open_zarr(mapper, decode_times=False).sortby("time")
+        return fld
 
     def get_single_var_mod_data_yearmean(self, exp, fld, model):
         """
@@ -414,14 +428,17 @@ class Cmip6MeteorDataGetter:
             Data converted from monthly to yearly mean data and including and extra flat ens dimension
         """
         ds = self.get_single_var_mod_data(exp, fld, model)
-        var_yearly = year_mean_monthly_xarray(ds[fld])
-        var_yearly = var_yearly.assign_coords(
-            {"time": np.arange(len(ds.time.values) // 12)}
-        ).rename({"time": "year"})
-        var_yearly = var_yearly.expand_dims(
-            dim={"ens": np.array([1])}
-        )  # .assign_coords({'ens':1})
-        return var_yearly
+        if ds is None:
+            return None
+        else:
+                var_yearly = year_mean_monthly_xarray(ds[fld])
+                var_yearly = var_yearly.assign_coords(
+                    {"time": np.arange(len(ds.time.values) // 12)}
+                ).rename({"time": "year"})
+                var_yearly = var_yearly.expand_dims(
+                    dim={"ens": np.array([1])}
+                )  # .assign_coords({'ens':1})
+                return var_yearly
 
     def make_meteor_training_data(self, exp, model, exp_mapper=None):
         """
@@ -486,9 +503,9 @@ class Cmip6MeteorDataGetter:
                     )
                     start_year = value["year"].values[-1] + 1
                     end_year_plus = start_year + next_dataset.sizes["year"]
-                    print(next_dataset.sizes["year"])
-                    print(len(range(start_year, end_year_plus)))
-                    print(range(start_year, end_year_plus))
+                    #print(next_dataset.sizes["year"])
+                    #print(len(range(start_year, end_year_plus)))
+                    #print(range(start_year, end_year_plus))
                     next_dataset = next_dataset.assign_coords(
                         {"year": np.arange(start_year, end_year_plus)}
                     )

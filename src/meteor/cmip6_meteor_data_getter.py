@@ -177,11 +177,8 @@ def initialise_dataframe_and_models(
 
     mdls = []
 
-    n = 0
-    combinations = len(flds) * len(exps)
     for mdl in mdls1:
 
-        members = {}
         # Test that one ensemble member has all data:
         sufficient_data = True
         for i in range(len(exps)):
@@ -215,10 +212,10 @@ def initialise_dataframe_and_models(
 
         if sufficient_data:
             mdls.append(mdl)
-            n = n + 1
-            print(f"Model {mdl} has full data")
+            #print(f"Model {mdl} has full data")
         else:
-            print(f"Model {mdl} has insufficient data")
+            0
+            #print(f"Model {mdl} has insufficient data")
 
     return df_all, mdls
 

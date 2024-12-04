@@ -1,6 +1,5 @@
 ### METEOR
-Multivariate Emulation of Time-Emergent fOrced Response
-
+Multivariate Emulation of Time-Evolving and Overlapping Responses
 
 # Installation
 ```
@@ -28,20 +27,30 @@ make virtual-environment
 ```
 ## Jupyter Notebooks
 The notebooks folder provides simple working examples to run the model within a Jupyter environment, and plot example output.  Installation instructions for installing Jupyterlab can be found at https://jupyter.org/install
+
 <code>METEOR_single_model_pattern_example.ipynb</code> produces a single pattern using CanESM2 data for the base and co2x2 experiments in PDRMIP, using input data text files stored in the <code>tests/test-data</code> folder
-<code>CMIP6_test.ipynb</code> provides demonstration of the cmip6_meteor_data_getter functionality to get data as xarrays directly from the CMIP6 zarrstore to use in pattern making and predictions. Currently it also demonstrates a couple of approaches to modelling aerosol forcing from residuals.
+
 <code>CMIP6_demo_with_residual.ipynb</code> demonstrates how to levarage the inbuilt aerosol forcing from residuals using the cmip6_meteor_data_getter functionality to get data in a minimal way.
+
+<code>CMIP6_mmdemo_with_archiving.ipynb</code> provides demonstration of the cmip6_meteor_data_getter functionality to get data as xarrays directly from the CMIP6 zarrstore to use in pattern making and predictions, archiving inputs to save runtime on multiple runs. Finally these datasets are used to provide multimodel demonstration of the METEOR emulation with both CO2-based green house gas responses, and aerosol response from residuals.
+
 
 
 ## scripts
 This folder contains example scripts and an example notebook, which might not work out of the box, but require data. 
+
 <code>test_install.py</code> is a test installation script that should work
+
 <code>test_cmip6_read_indata.py</code> demonstrates the cmip6_meteor_data_getter functionality only to make plots of cmip6 input data for a comprehensive list of models. Depending on the specs on your laptop you may
 run into memory issues for some of the higher resolution models, but otherwise it should work.
+
 <code>make_pattern_4xco2_plots.py</code> is a script demonstrating pattern generation from piControl and abrupt-4xco2 experiments using the cmip6datagetter for inputs, should work anywhere.
+
 <code>make_cmip6_test_plots.py</code> is a similar script, but used for testing, so might not be a good one to look at for a random user.
+
 <code>make_noresm_test.py</code> is a more comprehensive test script which relays on locally available data, which you would need to download if not run on cicero's internal servers.
-<code>METEOR_multi_model_pattern_example.ipynb</code> is a notebook which similarly relays on locally available data and which produces patterns and plots for four models (CanESM2, GISS-E2-R, NorESM1 and MIROC5) and three different PDRMIP experiments (base, co2x2 and sulx5).
+
+<code>METEOR_multi_model_pattern_example.ipynb</code> is a notebook which similarly relys on locally available data and which produces patterns and plots for four models (CanESM2, GISS-E2-R, NorESM1 and MIROC5) and three different PDRMIP experiments (base, co2x2 and sulx5) again relying on data locally available where you run. Demonstrating aerosol forcing not from a residual, but from a direct aerosol forcing experiment.
 
 ## Development
 * To start developing make sure you have a github account and that you are part of the ciceroOslo team.
@@ -117,7 +126,8 @@ make virtual-environment
 
 After this you should be able to run the automatic tests
 `make test` will only run the tests
-`make checks` will run the tests and formatting tests
+`make checks` will run the tests and formatting checks
+`make format-hecks` will run formatting checks only
 
 Before your code branch can be merged into the main code, it has to pass all the tests
 (The makefile also has an option to run only the formatting checks)
@@ -125,4 +135,4 @@ Tests are located in tests in tests/test-data/ data for testing against fortran 
 When you develop new code, try to think about what can be done to test and validate that your code does what you expect it to do, and try to integrate such tests into the automatic testing scheme.
 
 ## General code flow
-`meteor.py` contains the main control module, `prpatt.py` is a library with functions to fit parameters to define synthetic PC timeseries to processes PDRMIP output, as well as functions to run convolve synthetic PCA with a user-defined forcing timeseries. `scm_forcer_engine.py` provides a wrapper to enable using the ciceroscm simple climate to estimate forcing strength from emissions. `meteor_plot_utils.py` provides some simple plotting functionality. `cmip6_meteor_data_getter.py` has functions to define and access CMIP6 data as xarrays from cloud storage, meaning you can use cmip6 data with meteor with out going through a huge download and data wrangling process before going ahead. This can also be leveraged on it's own to get cmip6 data to plot and explore.
+`meteor.py` contains the main control module, `prpatt.py` is a library with functions to fit parameters to define synthetic PC timeseries to processes PDRMIP output, as well as functions to convolve synthetic PCAs with user-defined forcing timeseries. `scm_forcer_engine.py` provides a wrapper to enable using the ciceroscm simple climate to estimate forcing strength from emissions. `meteor_plot_utils.py` provides some simple plotting functionality. `cmip6_meteor_data_getter.py` has functions to define and access CMIP6 data as xarrays from cloud storage, meaning you can use cmip6 data with meteor with out going through a huge download and data wrangling process before going ahead. This can also be leveraged on it's own to get cmip6 data to plot and explore.

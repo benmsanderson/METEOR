@@ -36,6 +36,7 @@ REQUIREMENTS_NOTEBOOKS = [
     "notebook",
     "seaborn",
     "ipykernel",
+    "cartopy"
 ]
 REQUIREMENTS_TESTS = [
     "codecov",

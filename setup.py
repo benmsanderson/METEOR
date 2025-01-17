@@ -31,13 +31,7 @@ REQUIREMENTS = [
     "ciceroscm>=1.1.2",
 ]
 
-REQUIREMENTS_NOTEBOOKS = [
-    "ipywidgets",
-    "notebook",
-    "seaborn",
-    "ipykernel",
-    "cartopy"
-]
+REQUIREMENTS_NOTEBOOKS = ["ipywidgets", "notebook", "seaborn", "ipykernel", "cartopy"]
 REQUIREMENTS_TESTS = [
     "codecov",
     "coverage",

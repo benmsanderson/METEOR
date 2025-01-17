@@ -700,9 +700,13 @@ def get_timescales_from_anomaly(residual_anom, fcg_aer, n_modes=2):
     gmanom = global_mean(residual_anom)
     # TODO: Are all amplitudes = 1 a valid assumption?
     # TODO: Modify this to fit to nmodes different from 2?
-    bounds = [(1, 10), (10, 100)]
+    # bounds = [(1, 10), (10, 100)]
+    bounds = [(0, 10 ** (mode_num)) for mode_num in range(n_modes)]
     opt = minimize(
-        rmse_gm, [5, 50], args=(gmanom, fcg_aer), bounds=(bounds[0], bounds[1])
+        rmse_gm,
+        [np.mean(bound) for bound in bounds],
+        args=(gmanom, fcg_aer),
+        bounds=bounds,
     )
     params = lmfit.Parameters()
 

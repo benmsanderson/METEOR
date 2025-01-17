@@ -96,10 +96,9 @@ class MeteorPatternScaling:
         patternflds,
         get_training_file_from_exp,
         exp_list,
-        tmscl=None,
         from_file=True,
         ssp_input=None,
-    ):  # pylint: disable=too-many-arguments
+    ):  # pylint: disable=too-many-arguments, too-many-positional-arguments
         """
         Initialise Pattern Scaling object
 
@@ -111,15 +110,12 @@ class MeteorPatternScaling:
                name of the model/dataset for that this patter belongs to
         patternflds : dict
                     keys are names of the varibles to be considered
-                    Values are truncation lengths for each field
+                    Values are number of timescales to fit
         get_training_file_from_exp : function
                     Function that defines how to get find the location
                     of the training data input file for a given experiment
         exp_list : dict
                    List with experiment names
-        tmscl : list
-                Intial guess for timescales to fit the pattern to if
-                None is sent, [2,50] will be used
         """
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(None)
         scaling = sefps.run_to_get_scaling(exp_list)
@@ -129,8 +125,6 @@ class MeteorPatternScaling:
         )
         self.exp_list = exp_list
         self.patternflds = patternflds
-        if tmscl is None:
-            tmscl = [2, 50]
         self.pattern_dict = self._make_pattern_dict()
         if "xanom" in "-".join(exp_list):
             self._add_patterns_for_residual_exp(ssp_input)

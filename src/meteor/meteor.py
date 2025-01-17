@@ -99,7 +99,7 @@ class MeteorPatternScaling:
         tmscl=None,
         from_file=True,
         ssp_input=None,
-    ):  # pylint: disable=too-many-arguments
+    ):  # pylint: disable=too-many-arguments, too-many-positional-arguments
         """
         Initialise Pattern Scaling object
 

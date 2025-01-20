@@ -204,7 +204,7 @@ class MeteorPatternScaling:
         predicted_without = self._predict_combined_experiment_from_forcer_series(
             forcing_series, self.patternflds.keys(), ssp_input["nystart"]
         )  # [100:, :, :]
-        for fld in self.patternflds.keys():
+        for fld, n_modes in self.patternflds.items():
             predicted_without_fld = predicted_without[fld].isel(
                 time=slice(start_index, start_index + em_len)
             )
@@ -215,7 +215,7 @@ class MeteorPatternScaling:
                 self.dacanom[fld][exp_index, :em_len, :, :] - predicted_without_fld
             )
             (out, pattern_full) = prpatt.get_timescales_from_anomaly(
-                residual, forcing_of_residual
+                residual, forcing_of_residual, n_modes=n_modes
             )
             self.pattern_dict[exp][fld]["pattern_full"] = pattern_full
             self.pattern_dict[exp][fld]["outp"] = out

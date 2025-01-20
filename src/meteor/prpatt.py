@@ -15,6 +15,8 @@ from scipy.optimize import minimize
 
 LOGGER = logging.getLogger(__name__)
 
+print("Test update 10")
+
 
 def make_anom(ds_exp, ds_cnt):
     """
@@ -313,8 +315,8 @@ def proj_gm(tauvec, gmanom, fcg_aer):
 
     Leveraging the make_pmat to make a matix of exponential responses
     for the tauvec and convolving that with the derivative of the
-    aerosol forcing, we the get a timevector for the forcing decay (T).
-    We the project that onto the global mean anomaly of the time series
+    aerosol forcing, we then get a timevector for the forcing decay (T).
+    We then project that onto the global mean anomaly of the time series
     (G) as T^-1 G T
 
     Parameters
@@ -690,19 +692,17 @@ def get_timescales_from_anomaly(residual_anom, fcg_aer, n_modes=2):
         the temporal part, u, which has a timeseries per mode, and
         a spatial part, v, which has a spatial pattern for each model
     """
-    if n_modes != 2:
-        LOGGER.warning(
-            "n_modes different from 2 is currently not supported for residual"
-        )
-        n_modes = 2
     nt = len(residual_anom.time)
     pattern = {}
     gmanom = global_mean(residual_anom)
     # TODO: Are all amplitudes = 1 a valid assumption?
-    # TODO: Modify this to fit to nmodes different from 2?
-    bounds = [(1, 10), (10, 100)]
+    bounds = [(0.1, 10 ** (mode_num + 2)) for mode_num in range(n_modes)]
     opt = minimize(
-        rmse_gm, [5, 50], args=(gmanom, fcg_aer), bounds=(bounds[0], bounds[1])
+        rmse_gm,
+        [np.mean(bound) for bound in bounds],
+        args=(gmanom, fcg_aer),
+        bounds=bounds,
+        method="Powell",
     )
     params = lmfit.Parameters()
 

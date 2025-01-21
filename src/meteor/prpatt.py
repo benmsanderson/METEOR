@@ -699,7 +699,7 @@ def get_timescales_from_anomaly(residual_anom, fcg_aer, n_modes=2):
     bounds = [(0.1, 10 ** (mode_num + 2)) for mode_num in range(n_modes)]
     opt = minimize(
         rmse_gm,
-        [np.mean(bound) for bound in bounds],
+        [10 ** (mode_num + 1) for mode_num in range(n_modes)],
         args=(gmanom, fcg_aer),
         bounds=bounds,
         method="Powell",

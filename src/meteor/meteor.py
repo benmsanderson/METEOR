@@ -117,6 +117,12 @@ class MeteorPatternScaling:
                     of the training data input file for a given experiment
         exp_list : dict
                    List with experiment names
+        anom_timescales : dict
+            Optional parameter
+            Like patternfields should have fields as values, and number
+            of timescales to fit from the anomaly experiments for that field
+            as values. If this parameter is not sent, the 1 timescale per field
+            will be assumed if anomaly experiments are included.
         """
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(None)
         scaling = sefps.run_to_get_scaling(exp_list)
@@ -231,7 +237,7 @@ class MeteorPatternScaling:
             self.pattern_dict[exp][fld]["outp"] = out
 
     def predict_from_forcing_profile(
-        self, forc_timeseries, fld, exp="co2x2", year_0=1850
+        self, forc_timeseries, fld, exp="co2x2", year_0=1850, return_patterns_per_mode=False
     ):
         """
         Make prediction from experiment and a forcing profile
@@ -255,16 +261,20 @@ class MeteorPatternScaling:
         !Todo: Add tests to check that variable and experiment are in the patterns
         patternfld and exp_lists
         """
-        # Add something to account for the forcing strength of the experiment
         convolved_pca = prpatt.imodel_filter(
             self.pattern_dict[exp][fld]["outp"],
             forc_timeseries,
             forc_step=self.exp_forc_dict[exp],
             year_0=year_0,
         )
-        predicted = prpatt.rmodel(
-            self.pattern_dict[exp][fld]["pattern_full"], convolved_pca
-        )
+        if not return_patterns_per_mode: 
+            predicted = prpatt.rmodel(
+                self.pattern_dict[exp][fld]["pattern_full"], convolved_pca
+            )
+        else:
+            predicted = prpatt.recon_separately(
+                self.pattern_dict[exp][fld]["pattern_full"], convolved_pca
+            )
         return predicted
 
     def predict_from_combined_experiment(
@@ -273,6 +283,7 @@ class MeteorPatternScaling:
         concentrations_data,
         flds,
         conc_run=False,
+        return_patterns_per_mode=False
     ):
         """
         Predict the combined patterns for given flds for the given emissions and concentrations
@@ -307,12 +318,12 @@ class MeteorPatternScaling:
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(cfg)
         forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
         predicted = self._predict_combined_experiment_from_forcer_series(
-            forcing_series, flds, cfg["nystart"]
+            forcing_series, flds, cfg["nystart"], return_patterns_per_mode = return_patterns_per_mode
         )
         return predicted
 
     def _predict_combined_experiment_from_forcer_series(
-        self, forcing_series, flds, nystart
+        self, forcing_series, flds, nystart, return_patterns_per_mode = False
     ):
         """
         Predict the combined patterns for given flds for the given experiment split forcing series
@@ -342,7 +353,7 @@ class MeteorPatternScaling:
             for fld in flds:
                 if fld not in predicted:
                     predicted[fld] = self.predict_from_forcing_profile(
-                        forcing_series[exp], fld, exp, year_0=nystart
+                        forcing_series[exp], fld, exp, year_0=nystart, return_patterns_per_mode = return_patterns_per_mode
                     )
                     predicted[fld]["time"] = pd.to_datetime(
                         predicted[fld]["time"], format="%Y"
@@ -350,7 +361,7 @@ class MeteorPatternScaling:
 
                 else:
                     tmp = self.predict_from_forcing_profile(
-                        forcing_series[exp], fld, exp, year_0=nystart
+                        forcing_series[exp], fld, exp, year_0=nystart, return_patterns_per_mode = return_patterns_per_mode
                     )
                     tmp["time"] = pd.to_datetime(tmp["time"], format="%Y")
                     predicted[fld] = predicted[fld] + tmp

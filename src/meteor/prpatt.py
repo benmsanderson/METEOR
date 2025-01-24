@@ -502,7 +502,10 @@ def make_params(ain):
         # for each timescale, we add a parameter for the decay constant - default t_i
         # at the moment, we allow LMFIT 1 order magnitude limits compared with the default
         fit_params.add(
-            "t" + str(i), value=ain[2 * i + 1], min=0, max=ain[2 * i + 1] * 10
+            "t" + str(i),
+            value=ain[2 * i + 1],
+            min=ain[2 * i + 1] / 5,
+            max=ain[2 * i + 1] * 2,
         )
 
         # add a parameter representing the coefficient for the exponential decay with timescale t_i (coeff can be any value)
@@ -620,7 +623,7 @@ def get_timescales(anomaly_data, n_modes):
     # our first guess for amplitude is just the mean of the 2d field
     ampguess = anomaly_data.mean("lat").mean("lon").mean("time")
     # our time guess is 1,10,100 etc years
-    tguess = 10 ** (np.arange(n_modes) + 1)
+    tguess = 5 * 10 ** (np.arange(n_modes))
     # initialise the initial guess vector
     a0 = np.zeros(n_modes * 2)
     for i, t in enumerate(tguess):
@@ -696,10 +699,10 @@ def get_timescales_from_anomaly(residual_anom, fcg_aer, n_modes=2):
     pattern = {}
     gmanom = global_mean(residual_anom)
     # TODO: Are all amplitudes = 1 a valid assumption?
-    bounds = [(0.1, 10 ** (mode_num + 2)) for mode_num in range(n_modes)]
+    bounds = [(10 ** (mode_num), 10 ** (mode_num + 1)) for mode_num in range(n_modes)]
     opt = minimize(
         rmse_gm,
-        [10 ** (mode_num + 1) for mode_num in range(n_modes)],
+        [5 * 10 ** (mode_num) for mode_num in range(n_modes)],
         args=(gmanom, fcg_aer),
         bounds=bounds,
         method="Powell",

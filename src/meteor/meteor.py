@@ -98,6 +98,7 @@ class MeteorPatternScaling:
         exp_list,
         from_file=True,
         ssp_input=None,
+        anom_timescales=None,
     ):  # pylint: disable=too-many-arguments, too-many-positional-arguments
         """
         Initialise Pattern Scaling object
@@ -126,6 +127,15 @@ class MeteorPatternScaling:
         self.exp_list = exp_list
         self.patternflds = patternflds
         self.pattern_dict = self._make_pattern_dict()
+        if anom_timescales is None or not isinstance(anom_timescales, dict):
+            anom_timescales = {}
+            for fld in patternflds:
+                anom_timescales[fld] = 1
+        else:
+            for fld in patternflds:
+                if fld not in anom_timescales:
+                    anom_timescales[fld] = 1
+        self.anom_timescales = anom_timescales
         if "xanom" in "-".join(exp_list):
             self._add_patterns_for_residual_exp(ssp_input)
         self.name = name
@@ -204,7 +214,7 @@ class MeteorPatternScaling:
         predicted_without = self._predict_combined_experiment_from_forcer_series(
             forcing_series, self.patternflds.keys(), ssp_input["nystart"]
         )  # [100:, :, :]
-        for fld, n_modes in self.patternflds.items():
+        for fld in self.patternflds:
             predicted_without_fld = predicted_without[fld].isel(
                 time=slice(start_index, start_index + em_len)
             )
@@ -215,7 +225,7 @@ class MeteorPatternScaling:
                 self.dacanom[fld][exp_index, :em_len, :, :] - predicted_without_fld
             )
             (out, pattern_full) = prpatt.get_timescales_from_anomaly(
-                residual, forcing_of_residual, n_modes=n_modes
+                residual, forcing_of_residual, n_modes=self.anom_timescales[fld]
             )
             self.pattern_dict[exp][fld]["pattern_full"] = pattern_full
             self.pattern_dict[exp][fld]["outp"] = out

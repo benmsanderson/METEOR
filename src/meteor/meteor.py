@@ -237,8 +237,13 @@ class MeteorPatternScaling:
             self.pattern_dict[exp][fld]["outp"] = out
 
     def predict_from_forcing_profile(
-        self, forc_timeseries, fld, exp="co2x2", year_0=1850, return_patterns_per_mode=False
-    ):
+        self,
+        forc_timeseries,
+        fld,
+        exp="co2x2",
+        year_0=1850,
+        return_patterns_per_mode=False,
+    ):  # pylint: disable=too-many-arguments, too-many-positional-arguments
         """
         Make prediction from experiment and a forcing profile
 
@@ -252,6 +257,9 @@ class MeteorPatternScaling:
             Experiment that defines the stepfunction response for the forcer in question
         year_0 : int
             Start year of forcing timeseries
+        return_patterns_per_mode : bool
+            Option to have predictions returned separately per mode. The predicted patterns
+            will then have a separate dimension for the modes.
 
         Returns
         -------
@@ -267,7 +275,7 @@ class MeteorPatternScaling:
             forc_step=self.exp_forc_dict[exp],
             year_0=year_0,
         )
-        if not return_patterns_per_mode: 
+        if not return_patterns_per_mode:
             predicted = prpatt.rmodel(
                 self.pattern_dict[exp][fld]["pattern_full"], convolved_pca
             )
@@ -283,8 +291,8 @@ class MeteorPatternScaling:
         concentrations_data,
         flds,
         conc_run=False,
-        return_patterns_per_mode=False
-    ):
+        return_patterns_per_mode=False,
+    ):  # pylint: disable=too-many-arguments, too-many-positional-arguments
         """
         Predict the combined patterns for given flds for the given emissions and concentrations
 
@@ -298,6 +306,9 @@ class MeteorPatternScaling:
                Fields for which to calculate patterns
         conc_run : Bool
                    Whether experiment should be a concentrations run
+        return_patterns_per_mode : bool
+            Option to have predictions returned separately per mode. The predicted patterns
+            will then have a separate dimension for the modes.
 
         Returns
         -------
@@ -317,13 +328,17 @@ class MeteorPatternScaling:
         }
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(cfg)
         forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
+
         predicted = self._predict_combined_experiment_from_forcer_series(
-            forcing_series, flds, cfg["nystart"], return_patterns_per_mode = return_patterns_per_mode
+            forcing_series,
+            flds,
+            cfg["nystart"],
+            return_patterns_per_mode=return_patterns_per_mode,
         )
         return predicted
 
     def _predict_combined_experiment_from_forcer_series(
-        self, forcing_series, flds, nystart, return_patterns_per_mode = False
+        self, forcing_series, flds, nystart, return_patterns_per_mode=False
     ):
         """
         Predict the combined patterns for given flds for the given experiment split forcing series
@@ -353,7 +368,11 @@ class MeteorPatternScaling:
             for fld in flds:
                 if fld not in predicted:
                     predicted[fld] = self.predict_from_forcing_profile(
-                        forcing_series[exp], fld, exp, year_0=nystart, return_patterns_per_mode = return_patterns_per_mode
+                        forcing_series[exp],
+                        fld,
+                        exp,
+                        year_0=nystart,
+                        return_patterns_per_mode=return_patterns_per_mode,
                     )
                     predicted[fld]["time"] = pd.to_datetime(
                         predicted[fld]["time"], format="%Y"
@@ -361,8 +380,15 @@ class MeteorPatternScaling:
 
                 else:
                     tmp = self.predict_from_forcing_profile(
-                        forcing_series[exp], fld, exp, year_0=nystart, return_patterns_per_mode = return_patterns_per_mode
+                        forcing_series[exp],
+                        fld,
+                        exp,
+                        year_0=nystart,
+                        return_patterns_per_mode=return_patterns_per_mode,
                     )
                     tmp["time"] = pd.to_datetime(tmp["time"], format="%Y")
-                    predicted[fld] = predicted[fld] + tmp
+                    if return_patterns_per_mode:
+                        predicted[fld] = xr.concat((predicted[fld], tmp), dim="mode")
+                    else:
+                        predicted[fld] = predicted[fld] + tmp
         return predicted

@@ -1,7 +1,7 @@
 """
 PRPATT
 """
-import sys
+
 import logging
 
 import lmfit
@@ -14,8 +14,6 @@ from scipy.optimize import minimize
 # This is a library of functions to provide the backend to the pulse-response logic in METEOR
 
 LOGGER = logging.getLogger(__name__)
-
-print("Test update 10")
 
 
 def make_anom(ds_exp, ds_cnt):
@@ -746,7 +744,8 @@ def get_timescales_from_anomaly(residual_anom, fcg_aer, n_modes=2):
     pattern["v"] = bx
     return (params, pattern)
 
-def recon_separately(pattern_full, pc_matrix): 
+
+def recon_separately(pattern_full, pc_matrix):
     """
     Reconstruct gridded, time evolving output from a user
     defined principal component timeseries and EOF patterns
@@ -769,18 +768,23 @@ def recon_separately(pattern_full, pc_matrix):
     pattern_synth = pattern_full.copy()
     # now replace the PC matrix 'u' with the user defined vlaue
     pattern_synth["u"] = pc_matrix
-    print(pattern_synth)
     # now call recon function to reconstruct the original data from the Xarray EOF dataset
-        # Define matrices based on dictionary input:
+    # Define matrices based on dictionary input:
     mode_timescales = pattern_synth["u"]  # size n_time by n_modes
     pattern_per_mode = pattern_synth["v"]  # size n_pixels by n_modes
     # number of modes
     n_modes = pattern_per_mode.shape[0]
     # reshape v1 into a 2d matrix
     pattern_2d = pattern_per_mode.values.reshape(n_modes, -1)
-    print(pattern_2d.shape)
 
-    recon_per_mode = np.zeros((n_modes, mode_timescales.shape[0],pattern_per_mode.shape[1], pattern_per_mode.shape[2]))
+    recon_per_mode = np.zeros(
+        (
+            n_modes,
+            mode_timescales.shape[0],
+            pattern_per_mode.shape[1],
+            pattern_per_mode.shape[2],
+        )
+    )
     for mode in range(n_modes):
         # compute reconstruceted field (unweighted) as dot product
         recon_per_mode[mode, :, :, :] = np.reshape(
@@ -794,7 +798,12 @@ def recon_separately(pattern_full, pc_matrix):
     # convert reconstructed field to xarray and return
     recon_xarray = xr.DataArray(
         recon_per_mode,
-        coords=(range(n_modes), mode_timescales.time, pattern_per_mode.lat, pattern_per_mode.lon),
+        coords=(
+            range(n_modes),
+            mode_timescales.time,
+            pattern_per_mode.lat,
+            pattern_per_mode.lon,
+        ),
         dims=("mode", "time", "lat", "lon"),
     )
     return recon_xarray

@@ -137,6 +137,20 @@ def test_sulfate_from_residual_functionality(test_data_dir):
         prpatt.global_mean(patterns["pr"])
     )
 
+    patterns_separate = canesm_anomsulf_pattern.predict_from_combined_experiment(
+        em_data, conc_data, ["pr", "tas"], return_patterns_per_mode=True
+    )
+
+    assert np.all(patterns_separate["tas"].shape == (3, 351, 64, 128))
+    assert np.all(patterns_separate["pr"].shape == (3, 351, 64, 128))
+
+    assert np.allclose(
+        np.sum(patterns_separate["tas"].values, axis=0), patterns["tas"].values
+    )
+    assert np.allclose(
+        np.sum(patterns_separate["pr"].values, axis=0), patterns["pr"].values
+    )
+
 
 def test_return_separate_per_mode_patterns(test_data_dir):
     canesm_basic_pattern = MeteorPatternScaling(
@@ -161,4 +175,18 @@ def test_return_separate_per_mode_patterns(test_data_dir):
     assert np.all(patterns["tas"].shape == (2, 351, 64, 128))
     assert np.all(patterns["pr"].shape == (3, 351, 64, 128))
 
+    patterns_full = canesm_basic_pattern.predict_from_combined_experiment(
+        em_data, conc_data, ["pr", "tas"], return_patterns_per_mode=False
+    )
+    assert np.all(patterns_full["tas"].shape == (351, 64, 128))
+    assert np.all(patterns_full["pr"].shape == (351, 64, 128))
+
+    assert np.allclose(
+        np.sum(patterns["tas"].values, axis=0), patterns_full["tas"].values
+    )
+    assert np.allclose(
+        np.sum(patterns["pr"].values, axis=0), patterns_full["pr"].values
+    )
+    # assert np.allclose(patterns["tas"])
+    # assert False
     # TODO: Test this with anomaly pattern

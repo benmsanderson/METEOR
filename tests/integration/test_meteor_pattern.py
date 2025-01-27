@@ -136,3 +136,57 @@ def test_sulfate_from_residual_functionality(test_data_dir):
     assert np.mean(prpatt.global_mean(patterns_ghg["pr"])) > np.mean(
         prpatt.global_mean(patterns["pr"])
     )
+
+    patterns_separate = canesm_anomsulf_pattern.predict_from_combined_experiment(
+        em_data, conc_data, ["pr", "tas"], return_patterns_per_mode=True
+    )
+
+    assert np.all(patterns_separate["tas"].shape == (3, 351, 64, 128))
+    assert np.all(patterns_separate["pr"].shape == (3, 351, 64, 128))
+
+    assert np.allclose(
+        np.sum(patterns_separate["tas"].values, axis=0), patterns["tas"].values
+    )
+    assert np.allclose(
+        np.sum(patterns_separate["pr"].values, axis=0), patterns["pr"].values
+    )
+
+
+def test_return_separate_per_mode_patterns(test_data_dir):
+    canesm_basic_pattern = MeteorPatternScaling(
+        "pdrmip-CanESM2-basic",
+        {"tas": 2, "pr": 3},
+        lambda exp: os.path.join(test_data_dir, f"pdrmip-{exp}_T42_ANN.nc"),
+        exp_list=["base", "co2x2"],
+    )
+    assert canesm_basic_pattern.name == "pdrmip-CanESM2-basic"
+    assert "base" in canesm_basic_pattern.pattern_dict
+    assert "tas" in canesm_basic_pattern.pattern_dict["co2x2"]
+    assert "outp" in canesm_basic_pattern.pattern_dict["co2x2"]["pr"]
+    conc_data = input_handler.read_inputfile(
+        os.path.join(test_data_dir, "rcp85_conc_RCMIP.txt")
+    )
+    ih = input_handler.InputHandler({})
+    em_data = ih.read_emissions(os.path.join(test_data_dir, "rcp85_em_RCMIP.txt"))
+
+    patterns = canesm_basic_pattern.predict_from_combined_experiment(
+        em_data, conc_data, ["pr", "tas"], return_patterns_per_mode=True
+    )
+    assert np.all(patterns["tas"].shape == (2, 351, 64, 128))
+    assert np.all(patterns["pr"].shape == (3, 351, 64, 128))
+
+    patterns_full = canesm_basic_pattern.predict_from_combined_experiment(
+        em_data, conc_data, ["pr", "tas"], return_patterns_per_mode=False
+    )
+    assert np.all(patterns_full["tas"].shape == (351, 64, 128))
+    assert np.all(patterns_full["pr"].shape == (351, 64, 128))
+
+    assert np.allclose(
+        np.sum(patterns["tas"].values, axis=0), patterns_full["tas"].values
+    )
+    assert np.allclose(
+        np.sum(patterns["pr"].values, axis=0), patterns_full["pr"].values
+    )
+    # assert np.allclose(patterns["tas"])
+    # assert False
+    # TODO: Test this with anomaly pattern

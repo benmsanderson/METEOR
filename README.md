@@ -28,6 +28,8 @@ make virtual-environment
 ## Jupyter Notebooks
 The notebooks folder provides simple working examples to run the model within a Jupyter environment, and plot example output.  Installation instructions for installing Jupyterlab can be found at https://jupyter.org/install
 
+Beware that notebooks are tested as part of the test-suite on a one by one basis, so if you add a new notebook and you wnat it to be tested routinely, you need to add it. For certain notebooks the amount of downloading and running needed might not be advisable to have in the overall test suite.
+
 <code>METEOR_single_model_pattern_example.ipynb</code> produces a single pattern using CanESM2 data for the base and co2x2 experiments in PDRMIP, using input data text files stored in the <code>tests/test-data</code> folder
 
 <code>CMIP6_demo_with_residual.ipynb</code> demonstrates how to levarage the inbuilt aerosol forcing from residuals using the cmip6_meteor_data_getter functionality to get data in a minimal way.

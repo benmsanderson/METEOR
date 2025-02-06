@@ -151,6 +151,20 @@ def test_sulfate_from_residual_functionality(test_data_dir):
         np.sum(patterns_separate["pr"].values, axis=0), patterns["pr"].values
     )
 
+    canesm_combined_pattern = MeteorPatternScaling(
+        "cmip6-CanESM5-anomsulf",
+        {"tas": 2, "pr": 2},
+        lambda key: training_data[key],
+        from_file=False,
+        exp_list=["base", "co2x4", "sulxanom"],
+        anom_timescales = {"tas": 2, "pr":1}
+    )
+    patterns = canesm_combined_pattern.predict_from_combined_experiment(
+        em_data, conc_data, ["pr", "tas"], return_patterns_per_mode=True
+    )
+    assert np.all(patterns["tas"].shape == (4, 351, 64, 128))
+    assert np.all(patterns["pr"].shape == (3, 351, 64, 128))
+
 
 def test_return_separate_per_mode_patterns(test_data_dir):
     canesm_basic_pattern = MeteorPatternScaling(

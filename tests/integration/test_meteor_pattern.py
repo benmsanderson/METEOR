@@ -206,7 +206,7 @@ def test_return_separate_per_mode_patterns(test_data_dir):
     # TODO: Test this with anomaly pattern
 
 
-def test_models_no_aer_fit():
+def test_models_no_aer_fit(test_data_dir):
     datagetter = Cmip6MeteorDataGetter(
         exps=["piControl", "abrupt-4xCO2", "historical", "ssp245"],
         dbe=["CMIP", "CMIP", "CMIP", "ScenarioMIP"],
@@ -216,10 +216,10 @@ def test_models_no_aer_fit():
     # model = "MPI-ESM1-2-LR"
 
     conc_data = input_handler.read_inputfile(
-        "../ciceroscm/tests/test-data/ssp245_conc_RCMIP.txt"
+        os.path.join(test_data_dir, "rcp85_conc_RCMIP.txt")
     )
     ih = input_handler.InputHandler({})
-    em_data = ih.read_emissions("../ciceroscm/tests/test-data/ssp245_em_RCMIP.txt")
+    em_data = ih.read_emissions(os.path.join(test_data_dir, "rcp85_em_RCMIP.txt"))
     training_data = {
         "base": datagetter.make_meteor_training_data("base", model),
         "co2x4": datagetter.make_meteor_training_data("co2x4", model),

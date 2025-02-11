@@ -151,6 +151,20 @@ def test_sulfate_from_residual_functionality(test_data_dir):
         np.sum(patterns_separate["pr"].values, axis=0), patterns["pr"].values
     )
 
+    canesm_combined_pattern = MeteorPatternScaling(
+        "cmip6-CanESM5-anomsulf",
+        {"tas": 2, "pr": 2},
+        lambda key: training_data[key],
+        from_file=False,
+        exp_list=["base", "co2x4", "sulxanom"],
+        anom_timescales={"tas": 2, "pr": 1},
+    )
+    patterns = canesm_combined_pattern.predict_from_combined_experiment(
+        em_data, conc_data, ["pr", "tas"], return_patterns_per_mode=True
+    )
+    assert np.all(patterns["tas"].shape == (4, 351, 64, 128))
+    assert np.all(patterns["pr"].shape == (3, 351, 64, 128))
+
 
 def test_return_separate_per_mode_patterns(test_data_dir):
     canesm_basic_pattern = MeteorPatternScaling(
@@ -190,3 +204,43 @@ def test_return_separate_per_mode_patterns(test_data_dir):
     # assert np.allclose(patterns["tas"])
     # assert False
     # TODO: Test this with anomaly pattern
+
+
+def test_models_no_aer_fit(test_data_dir):
+    datagetter = Cmip6MeteorDataGetter(
+        exps=["piControl", "abrupt-4xCO2", "historical", "ssp245"],
+        dbe=["CMIP", "CMIP", "CMIP", "ScenarioMIP"],
+    )
+    model = "AWI-CM-1-1-MR"  # "CanESM5",
+    # models_weird = ["CanESM5"]
+    # model = "MPI-ESM1-2-LR"
+
+    conc_data = input_handler.read_inputfile(
+        os.path.join(test_data_dir, "rcp85_conc_RCMIP.txt")
+    )
+    ih = input_handler.InputHandler({})
+    em_data = ih.read_emissions(os.path.join(test_data_dir, "rcp85_em_RCMIP.txt"))
+    training_data = {
+        "base": datagetter.make_meteor_training_data("base", model),
+        "co2x4": datagetter.make_meteor_training_data("co2x4", model),
+        "sulxanom": datagetter.make_meteor_training_data_composite(
+            ["historical", "ssp245"], model
+        ),
+    }
+
+    anomsulf_pattern = MeteorPatternScaling(
+        "cmip6-CanESM5-anomsulf",
+        {"tas": 3},
+        lambda key: training_data[key],
+        from_file=False,
+        exp_list=["base", "co2x4", "sulxanom"],
+        anom_timescales={"tas": 3},
+    )
+    patterns = anomsulf_pattern.predict_from_combined_experiment(
+        em_data, conc_data, ["tas"], return_patterns_per_mode=True
+    )
+    ghg_sum_prediction = prpatt.global_mean(
+        patterns["tas"][:3, :, :, :].sum(dim="mode")
+    )
+    total_prediction = prpatt.global_mean(patterns["tas"].sum(dim="mode"))
+    assert not np.allclose(ghg_sum_prediction, total_prediction)

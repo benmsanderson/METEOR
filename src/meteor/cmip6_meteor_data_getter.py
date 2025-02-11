@@ -491,10 +491,14 @@ class Cmip6MeteorDataGetter:
             one after the other, this can be specified using this dictionary
             The keyword should be the latter of the experiments to glue together
             If Full-back is chosen as the value for this, a cut will be made to
-            the former dataset to make room for the latter dataset. Otherwise
-            you can specify a number of years to cut in the previous dataset.
-            Currently cutting from the former dataset is not implemented, but
-            may be added later
+            the former dataset to make room for the latter dataset. If the latter dataset
+            has more data than for 200 years (i.e. ssp running beyond 2100) and the
+            dataset to overlap over this does not have such a long dataset, the last
+            200 years of the dataset will be cut. For more control you can
+            you can specify a number of years (int) to cut in the previous dataset.
+            Currently cutting from the last dataset is not implemented, but
+            may be added later.
+
         Returns
         -------
         xr.Dataset
@@ -515,6 +519,13 @@ class Cmip6MeteorDataGetter:
                         if exp in overlap:
                             if overlap[exp] == "Full-back":
                                 cut = len(next_dataset["year"].values)
+                                # Hacky fix for if ssp experiments run
+                                if (
+                                    exp.startswith("ssp")
+                                    and cut > 200
+                                    and len(value["year"].values) <= 352
+                                ):
+                                    cut = cut - 200
                             else:
                                 cut = overlap[exp]
 

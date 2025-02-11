@@ -53,6 +53,53 @@ def read_training_data(get_training_data, exp_list, from_file=True):
     return dacanom
 
 
+def calculate_residual_and_do_crude_nan_cut(daconom_field, predicted_without_fld):
+    """
+    Calculate a residual between input data field, and predicted field
+    Includes light handling of the data field possibly missing data in the end years
+
+    Parameters
+    ----------
+    daconom_field : xr.DataArray
+        Data field with time, lat and lon dimensions
+    predicted_without_fld : xr.DataArray
+        Data field of predicted values for data without residual forcing
+        should have same dimensions of same size as daconom_field
+
+    Returns
+    -------
+    xr.DataArray
+        The result of subtracting predicted_without_fld from the daconom_field
+        If the daconom_fld has nan values for the last timesteps (i.e. missing
+        data for the latest years), both that and the predicted_without_fld
+        will be cut to omit those years before the subtractions is conducted
+        If the daconom_field has nans scattered throughout the data, an error
+        will be raised.
+
+    Raises
+    ------
+    ValueError
+        If the daconom_field has nans scattered throughout the data,
+        (i.e. data missing for some years, present for later years) a
+        ValueError will be raised.
+    """
+    if np.isnan(daconom_field.values).sum() > 0:
+        gm = prpatt.global_mean(daconom_field)
+        tot_len = len(gm.values)
+        tot_nan_yrs = np.isnan(gm.values).sum()
+        nan_in_last = np.isnan(gm.values[-tot_nan_yrs:]).sum()
+        if nan_in_last < tot_nan_yrs:
+            raise ValueError(
+                "The dataset you are trying to emulate includes NaN values scattered throughout. METEOR does not currently support emulation such datasets"
+            )
+        LOGGER.warning(
+            "Cutting residual dataset to avoid nans at the end of the dataset"
+        )
+        daconom_field = daconom_field[: (tot_len - tot_nan_yrs), :, :]
+        predicted_without_fld = predicted_without_fld[: (tot_len - tot_nan_yrs), :, :]
+    return daconom_field - predicted_without_fld
+
+
 class MeteorPatternScaling:
     """
     Pattern scaling descriptor class
@@ -227,8 +274,8 @@ class MeteorPatternScaling:
             predicted_without_fld = predicted_without_fld.assign_coords(
                 time=np.arange(em_len)
             )
-            residual = (
-                self.dacanom[fld][exp_index, :em_len, :, :] - predicted_without_fld
+            residual = calculate_residual_and_do_crude_nan_cut(
+                self.dacanom[fld][exp_index, :em_len, :, :], predicted_without_fld
             )
             (out, pattern_full) = prpatt.get_timescales_from_anomaly(
                 residual, forcing_of_residual, n_modes=self.anom_timescales[fld]

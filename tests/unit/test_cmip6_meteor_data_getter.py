@@ -1,8 +1,7 @@
 import pytest
 import xarray as xr
 
-from meteor import cmip6_meteor_data_getter, prpatt
-import matplotlib.pyplot as plt
+from meteor import cmip6_meteor_data_getter
 
 
 def test_get_unique_models():
@@ -57,55 +56,12 @@ def test_make_meteor_training_data_composite_more_than_one():
     models = data_getter.models
     print(len(models))
 
-    #test_composite = data_getter.make_meteor_training_data_composite(
-    #    exps, model="CanESM5", overlap={"ssp534-over": "Full-back"}
-    #)
-    #assert len(test_composite["year"].values) == 251
+    test_composite = data_getter.make_meteor_training_data_composite(
+        exps, model="CanESM5", overlap={"ssp534-over": "Full-back"}
+    )
+    assert len(test_composite["year"].values) == 251
 
-    #test_composite = data_getter.make_meteor_training_data_composite(
-    #    exps, model="CanESM5", overlap={"ssp534-over": 61}
-    #)
-    #assert len(test_composite["year"].values) == 251
-    weird_models = {}
-    for model in models:
-        print(model)
-
-        ssp585 = data_getter.get_single_var_mod_data_yearmean("ssp585", "tas", model)
-        ssp534 = data_getter.get_single_var_mod_data_yearmean("ssp534-over", "tas", model)
-        
-        print(len(ssp585["year"]))
-        print(len(ssp534["year"]))
-        years_585 = range(2015, 2015 + len(ssp585["year"]))
-        years_534 = range(2040, 2040 + len(ssp534["year"]))
-        mean_ssp585 = prpatt.global_mean(ssp585)
-        mean_ssp534 = prpatt.global_mean(ssp534)
-        print(mean_ssp585.values[0][ 23:27])
-        print(mean_ssp534.values[0][:3])
-
-        fig = plt.subplot()
-
-
-        fig.plot(years_585, mean_ssp585.values[0], ls=":")
-        fig.plot(years_534, mean_ssp534.values[0], ls=":")
-        fig.set_title(f"Global mean temperature for {model}")
-        fig.set_xlabel("Year")
-        fig.set_ylabel("Global mean temperature")
-        
-
-        try: 
-            test_composite = data_getter.make_meteor_training_data_composite(
-                exps, model=model, overlap={"ssp534-over": "Full-back"}
-            )
-            composite_mean = prpatt.global_mean(test_composite["tas"])
-            print(composite_mean)
-            years_composite = range(1850, 1850 + len(composite_mean["year"]))
-            fig.plot(years_composite, composite_mean.values[0], ls=":")
-        except:
-            print(f"Model {model} has a problem generating the composite")
-            weird_models[model] = [len(ssp585["year"]), len(ssp534["year"])]
-
-        plt.savefig(f"test_composite_temperature_{model}.png")
-        plt.clf()
-
-        print(weird_models)
-    assert False
+    test_composite = data_getter.make_meteor_training_data_composite(
+        exps, model="CanESM5", overlap={"ssp534-over": 61}
+    )
+    # assert len(test_composite["year"].values) == 251

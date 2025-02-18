@@ -180,17 +180,28 @@ class MeteorPatternScaling:
         self.exp_list = exp_list
         self.patternflds = patternflds
         self.pattern_dict = self._make_pattern_dict()
-        if anom_timescales is None or not isinstance(anom_timescales, dict):
-            anom_timescales = {}
-            for fld in patternflds:
-                anom_timescales[fld] = 1
-        else:
-            for fld in patternflds:
-                if fld not in anom_timescales:
-                    anom_timescales[fld] = 1
-        self.anom_timescales = anom_timescales
         if "xanom" in "-".join(exp_list):
-            self._add_patterns_for_residual_exp(ssp_input)
+            if anom_timescales is None or not isinstance(anom_timescales, dict):
+                anom_timescales = {}
+                for fld in patternflds:
+                    anom_timescales[fld] = 1
+            else:
+                for fld in patternflds:
+                    if fld not in anom_timescales:
+                        anom_timescales[fld] = 1
+
+            if all(value == 0 for value in anom_timescales.values()):
+                anom_exps = [anomexp for anomexp in exp_list if "xanom" in anomexp]
+                for anomexp in anom_exps:
+                    self.exp_list.remove(anomexp)
+                    self.dacanom = self.dacanom.where(
+                        self.dacanom.expt != anomexp, drop=True
+                    )
+                    del self.exp_forc_dict[anomexp]
+                    del self.pattern_dict[anomexp]
+            else:
+                self.anom_timescales = anom_timescales
+                self._add_patterns_for_residual_exp(ssp_input)
         self.name = name
 
     def _make_pattern_dict(self):
@@ -268,6 +279,10 @@ class MeteorPatternScaling:
             forcing_series, self.patternflds.keys(), ssp_input["nystart"]
         )  # [100:, :, :]
         for fld in self.patternflds:
+            if self.anom_timescales[fld] == 0:
+                # TODO: Delete also the input data from daconom for this?
+                del self.pattern_dict[exp][fld]
+                continue
             predicted_without_fld = predicted_without[fld].isel(
                 time=slice(start_index, start_index + em_len)
             )
@@ -413,6 +428,8 @@ class MeteorPatternScaling:
             if forcing_series[exp] is None:
                 continue
             for fld in flds:
+                if fld not in self.pattern_dict[exp].keys():
+                    continue
                 if fld not in predicted:
                     predicted[fld] = self.predict_from_forcing_profile(
                         forcing_series[exp],

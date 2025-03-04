@@ -1,6 +1,8 @@
 ### METEOR
 Multivariate Emulation of Time-Evolving and Overlapping Responses
 
+[![DOI](https://zenodo.org/badge/800880930.svg)](https://doi.org/10.5281/zenodo.14967116)
+
 # Installation
 ```
 git clone https://github.com/benmsanderson/METEOR.git

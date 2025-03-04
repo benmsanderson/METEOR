@@ -36,7 +36,13 @@ Beware that notebooks are tested as part of the test-suite on a one by one basis
 
 <code>CMIP6_mmdemo_with_archiving.ipynb</code> provides demonstration of the cmip6_meteor_data_getter functionality to get data as xarrays directly from the CMIP6 zarrstore to use in pattern making and predictions, archiving inputs to save runtime on multiple runs. Finally these datasets are used to provide multimodel demonstration of the METEOR emulation with both CO2-based green house gas responses, and aerosol response from residuals.
 
+<code>METEOR_paper_figures.ipynb</code> documents the code for Figures 1 and 3--7 of the main manuscript for deriving GHG and aerosol residula patterm and globally aggregated evaluation of METEOR, including supplementary figures showing individual behaviour of the models used as trainign data. It also illustrates reading and downloading (local save) training data, as well as running METEOR with this data and how to vary its inputs.
 
+<code>METEOR_paper_figures_spatial.ipynb</code> documents the code for Figures 8 and 9 of the main manuscript for the spatial evaluation of METEOR. 
+
+<code>METEOR_paper_figures_timescale_eval.ipynb</code> documents the code for the supplementary figures 1--3, illustrating an evaluation of the performance of METEOR under a varying selection of timescales. 
+
+Nota bene: The <code>METEOR_paper_figures_*.ipynb</code> python notebooks are excluded from the test suite and are not tested by the automated tests. Modifications or relying on them for production use is at your own risk, so proceed with caution.
 
 ## scripts
 This folder contains example scripts and an example notebook, which might not work out of the box, but require data. 

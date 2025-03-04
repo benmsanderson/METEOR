@@ -313,8 +313,8 @@ def proj_gm(tauvec, gmanom, fcg_aer):
 
     Leveraging the make_pmat to make a matix of exponential responses
     for the tauvec and convolving that with the derivative of the
-    aerosol forcing, we the get a timevector for the forcing decay (T).
-    We the project that onto the global mean anomaly of the time series
+    aerosol forcing, we then get a timevector for the forcing decay (T).
+    We then project that onto the global mean anomaly of the time series
     (G) as T^-1 G T
 
     Parameters
@@ -500,7 +500,10 @@ def make_params(ain):
         # for each timescale, we add a parameter for the decay constant - default t_i
         # at the moment, we allow LMFIT 1 order magnitude limits compared with the default
         fit_params.add(
-            "t" + str(i), value=ain[2 * i + 1], min=0, max=ain[2 * i + 1] * 10
+            "t" + str(i),
+            value=ain[2 * i + 1],
+            min=ain[2 * i + 1] / 5,
+            max=ain[2 * i + 1] * 2,
         )
 
         # add a parameter representing the coefficient for the exponential decay with timescale t_i (coeff can be any value)
@@ -618,7 +621,7 @@ def get_timescales(anomaly_data, n_modes):
     # our first guess for amplitude is just the mean of the 2d field
     ampguess = anomaly_data.mean("lat").mean("lon").mean("time")
     # our time guess is 1,10,100 etc years
-    tguess = 10 ** (np.arange(n_modes) + 1)
+    tguess = 5 * 10 ** (np.arange(n_modes))
     # initialise the initial guess vector
     a0 = np.zeros(n_modes * 2)
     for i, t in enumerate(tguess):
@@ -690,19 +693,17 @@ def get_timescales_from_anomaly(residual_anom, fcg_aer, n_modes=2):
         the temporal part, u, which has a timeseries per mode, and
         a spatial part, v, which has a spatial pattern for each model
     """
-    if n_modes != 2:
-        LOGGER.warning(
-            "n_modes different from 2 is currently not supported for residual"
-        )
-        n_modes = 2
     nt = len(residual_anom.time)
     pattern = {}
     gmanom = global_mean(residual_anom)
     # TODO: Are all amplitudes = 1 a valid assumption?
-    # TODO: Modify this to fit to nmodes different from 2?
-    bounds = [(1, 10), (10, 100)]
+    bounds = [(10 ** (mode_num), 10 ** (mode_num + 1)) for mode_num in range(n_modes)]
     opt = minimize(
-        rmse_gm, [5, 50], args=(gmanom, fcg_aer), bounds=(bounds[0], bounds[1])
+        rmse_gm,
+        [5 * 10 ** (mode_num) for mode_num in range(n_modes)],
+        args=(gmanom, fcg_aer),
+        bounds=bounds,
+        method="Powell",
     )
     params = lmfit.Parameters()
 
@@ -742,6 +743,70 @@ def get_timescales_from_anomaly(residual_anom, fcg_aer, n_modes=2):
     )
     pattern["v"] = bx
     return (params, pattern)
+
+
+def recon_separately(pattern_full, pc_matrix):
+    """
+    Reconstruct gridded, time evolving output from a user
+    defined principal component timeseries and EOF patterns
+
+    Parameters
+    ----------
+    pattern_full : dict
+             Dictionary temporal and spatial pattern
+    pc_matrix : xarray.DataArray
+             Data array of principal component timeseries
+
+    Returns
+    -------
+    xarray.DataArray
+             Reconstructed dataarray for the forcing change
+    """
+    # reconstruct step function output from EOFs and a user-defined PC timeseries 'pc_matrix'
+    # first create the synthetic EOF xarray structure
+    # we copy the original EOFs and PCs from the raw data (we will keep the spatial patterns)
+    pattern_synth = pattern_full.copy()
+    # now replace the PC matrix 'u' with the user defined vlaue
+    pattern_synth["u"] = pc_matrix
+    # now call recon function to reconstruct the original data from the Xarray EOF dataset
+    # Define matrices based on dictionary input:
+    mode_timescales = pattern_synth["u"]  # size n_time by n_modes
+    pattern_per_mode = pattern_synth["v"]  # size n_pixels by n_modes
+    # number of modes
+    n_modes = pattern_per_mode.shape[0]
+    # reshape v1 into a 2d matrix
+    pattern_2d = pattern_per_mode.values.reshape(n_modes, -1)
+
+    recon_per_mode = np.zeros(
+        (
+            n_modes,
+            mode_timescales.shape[0],
+            pattern_per_mode.shape[1],
+            pattern_per_mode.shape[2],
+        )
+    )
+    for mode in range(n_modes):
+        # compute reconstruceted field (unweighted) as dot product
+        recon_per_mode[mode, :, :, :] = np.reshape(
+            np.outer(mode_timescales[:, mode], pattern_2d[mode, :]),
+            [
+                mode_timescales.shape[0],
+                pattern_per_mode.shape[1],
+                pattern_per_mode.shape[2],
+            ],
+        )
+    # convert reconstructed field to xarray and return
+    recon_xarray = xr.DataArray(
+        recon_per_mode,
+        coords=(
+            range(n_modes),
+            mode_timescales.time,
+            pattern_per_mode.lat,
+            pattern_per_mode.lon,
+        ),
+        dims=("mode", "time", "lat", "lon"),
+    )
+    return recon_xarray
 
 
 def recon(pattern):

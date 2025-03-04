@@ -24,19 +24,14 @@ REQUIREMENTS = [
     "xarray",
     "netcdf4",
     "h5netcdf",
-    "zarr",
+    "zarr<3",
     "gcsfs",
     "eofs",
     "lmfit",
     "ciceroscm>=1.1.2",
 ]
 
-REQUIREMENTS_NOTEBOOKS = [
-    "ipywidgets",
-    "notebook",
-    "seaborn",
-    "ipykernel",
-]
+REQUIREMENTS_NOTEBOOKS = ["ipywidgets", "notebook", "seaborn", "ipykernel", "cartopy"]
 REQUIREMENTS_TESTS = [
     "codecov",
     "coverage",

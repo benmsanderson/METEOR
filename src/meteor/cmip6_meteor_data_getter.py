@@ -473,7 +473,9 @@ class Cmip6MeteorDataGetter:
         training_data = make_xarray_with_correct_dims(self.flds, fld_values)
         return training_data
 
-    def make_meteor_training_data_composite(self, exps, model):
+    def make_meteor_training_data_composite(
+        self, exps, model, overlap=None
+    ):  # pylint: disable=too-many-nested-blocks
         """
         Make xr.dataset with data and format used for meteor
 
@@ -484,11 +486,25 @@ class Cmip6MeteorDataGetter:
             the same order as the experiments are meant to be concatenated
         model : str
             Name of model for which to find and format training data
+        overlap : dict
+            If any of the experiments are not supposed to just be glued
+            one after the other, this can be specified using this dictionary
+            The keyword should be the latter of the experiments to glue together
+            If Full-back is chosen as the value for this, a cut will be made to
+            the former dataset to make room for the latter dataset. If the latter dataset
+            has more data than for 200 years (i.e. ssp running beyond 2100) and the
+            dataset to overlap over this does not have such a long dataset, the last
+            200 years of the dataset will be cut. For more control you can
+            you can specify a number of years (int) to cut in the previous dataset.
+            Currently cutting from the last dataset is not implemented, but
+            may be added later.
+
         Returns
         -------
         xr.Dataset
             Dataset with yearly data on the format usable for METEOR
         """
+        # TODO: Add support for cutting forward.
         fld_values = []
         for fld in self.flds:
             value = None
@@ -499,7 +515,25 @@ class Cmip6MeteorDataGetter:
                     next_dataset = self.get_single_var_mod_data_yearmean(
                         exp, fld, model
                     )
+                    if overlap is not None:
+                        if exp in overlap:
+                            if overlap[exp] == "Full-back":
+                                cut = len(next_dataset["year"].values)
+                                # Hacky fix for if ssp experiments run
+                                if (
+                                    exp.startswith("ssp")
+                                    and cut > 200
+                                    and len(value["year"].values) <= 352
+                                ):
+                                    cut = cut - 200
+                            else:
+                                cut = overlap[exp]
+
+                            value = value.sel(
+                                year=slice(0, len(value["year"].values) - cut - 1)
+                            )
                     start_year = value["year"].values[-1] + 1
+
                     end_year_plus = start_year + next_dataset.sizes["year"]
                     # print(next_dataset.sizes["year"])
                     # print(len(range(start_year, end_year_plus)))

@@ -28,13 +28,21 @@ make virtual-environment
 ## Jupyter Notebooks
 The notebooks folder provides simple working examples to run the model within a Jupyter environment, and plot example output.  Installation instructions for installing Jupyterlab can be found at https://jupyter.org/install
 
+Beware that notebooks are tested as part of the test-suite on a one by one basis, so if you add a new notebook and you wnat it to be tested routinely, you need to add it. For certain notebooks the amount of downloading and running needed might not be advisable to have in the overall test suite.
+
 <code>METEOR_single_model_pattern_example.ipynb</code> produces a single pattern using CanESM2 data for the base and co2x2 experiments in PDRMIP, using input data text files stored in the <code>tests/test-data</code> folder
 
 <code>CMIP6_demo_with_residual.ipynb</code> demonstrates how to levarage the inbuilt aerosol forcing from residuals using the cmip6_meteor_data_getter functionality to get data in a minimal way.
 
 <code>CMIP6_mmdemo_with_archiving.ipynb</code> provides demonstration of the cmip6_meteor_data_getter functionality to get data as xarrays directly from the CMIP6 zarrstore to use in pattern making and predictions, archiving inputs to save runtime on multiple runs. Finally these datasets are used to provide multimodel demonstration of the METEOR emulation with both CO2-based green house gas responses, and aerosol response from residuals.
 
+<code>METEOR_paper_figures.ipynb</code> documents the code for Figures 1 and 3--7 of the main manuscript for deriving GHG and aerosol residula patterm and globally aggregated evaluation of METEOR, including supplementary figures showing individual behaviour of the models used as training data. It also illustrates reading and downloading (local save) training data, as well as running METEOR with this data and how to vary its inputs.
 
+<code>METEOR_paper_figures_spatial.ipynb</code> documents the code for Figures 8 and 9 of the main manuscript for the spatial evaluation of METEOR. 
+
+<code>METEOR_paper_figures_timescale_eval.ipynb</code> documents the code for the supplementary figures 1--3, illustrating an evaluation of the performance of METEOR under a varying selection of timescales. 
+
+Nota bene: The <code>METEOR_paper_figures_*.ipynb</code> python notebooks are excluded from the test suite and are not tested by the automated tests. Without available pre-cached data, they will require a long time to run, and for large datasets memory limitations of your computer may be an issue. Modifications or relying on these notebooks for production use is at your own risk, so proceed with caution.
 
 ## scripts
 This folder contains example scripts and an example notebook, which might not work out of the box, but require data. 

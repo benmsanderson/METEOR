@@ -46,3 +46,22 @@ def test_get_unique_models():
     assert test_composite.sizes["year"] == 251
     print(test_composite["year"].values)
     # assert False
+
+
+def test_make_meteor_training_data_composite_more_than_one():
+    exps = ["historical", "ssp585", "ssp534-over"]
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        exps=exps, dbe=["CMIP", "ScenarioMIP", "ScenarioMIP"]
+    )
+    models = data_getter.models
+    print(len(models))
+
+    test_composite = data_getter.make_meteor_training_data_composite(
+        exps, model="CanESM5", overlap={"ssp534-over": "Full-back"}
+    )
+    assert len(test_composite["year"].values) == 251
+
+    test_composite = data_getter.make_meteor_training_data_composite(
+        exps, model="CanESM5", overlap={"ssp534-over": 61}
+    )
+    # assert len(test_composite["year"].values) == 251

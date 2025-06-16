@@ -1,11 +1,25 @@
-#!/usr/bin/env python
-# coding: utf-8
+# ---
+# jupyter:
+#   jupytext:
+#     formats: ipynb,py:percent
+#     text_representation:
+#       extension: .py
+#       format_name: percent
+#       format_version: '1.3'
+#       jupytext_version: 1.17.2
+#   kernelspec:
+#     display_name: venv
+#     language: python
+#     name: python3
+# ---
 
-# In[2]:
+# %%
+
+# %%
 
 
 # conda activate meteor
-# rm -r venv              
+# # rm -r venv              
 # make first-venv
 # make clean
 # make virtual-environment
@@ -13,41 +27,25 @@
 # then select the kernel 'venv' in jupyter notebook
 
 import os
-import sys
-import matplotlib.pyplot as plt
+
 import numpy as np
 import xarray as xr
 import pandas as pd
 from dataclasses import asdict
 import warnings
 from pandas.errors import SettingWithCopyWarning
-from functools import partial
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=(SettingWithCopyWarning))
 warnings.filterwarnings("ignore", message=".*not in pamset.*")
 
-from meteor import MeteorPatternScaling, meteor_plot_utils
+from meteor import MeteorPatternScaling, meteor
 from meteor import prpatt
 from meteor import Cmip6MeteorDataGetter
-from meteor import scm_forcer_engine
-from ciceroscm import CICEROSCM
 from ciceroscm import input_handler
 
-from meteor.prpatt import recon
-
-import cartopy.crs as ccrs
-import cartopy as cart
-from cartopy.util import add_cyclic_point
-from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
-import seaborn as sns
-from matplotlib.gridspec import GridSpec
-from scipy.interpolate import griddata
-import matplotlib.ticker as mticker
-from scipy.stats import pearsonr
-from tqdm import tqdm
 
 
-# In[ ]:
+# %%
 
 
 def nrmse_values(pred, true, alpha=5):
@@ -62,7 +60,7 @@ def nrmse_values(pred, true, alpha=5):
     return nrmse_spatial, nrmse_global, nrmse_tot
 
 
-# In[ ]:
+# %%
 
 
 def global_mean(ds):
@@ -77,7 +75,7 @@ def global_mean(ds):
     return gm
 
 
-# In[ ]:
+# %%
 
 
 cscm_data_dir = os.path.join(os.getcwd(), "..", "src", "meteor", "default_scm_data")
@@ -91,7 +89,7 @@ just_ssp534 = True
 
 # SSP245 for aerorol residual from abrupt-4xCO2
 
-# In[ ]:
+# %%
 
 
 ih = input_handler.InputHandler({})
@@ -104,7 +102,7 @@ em_data = ih.read_emissions(os.path.join(cscm_data_dir, "ssp245_em_RCMIP.txt"))
 
 # standard SSP scenarios
 
-# In[ ]:
+# %%
 
 
 if just_NorESMLM:
@@ -113,7 +111,7 @@ else:
     scenarios = [ "ssp126", "ssp245", "ssp370", "ssp585"]
 
 
-# In[ ]:
+# %%
 
 
 #For predictions: read in SSP concentrations and emissions
@@ -131,7 +129,7 @@ for i,s in enumerate(scenarios):
 
 # SSP534-over
 
-# In[ ]:
+# %%
 
 
 #For predictions: read in SSP concentrations and emissions
@@ -150,13 +148,13 @@ for i,s in enumerate(['ssp534-over']):
 
 # Getting CMIP6 data from the zarrstore for tas
 
-# In[ ]:
+# %%
 
 
 flds = ["tas","pr"]
 
 
-# In[ ]:
+# %%
 
 models = []
 data_getter = None
@@ -181,7 +179,7 @@ elif not just_ssp534:
 #    print(property)
 
 
-# In[ ]:
+# %%
 
 
 
@@ -189,7 +187,7 @@ elif not just_ssp534:
 
 # Create training data dictionary for all selected models (may run for a while) - and save locally in 'cache' (cachedir) due to data memory requirements
 
-# In[ ]:
+# %%
 
 
 # remove problematic models when creating the pattern
@@ -207,7 +205,7 @@ print(models)
 
 # ### Getting data for SSP534-over
 
-# In[ ]:
+# %%
 
 
 if not just_NorESMLM and just_ssp534:
@@ -228,7 +226,7 @@ if not just_NorESMLM and just_ssp534:
 
 # # Train patterns and timescales for all models
 
-# In[ ]:
+# %%
 
 
 def get_training_data_and_train(mname, data_getter=data_getter):
@@ -255,7 +253,7 @@ def get_training_data_and_train(mname, data_getter=data_getter):
 
 # # Get test data from file
 
-# In[ ]:
+# %%
 
 
 CB_test_data = xr.open_dataset("outputs_ssp245.nc")
@@ -268,7 +266,7 @@ CB_test_data = xr.open_dataset("outputs_ssp245.nc")
 
 # capture the spatial response of the last 20 years (2080--2100)
 
-# In[ ]:
+# %%
 
 if not just_ssp534:
     cols = []
@@ -372,7 +370,7 @@ if not just_ssp534:
             #scoring_df.to_latex(f"CB_scoring_{mname}_latex.txt", bold_rows=True, float_format="{{:0.3f}}".format, label="CB_comprison_errors_all", caption = "METEOR performance for all models evaluated using the Climate bench evalutaion metrics. Note that comparison is to single ensemble members, so variability driven errors are included.")
 
 
-# In[ ]:
+# %%
 
 
 if not just_NorESMLM and not just_ssp534:
@@ -391,7 +389,7 @@ if not just_NorESMLM and not just_ssp534:
 
 # ### SSP534-over
 
-# In[ ]:
+# %%
 
 
 if not just_NorESMLM and just_ssp534:
@@ -399,7 +397,7 @@ if not just_NorESMLM and just_ssp534:
     
     cols = []
     err_measures = ["NRMSE_spatial", "NRMSE_global", "NRMSE_total"]
-    skip_for_now = []#["CESM2-WACCM"]
+    skip_for_now = []#["MIROC-ES2L"]#["CESM2-WACCM"]
     rowhs = []
     for nv, var in enumerate(flds): 
         for err_measure in err_measures:
@@ -421,8 +419,13 @@ if not just_NorESMLM and just_ssp534:
                 )[var]
                 print(mname)
                 print(sc)
-                truth_ds = data_getter_ssp534.make_meteor_training_data_composite(["historical", "ssp585", sc], var, mname)  
-                truth_ds = truth_ds.isel(year= slice(65, 86))
+                truth_ds = data_getter_ssp534.get_single_var_mod_data_yearmean(sc, var, mname)
+                if len(truth_ds.year) == 61:
+                    truth_ds = truth_ds.isel(year= slice(40, 61))
+                elif len(truth_ds.year) == 86:
+                    truth_ds = truth_ds.isel(year= slice(65, 86))
+                else:
+                    print(len(truth_ds.year))
                 if var == "tas":
                     truth_ds = truth_ds - shift_data
                 truth_ds = truth_ds.rename({"year": "time"})

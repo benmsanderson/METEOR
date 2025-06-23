@@ -38,11 +38,15 @@ Beware that notebooks are tested as part of the test-suite on a one by one basis
 
 <code>CMIP6_mmdemo_with_archiving.ipynb</code> provides demonstration of the cmip6_meteor_data_getter functionality to get data as xarrays directly from the CMIP6 zarrstore to use in pattern making and predictions, archiving inputs to save runtime on multiple runs. Finally these datasets are used to provide multimodel demonstration of the METEOR emulation with both CO2-based green house gas responses, and aerosol response from residuals.
 
-<code>METEOR_paper_figures.ipynb</code> documents the code for Figures 1 and 3--7 of the main manuscript for deriving GHG and aerosol residula patterm and globally aggregated evaluation of METEOR, including supplementary figures showing individual behaviour of the models used as training data. It also illustrates reading and downloading (local save) training data, as well as running METEOR with this data and how to vary its inputs.
+<code>METEOR_paper_figures.ipynb</code> documents the code for Figures 1 and 5--7 of the main manuscript for deriving GHG and aerosol residual patterm and globally aggregated evaluation of METEOR, including supplementary figures A4 which demonstrates how patterns are combined and B1-B8 showing individual global mean emulation behaviour of the models used as training data. It also illustrates reading and downloading (local save) training data, as well as running METEOR with this data and how to vary its inputs.
 
-<code>METEOR_paper_figures_spatial.ipynb</code> documents the code for Figures 8 and 9 of the main manuscript for the spatial evaluation of METEOR. 
+<code>METEOR_paper_figures_spatial.ipynb</code> documents the generation of map comparison plots between multi-model mean emulation and CMIP6 data, figures 8 and 9. In addition it shows how the RMSE map comparison plot figure 14 was produced.
 
-<code>METEOR_paper_figures_timescale_eval.ipynb</code> documents the code for the supplementary figures 1--3, illustrating an evaluation of the performance of METEOR under a varying selection of timescales. 
+<code>METEOR_paper_figures_spatial_per_model_scatter.ipynb</code> documents the generation of regional comparison scatter plots per scenario (for standard scenarios), Figure 10, and model (for ssp534), Figure 11. 
+
+<code>METEOR_paper_figures_spatial_per_model.ipynb</code> documents the generation of ssp534 plots that show precipitation change as functions of temperature change, figures 12 and 13. The notebook also documents the code for making the supplementary per model map comparisons (B9-B14). 
+
+<code>METEOR_paper_figures_timescale_eval.ipynb</code> documents the code for the supplementary figures A1--A3, illustrating an evaluation of the performance of METEOR under a varying selection of timescales. 
 
 Nota bene: The <code>METEOR_paper_figures_*.ipynb</code> python notebooks are excluded from the test suite and are not tested by the automated tests. Without available pre-cached data, they will require a long time to run, and for large datasets memory limitations of your computer may be an issue. Modifications or relying on these notebooks for production use is at your own risk, so proceed with caution.
 

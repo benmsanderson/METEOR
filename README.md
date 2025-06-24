@@ -1,7 +1,7 @@
 ### METEOR
 Multivariate Emulation of Time-Evolving and Overlapping Responses
 
-[![DOI](https://zenodo.org/badge/800880930.svg)](https://doi.org/10.5281/zenodo.14967116)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15732955.svg)](https://doi.org/10.5281/zenodo.15732955)
 
 # Installation
 ```

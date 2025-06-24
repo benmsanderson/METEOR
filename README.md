@@ -48,7 +48,9 @@ Beware that notebooks are tested as part of the test-suite on a one by one basis
 
 <code>METEOR_paper_figures_timescale_eval.ipynb</code> documents the code for the supplementary figures A1--A3, illustrating an evaluation of the performance of METEOR under a varying selection of timescales. 
 
-Nota bene: The <code>METEOR_paper_figures_*.ipynb</code> python notebooks are excluded from the test suite and are not tested by the automated tests. Without available pre-cached data, they will require a long time to run, and for large datasets memory limitations of your computer may be an issue. Modifications or relying on these notebooks for production use is at your own risk, so proceed with caution.
+<code>Climate_Bench_METEOR.ipynb</code> documents the calculation of ClimateBench like metrics. 
+
+Nota bene: The <code>METEOR_paper_figures_*.ipynb</code> and <code>Climate_Bench_METEOR.ipynb</code> python notebooks are excluded from the test suite and are not tested by the automated tests. Without available pre-cached data, they will require a long time to run, and for large datasets memory limitations of your computer may be an issue. Modifications or relying on these notebooks for production use is at your own risk, so proceed with caution.
 
 ## scripts
 This folder contains example scripts and an example notebook, which might not work out of the box, but require data. 

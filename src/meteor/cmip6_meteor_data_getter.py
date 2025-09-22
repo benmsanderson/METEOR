@@ -617,3 +617,116 @@ class Cmip6MeteorDataGetter:
                     )
             fld_values.append(value)
         return make_xarray_with_correct_dims(self.flds, fld_values)
+
+    def train_noise_model(
+        self, experiments, model, variable_name, n_modes=10, lag_order=2, cache_dir=None
+    ):
+        """
+        Train a noise generator model for a specific variable and model.
+
+        Parameters
+        ----------
+        experiments : list
+            List of experiments to use for training (e.g., ["historical", "ssp245"])
+        model : str
+            Name of the climate model
+        variable_name : str
+            Variable to model (e.g., 'tas', 'pr')
+        n_modes : int, optional
+            Number of PCA modes to retain. Default is 10.
+        lag_order : int, optional
+            Lag order for VARX model. Default is 2.
+        cache_dir : str, optional
+            Directory to cache the trained model. If None, model is not cached.
+
+        Returns
+        -------
+        MeteorNoiseGenerator
+            Fitted noise generator
+        """
+        from .noise_generator import MeteorNoiseGenerator
+
+        # Get monthly training data
+        monthly_data = self.make_meteor_training_data_composite(
+            experiments, model, monthly=True
+        )
+
+        # Create and fit noise generator
+        noise_gen = MeteorNoiseGenerator(n_modes=n_modes, lag_order=lag_order)
+        noise_gen.fit(monthly_data, variable_name)
+
+        # Cache if requested
+        if cache_dir is not None:
+            import os
+
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_path = os.path.join(
+                cache_dir, f"{model}_{variable_name}_noise_model.pkl"
+            )
+            noise_gen.save_model(cache_path)
+
+        return noise_gen
+
+    def train_all_noise_models(
+        self,
+        experiments,
+        models=None,
+        variables=None,
+        n_modes=10,
+        lag_order=2,
+        cache_dir=None,
+    ):
+        """
+        Train noise models for all specified combinations of models and variables.
+
+        Parameters
+        ----------
+        experiments : list
+            List of experiments to use for training
+        models : list, optional
+            List of models to train. If None, uses all available models.
+        variables : list, optional
+            List of variables to train. If None, uses all fields in the data getter.
+        n_modes : int, optional
+            Number of PCA modes to retain. Default is 10.
+        lag_order : int, optional
+            Lag order for VARX model. Default is 2.
+        cache_dir : str, optional
+            Directory to cache the trained models
+
+        Returns
+        -------
+        dict
+            Nested dictionary with structure: {model: {variable: MeteorNoiseGenerator}}
+        """
+        if models is None:
+            models = self.models
+        if variables is None:
+            variables = self.flds
+
+        noise_models = {}
+
+        for model in models:
+            if not self.check_if_model_has_data(model):
+                print(f"Skipping {model} - no complete data available")
+                continue
+
+            noise_models[model] = {}
+
+            for variable in variables:
+                print(f"Training noise model for {model} - {variable}")
+                try:
+                    noise_gen = self.train_noise_model(
+                        experiments,
+                        model,
+                        variable,
+                        n_modes=n_modes,
+                        lag_order=lag_order,
+                        cache_dir=cache_dir,
+                    )
+                    noise_models[model][variable] = noise_gen
+                except Exception as e:
+                    print(f"Failed to train noise model for {model} - {variable}: {e}")
+                    continue
+
+        return noise_models

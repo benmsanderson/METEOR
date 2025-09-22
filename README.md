@@ -1,6 +1,17 @@
 ### METEOR
 Multivariate Emulation of Time-Evolving and Overlapping Responses
 
+METEOR is a fast climate emulator that combines pattern scaling for long-term climate response with stochastic noise modeling for short-term variability. It enables rapid generation of ensemble climate projections at both annual and monthly resolution by learning from CMIP6 climate model data.
+
+#### New: Monthly Climate Variability
+METEOR now includes monthly noise generation capabilities that add realistic short-term climate variability to annual pattern scaling predictions:
+- **Monthly Resolution**: Generate climate projections at monthly time scales
+- **Temperature-Dependent Seasonality**: Seasonal cycles that change with warming
+- **Stochastic Variability**: Multiple ensemble realizations for uncertainty quantification
+- **PCA/VARX Modeling**: Preserve spatial-temporal covariance from CMIP6 training data
+
+See `MONTHLY_NOISE_README.md` for complete workflow documentation.
+
 # Installation
 ```
 git clone https://github.com/benmsanderson/METEOR.git
@@ -34,7 +45,7 @@ Beware that notebooks are tested as part of the test-suite on a one by one basis
 
 <code>CMIP6_demo_with_residual.ipynb</code> demonstrates how to levarage the inbuilt aerosol forcing from residuals using the cmip6_meteor_data_getter functionality to get data in a minimal way.
 
-<code>CMIP6_mmdemo_with_archiving.ipynb</code> provides demonstration of the cmip6_meteor_data_getter functionality to get data as xarrays directly from the CMIP6 zarrstore to use in pattern making and predictions, archiving inputs to save runtime on multiple runs. Finally these datasets are used to provide multimodel demonstration of the METEOR emulation with both CO2-based green house gas responses, and aerosol response from residuals.
+<code>CMIP6_mmdemo_with_archiving.ipynb</code> provides demonstration of the cmip6_meteor_data_getter functionality to get data as xarrays directly from the CMIP6 zarrstore to use in pattern making and predictions, archiving inputs to save runtime on multiple runs. Finally these datasets are used to provide multimodel demonstration of the METEOR emulation with both CO2-based green house gas responses, and aerosol response from residuals. **Now includes**: Monthly noise generation examples showing the complete workflow from annual pattern scaling to monthly ensemble generation.
 
 <code>METEOR_paper_figures.ipynb</code> documents the code for Figures 1 and 3--7 of the main manuscript for deriving GHG and aerosol residula patterm and globally aggregated evaluation of METEOR, including supplementary figures showing individual behaviour of the models used as training data. It also illustrates reading and downloading (local save) training data, as well as running METEOR with this data and how to vary its inputs.
 
@@ -143,4 +154,4 @@ Tests are located in tests in tests/test-data/ data for testing against fortran 
 When you develop new code, try to think about what can be done to test and validate that your code does what you expect it to do, and try to integrate such tests into the automatic testing scheme.
 
 ## General code flow
-`meteor.py` contains the main control module, `prpatt.py` is a library with functions to fit parameters to define synthetic PC timeseries to processes PDRMIP output, as well as functions to convolve synthetic PCAs with user-defined forcing timeseries. `scm_forcer_engine.py` provides a wrapper to enable using the ciceroscm simple climate to estimate forcing strength from emissions. `meteor_plot_utils.py` provides some simple plotting functionality. `cmip6_meteor_data_getter.py` has functions to define and access CMIP6 data as xarrays from cloud storage, meaning you can use cmip6 data with meteor with out going through a huge download and data wrangling process before going ahead. This can also be leveraged on it's own to get cmip6 data to plot and explore.
+`meteor.py` contains the main control module with the MeteorPatternScaling class for annual pattern scaling and new monthly prediction capabilities. `noise_generator.py` provides the MeteorNoiseGenerator class for monthly climate variability using PCA/VARX modeling. `prpatt.py` is a library with functions to fit parameters to define synthetic PC timeseries to processes PDRMIP output, as well as functions to convolve synthetic PCAs with user-defined forcing timeseries. `scm_forcer_engine.py` provides a wrapper to enable using the ciceroscm simple climate to estimate forcing strength from emissions. `meteor_plot_utils.py` provides some simple plotting functionality. `cmip6_meteor_data_getter.py` has functions to define and access CMIP6 data as xarrays from cloud storage, meaning you can use cmip6 data with meteor with out going through a huge download and data wrangling process before going ahead. This can also be leveraged on it's own to get cmip6 data to plot and explore, and now includes integrated training methods for monthly noise models.

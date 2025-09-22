@@ -6,6 +6,7 @@ This module implements the methodology for:
 2. PCA-based spatial decomposition of anomalies
 3. VARX modeling of principal components
 4. Stochastic simulation of new climate realizations
+5. Noise-only generation for combining with annual climate projections
 """
 
 import numpy as np
@@ -25,6 +26,9 @@ class MeteorNoiseGenerator:
     This class implements a method to generate stochastic climate realizations
     by separating deterministic (temperature-dependent seasonal cycle) and
     stochastic (internal variability) components from monthly climate data.
+
+    Can generate either full climate realizations or noise-only components
+    that can be added to annual climate projections from METEOR.
 
     Attributes
     ----------
@@ -185,7 +189,11 @@ class MeteorNoiseGenerator:
         print(f"   - VARX lag order: {self.lag_order}")
 
     def generate_realization(
-        self, global_temp_trajectory, n_realizations=1, random_seed=None
+        self,
+        global_temp_trajectory,
+        n_realizations=1,
+        random_seed=None,
+        noise_only=False,
     ):
         """
         Generate stochastic climate realizations.
@@ -193,16 +201,22 @@ class MeteorNoiseGenerator:
         Parameters
         ----------
         global_temp_trajectory : array-like
-            Global temperature trajectory to drive the seasonal cycle
+            Global temperature trajectory to drive the seasonal cycle.
+            If noise_only=True, this can be any length array (values ignored for temperature effects).
         n_realizations : int, optional
             Number of realizations to generate. Default is 1.
         random_seed : int, optional
             Random seed for reproducibility
+        noise_only : bool, optional
+            If True, generate only the stochastic noise component without temperature
+            dependence or constant terms. This is useful for adding to METEOR annual
+            predictions. Default is False.
 
         Returns
         -------
-        list of xr.DataArray
-            Generated climate realizations
+        xr.DataArray or list of xr.DataArray
+            Generated climate realizations. If noise_only=True, returns just the
+            stochastic component that can be added to other predictions.
         """
         if not self.fitted:
             raise ValueError("Model must be fitted before generating realizations")
@@ -217,25 +231,65 @@ class MeteorNoiseGenerator:
             n_time = len(global_temp_trajectory)
             time = np.arange(n_time)
 
-            # Create harmonic features for the new trajectory
-            X = self._create_harmonic_features(time, global_temp_trajectory)
+            if noise_only:
+                # For noise-only: zero temperature, keep seasonal harmonics only
+                zero_temp = np.zeros_like(global_temp_trajectory)
+                X = self._create_harmonic_features(time, zero_temp)
 
-            # Generate seasonal cycle
-            seasonal_cycle = self.seasonal_model.predict(X)
-            seasonal_cycle_xr = xr.DataArray(
-                seasonal_cycle.reshape(
-                    n_time, len(self.coords["lat"]), len(self.coords["lon"])
-                ),
-                coords={
-                    "month": time,
-                    "lat": self.coords["lat"],
-                    "lon": self.coords["lon"],
-                },
-                dims=("month", "lat", "lon"),
-            )
+                # Generate seasonal cycle but remove temperature interactions and constant
+                seasonal_cycle = self.seasonal_model.predict(X)
 
-            # Generate stochastic component
-            synthetic_pcs = self._generate_stochastic_pcs(X[:, :3], n_time)
+                # Remove the constant term (intercept) and temperature-dependent terms
+                # The seasonal model has: intercept + t_glob + harmonics + t_glob*harmonics
+                # For noise-only, we want: harmonics only (indices 1-4 in the coefficient matrix)
+                seasonal_harmonics_only = np.zeros_like(seasonal_cycle)
+
+                # Extract just the harmonic coefficients (annual and semi-annual, indices 1-4)
+                harmonic_coeffs = self.seasonal_model.coef_[
+                    :, 1:5
+                ]  # Skip t_glob (0) and interactions (5-8)
+                harmonic_features = X[:, 1:5]  # Just the harmonic terms
+
+                # Apply harmonic components only
+                seasonal_harmonics_only = harmonic_features @ harmonic_coeffs.T
+
+                seasonal_cycle_xr = xr.DataArray(
+                    seasonal_harmonics_only.reshape(
+                        n_time, len(self.coords["lat"]), len(self.coords["lon"])
+                    ),
+                    coords={
+                        "month": time,
+                        "lat": self.coords["lat"],
+                        "lon": self.coords["lon"],
+                    },
+                    dims=("month", "lat", "lon"),
+                )
+            else:
+                # Standard operation: full seasonal cycle with temperature dependence
+                X = self._create_harmonic_features(time, global_temp_trajectory)
+
+                # Generate seasonal cycle
+                seasonal_cycle = self.seasonal_model.predict(X)
+                seasonal_cycle_xr = xr.DataArray(
+                    seasonal_cycle.reshape(
+                        n_time, len(self.coords["lat"]), len(self.coords["lon"])
+                    ),
+                    coords={
+                        "month": time,
+                        "lat": self.coords["lat"],
+                        "lon": self.coords["lon"],
+                    },
+                    dims=("month", "lat", "lon"),
+                )
+
+            # Generate stochastic component (same for both modes)
+            if noise_only:
+                # For noise-only, use zero temperature for exogenous variables
+                zero_temp = np.zeros_like(global_temp_trajectory)
+                X_zero = self._create_harmonic_features(time, zero_temp)
+                synthetic_pcs = self._generate_stochastic_pcs(X_zero[:, :3], n_time)
+            else:
+                synthetic_pcs = self._generate_stochastic_pcs(X[:, :3], n_time)
 
             # Reconstruct anomalies
             reconstructed_anomalies = synthetic_pcs @ self.pca.components_

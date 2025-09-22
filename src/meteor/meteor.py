@@ -13,6 +13,82 @@ from . import prpatt, scm_forcer_engine
 LOGGER = logging.getLogger(__name__)
 
 
+class Meteor:
+    """
+    Main METEOR emulator class.
+
+    This class orchestrates pattern scaling and noise generation
+    to create an ensemble of climate realisations based on a training set.
+    """
+
+    def __init__(self, pattern_scaling_model, noise_generator):
+        """
+        Initialise the METEOR emulator.
+
+        Parameters
+        ----------
+        pattern_scaling_model : object
+            A fitted pattern scaling model. It is assumed to have a `predict`
+            method that takes a global mean trajectory (xr.DataArray) and
+            returns a spatio-temporal field (xr.DataArray).
+        noise_generator : object
+            A fitted noise generator with a `generate_noise` method.
+        """
+        self.pattern_scaling_model_ = pattern_scaling_model
+        self.noise_generator_ = noise_generator
+        self.X_train_ = None
+        self.ensemble_ = None
+
+    def fit(self, X_train):
+        """
+        "Fits" the model by providing the training data.
+
+        In a complete workflow, this method might also train the pattern
+        scaling and noise models. Here, we assume they are pre-trained and
+        we just store the training data required for generating new
+        realisations.
+
+        Parameters
+        ----------
+        X_train : xr.DataArray
+            Training data with dimensions ('member', 'time', 'lat', 'lon').
+        """
+        self.X_train_ = X_train
+        # The initial ensemble is the training data itself.
+        self.ensemble_ = X_train.copy(deep=True)
+        return self
+
+    def add_realisation(self):
+        """
+        Generate and add a new realisation to the ensemble.
+
+        This implements the corrected logic where a single mean warming
+        pattern is calculated from the ensemble-mean trajectory of the
+        training data. A new, unique noise realisation is then added to this
+        mean pattern to create the new ensemble member.
+        """
+        if self.X_train_ is None:
+            raise RuntimeError("Model is not fitted. Call fit(X_train) first.")
+
+        # generate a new noise realisation
+        new_noise = self.noise_generator_.generate_noise()
+
+        # The mean signal is the forced response component, which is assumed to be
+        # the same for all realisations. We estimate this from the mean
+        # global-mean temperature change across all training members.
+        mean_global_mean_trajectory = self.X_train_.mean(dim=["lat", "lon", "member"])
+        mean_warming_pattern = self.pattern_scaling_model_.predict(
+            mean_global_mean_trajectory
+        )
+
+        # A new realisation is the sum of the mean warming pattern and a new
+        # noise realisation.
+        new_realisation = mean_warming_pattern + new_noise
+
+        # add the new realisation to the ensemble
+        self.ensemble_ = xr.concat([self.ensemble_, new_realisation], dim="member")
+
+
 def read_training_data(get_training_data, exp_list, from_file=True):
     """
     Read training data into xarray
@@ -647,3 +723,95 @@ class MeteorPatternScaling:
             conc_run=conc_run,
             random_seed=random_seed,
         )
+
+    def to_monthly(self, annual_prediction, start_year=None):
+        """
+        Convert annual prediction output to monthly intervals.
+
+        This method expands annual climate predictions to monthly resolution
+        by repeating each annual value 12 times. This allows easy combination
+        with monthly noise generator output.
+
+        Parameters
+        ----------
+        annual_prediction : xr.DataArray
+            Annual climate prediction with dimensions (time, lat, lon) where
+            time represents years
+        start_year : int, optional
+            Starting year for the monthly time coordinate. If None, uses
+            integer indices starting from 0.
+
+        Returns
+        -------
+        xr.DataArray
+            Monthly climate prediction with dimensions (month, lat, lon)
+            where each annual value is repeated for 12 consecutive months
+
+        Examples
+        --------
+        >>> # Get annual prediction from METEOR
+        >>> annual_pred = pattern_model.predict_from_combined_experiment(...)
+        >>> # Convert to monthly for combining with noise
+        >>> monthly_pred = pattern_model.to_monthly(annual_pred['tas'])
+        >>> # Now can add monthly noise
+        >>> full_monthly = monthly_pred + noise_realization
+        """
+        # Validate input
+        if not isinstance(annual_prediction, xr.DataArray):
+            raise ValueError("annual_prediction must be an xarray DataArray")
+
+        if "time" not in annual_prediction.dims:
+            raise ValueError("annual_prediction must have a 'time' dimension")
+
+        # Get dimensions
+        time_dim = annual_prediction.get_axis_num("time")
+        n_years = annual_prediction.shape[time_dim]
+        n_months = n_years * 12
+
+        # Create expanded array by repeating each year 12 times
+        # Use numpy repeat along the time axis
+        expanded_values = np.repeat(annual_prediction.values, 12, axis=time_dim)
+
+        # Create monthly time coordinate
+        if start_year is not None:
+            # Create proper monthly time coordinate based on years
+            months = []
+            for year_idx in range(n_years):
+                year = start_year + year_idx
+                for month in range(12):
+                    months.append(year * 12 + month)  # Year-month index
+            monthly_coord = np.array(months)
+        else:
+            # Use simple integer indexing
+            monthly_coord = np.arange(n_months)
+
+        # Create new DataArray with monthly dimensions
+        # Replace time dimension with month dimension
+        new_dims = list(annual_prediction.dims)
+        new_dims[time_dim] = "month"
+
+        # Create new coordinates
+        new_coords = {}
+        for coord_name, coord_values in annual_prediction.coords.items():
+            if coord_name == "time":
+                new_coords["month"] = monthly_coord
+            else:
+                new_coords[coord_name] = coord_values
+
+        # Create the monthly DataArray
+        monthly_prediction = xr.DataArray(
+            expanded_values,
+            dims=new_dims,
+            coords=new_coords,
+            attrs=annual_prediction.attrs.copy(),
+        )
+
+        # Update attributes to indicate monthly conversion
+        monthly_prediction.attrs["converted_to_monthly"] = True
+        if "description" in monthly_prediction.attrs:
+            monthly_prediction.attrs["description"] = (
+                monthly_prediction.attrs["description"]
+                + " (converted from annual to monthly by repeating values)"
+            )
+
+        return monthly_prediction

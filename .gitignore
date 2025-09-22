@@ -133,3 +133,5 @@ dmypy.json
 
 #VSCode
 .vscode/
+
+notebooks/noise_cache

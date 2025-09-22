@@ -133,6 +133,3 @@ dmypy.json
 
 #VSCode
 .vscode/
-
-notebooks/
-CanESM5_ssp245_monthly.nc

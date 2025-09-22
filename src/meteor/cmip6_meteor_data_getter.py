@@ -438,7 +438,36 @@ class Cmip6MeteorDataGetter:
         )  # .assign_coords({'ens':1})
         return var_yearly
 
-    def make_meteor_training_data(self, exp, model, exp_mapper=None):
+    def get_single_var_mod_data_monthly(self, exp, fld, model):
+        """
+        Get monthly data for a single variable, model and experiment combination
+
+        Parameters
+        ----------
+        exp: str
+            Name of experiment for which you want data
+        fld: str
+            Name of field for which you want data
+        model: str
+            Name of model for which you want data
+
+        Returns
+        -------
+        xr.DataArrray
+            Monthly data with time dimension preserved and including an extra flat ens dimension
+        """
+        ds = self.get_single_var_mod_data(exp, fld, model)
+        if ds is None:
+            return None
+
+        var_monthly = ds[fld]
+        var_monthly = var_monthly.assign_coords(
+            {"time": np.arange(len(ds.time.values))}
+        ).rename({"time": "month"})
+        var_monthly = var_monthly.expand_dims(dim={"ens": np.array([1])})
+        return var_monthly
+
+    def make_meteor_training_data(self, exp, model, exp_mapper=None, monthly=False):
         """
         Make xr.dataset with data and format used for meteor
 
@@ -452,29 +481,45 @@ class Cmip6MeteorDataGetter:
         exp_mapper : dict
             Dictionary that maps experiments of the METEOR type (keys) to experiments
             getable by the CMIP6DataGetter (values)
+        monthly : bool, optional
+            If True, return monthly data instead of yearly averages. Default is False.
 
         Returns
         -------
         xr.Dataset
-            Dataset with yearly data on the format usable for METEOR
+            Dataset with yearly data on the format usable for METEOR (or monthly if monthly=True)
         """
         if not exp_mapper:
             exp_mapper = cmip6_to_meteor_exp_remapper
         fld_values = []
         for fld in self.flds:
             if exp in exp_mapper:
-                fld_values.append(
-                    self.get_single_var_mod_data_yearmean(exp_mapper[exp], fld, model)
-                )
+                if monthly:
+                    fld_values.append(
+                        self.get_single_var_mod_data_monthly(
+                            exp_mapper[exp], fld, model
+                        )
+                    )
+                else:
+                    fld_values.append(
+                        self.get_single_var_mod_data_yearmean(
+                            exp_mapper[exp], fld, model
+                        )
+                    )
             else:
-                fld_values.append(
-                    self.get_single_var_mod_data_yearmean(exp, fld, model)
-                )
+                if monthly:
+                    fld_values.append(
+                        self.get_single_var_mod_data_monthly(exp, fld, model)
+                    )
+                else:
+                    fld_values.append(
+                        self.get_single_var_mod_data_yearmean(exp, fld, model)
+                    )
         training_data = make_xarray_with_correct_dims(self.flds, fld_values)
         return training_data
 
     def make_meteor_training_data_composite(
-        self, exps, model, overlap=None
+        self, exps, model, overlap=None, monthly=False
     ):  # pylint: disable=too-many-nested-blocks
         """
         Make xr.dataset with data and format used for meteor
@@ -498,52 +543,77 @@ class Cmip6MeteorDataGetter:
             you can specify a number of years (int) to cut in the previous dataset.
             Currently cutting from the last dataset is not implemented, but
             may be added later.
+        monthly : bool, optional
+            If True, return monthly data instead of yearly averages. Default is False.
+            When True, overlap cuts are multiplied by 12 to account for monthly timesteps.
 
         Returns
         -------
         xr.Dataset
-            Dataset with yearly data on the format usable for METEOR
+            Dataset with yearly data on the format usable for METEOR (or monthly if monthly=True)
         """
         # TODO: Add support for cutting forward.
         fld_values = []
+        time_dim = "month" if monthly else "year"
+
         for fld in self.flds:
             value = None
             for exp in exps:
                 if value is None:
-                    value = self.get_single_var_mod_data_yearmean(exp, fld, model)
+                    if monthly:
+                        value = self.get_single_var_mod_data_monthly(exp, fld, model)
+                    else:
+                        value = self.get_single_var_mod_data_yearmean(exp, fld, model)
                 else:
-                    next_dataset = self.get_single_var_mod_data_yearmean(
-                        exp, fld, model
-                    )
+                    if monthly:
+                        next_dataset = self.get_single_var_mod_data_monthly(
+                            exp, fld, model
+                        )
+                    else:
+                        next_dataset = self.get_single_var_mod_data_yearmean(
+                            exp, fld, model
+                        )
+
                     if overlap is not None:
                         if exp in overlap:
                             if overlap[exp] == "Full-back":
-                                cut = len(next_dataset["year"].values)
+                                cut = len(next_dataset[time_dim].values)
                                 # Hacky fix for if ssp experiments run
                                 if (
                                     exp.startswith("ssp")
-                                    and cut > 200
-                                    and len(value["year"].values) <= 352
+                                    and cut
+                                    > (
+                                        2400 if monthly else 200
+                                    )  # 200 years * 12 months
+                                    and len(value[time_dim].values)
+                                    <= (
+                                        4224 if monthly else 352
+                                    )  # 352 years * 12 months
                                 ):
-                                    cut = cut - 200
+                                    cut = cut - (
+                                        2400 if monthly else 200
+                                    )  # 200 years * 12 months
                             else:
-                                cut = overlap[exp]
+                                cut = overlap[exp] * (
+                                    12 if monthly else 1
+                                )  # Convert years to months if needed
 
                             value = value.sel(
-                                year=slice(0, len(value["year"].values) - cut - 1)
+                                **{
+                                    time_dim: slice(
+                                        0, len(value[time_dim].values) - cut - 1
+                                    )
+                                }
                             )
-                    start_year = value["year"].values[-1] + 1
+                    start_time = value[time_dim].values[-1] + 1
 
-                    end_year_plus = start_year + next_dataset.sizes["year"]
-                    # print(next_dataset.sizes["year"])
-                    # print(len(range(start_year, end_year_plus)))
-                    # print(range(start_year, end_year_plus))
+                    end_time_plus = start_time + next_dataset.sizes[time_dim]
                     next_dataset = next_dataset.assign_coords(
-                        {"year": np.arange(start_year, end_year_plus)}
+                        {time_dim: np.arange(start_time, end_time_plus)}
                     )
                     value = xr.concat(
                         [value, next_dataset],
-                        dim="year",
+                        dim=time_dim,
                     )
             fld_values.append(value)
         return make_xarray_with_correct_dims(self.flds, fld_values)

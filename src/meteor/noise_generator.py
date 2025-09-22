@@ -3,7 +3,10 @@ Module for generating climate noise realizations using PCA and VARX modeling.
 
 This module implements the methodology for:
 1. Temperature-dependent seasonal cycle extraction using modulated harmonic regression
-2. PCA-based spatial decomposition of anomalies
+        xr.DataArray or list of xr.DataArray
+            Generated climate realizations. If noise_only=True, returns the
+            stochastic component plus temperature-modulated harmonics (but without
+            direct temperature trends) that can be added to other predictions.PCA-based spatial decomposition of anomalies
 3. VARX modeling of principal components
 4. Stochastic simulation of new climate realizations
 5. Noise-only generation for combining with annual climate projections
@@ -208,11 +211,9 @@ class MeteorNoiseGenerator:
         random_seed : int, optional
             Random seed for reproducibility
         noise_only : bool, optional
-            If True, generate only the stochastic noise component without temperature
-            dependence or constant terms. This is useful for adding to METEOR annual
-            predictions. Default is False.
-
-        Returns
+            If True, generate only the stochastic noise component without direct temperature
+            effects or constant terms, but preserve temperature-modulated seasonal harmonics.
+            This is useful for adding to METEOR annual predictions. Default is False.        Returns
         -------
         xr.DataArray or list of xr.DataArray
             Generated climate realizations. If noise_only=True, returns just the
@@ -232,29 +233,37 @@ class MeteorNoiseGenerator:
             time = np.arange(n_time)
 
             if noise_only:
-                # For noise-only: zero temperature, keep seasonal harmonics only
-                zero_temp = np.zeros_like(global_temp_trajectory)
-                X = self._create_harmonic_features(time, zero_temp)
+                # For noise-only: keep seasonal harmonics AND temperature-modulated harmonics
+                # but remove the direct temperature effect (intercept + t_glob term)
+                X = self._create_harmonic_features(time, global_temp_trajectory)
 
-                # Generate seasonal cycle but remove temperature interactions and constant
+                # Generate full seasonal cycle prediction
                 seasonal_cycle = self.seasonal_model.predict(X)
 
-                # Remove the constant term (intercept) and temperature-dependent terms
-                # The seasonal model has: intercept + t_glob + harmonics + t_glob*harmonics
-                # For noise-only, we want: harmonics only (indices 1-4 in the coefficient matrix)
-                seasonal_harmonics_only = np.zeros_like(seasonal_cycle)
+                # Now remove only the direct temperature effects (intercept + t_glob)
+                # Keep: harmonics (indices 1-4) + temperature-modulated harmonics (indices 5-8)
+                # Remove: intercept + t_glob (index 0)
 
-                # Extract just the harmonic coefficients (annual and semi-annual, indices 1-4)
-                harmonic_coeffs = self.seasonal_model.coef_[
-                    :, 1:5
-                ]  # Skip t_glob (0) and interactions (5-8)
-                harmonic_features = X[:, 1:5]  # Just the harmonic terms
+                # Create a modified prediction by zeroing out unwanted terms
+                # The seasonal model coefficients are organized as:
+                # coef_[:, 0] = t_glob coefficient (direct temperature effect)
+                # coef_[:, 1-4] = pure harmonic coefficients
+                # coef_[:, 5-8] = temperature-modulated harmonic coefficients
 
-                # Apply harmonic components only
-                seasonal_harmonics_only = harmonic_features @ harmonic_coeffs.T
+                # Calculate what to subtract (intercept + direct temperature effect)
+                intercept_effect = self.seasonal_model.intercept_
+                temp_effect = (
+                    self.seasonal_model.coef_[:, 0]
+                    * global_temp_trajectory[:, np.newaxis]
+                )
+
+                # Remove intercept and direct temperature effect from seasonal cycle
+                seasonal_cycle_adjusted = (
+                    seasonal_cycle - intercept_effect[np.newaxis, :] - temp_effect
+                )
 
                 seasonal_cycle_xr = xr.DataArray(
-                    seasonal_harmonics_only.reshape(
+                    seasonal_cycle_adjusted.reshape(
                         n_time, len(self.coords["lat"]), len(self.coords["lon"])
                     ),
                     coords={
@@ -282,12 +291,11 @@ class MeteorNoiseGenerator:
                     dims=("month", "lat", "lon"),
                 )
 
-            # Generate stochastic component (same for both modes)
+            # Generate stochastic component
             if noise_only:
-                # For noise-only, use zero temperature for exogenous variables
-                zero_temp = np.zeros_like(global_temp_trajectory)
-                X_zero = self._create_harmonic_features(time, zero_temp)
-                synthetic_pcs = self._generate_stochastic_pcs(X_zero[:, :3], n_time)
+                # For noise-only, keep temperature in exogenous variables but use actual temperature
+                # This preserves the temperature-dependent variability patterns
+                synthetic_pcs = self._generate_stochastic_pcs(X[:, :3], n_time)
             else:
                 synthetic_pcs = self._generate_stochastic_pcs(X[:, :3], n_time)
 

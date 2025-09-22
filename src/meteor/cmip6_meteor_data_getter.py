@@ -646,26 +646,16 @@ class Cmip6MeteorDataGetter:
         """
         from .noise_generator import MeteorNoiseGenerator
 
-        # Get monthly training data
-        monthly_data = self.make_meteor_training_data_composite(
-            experiments, model, monthly=True
+        # Use the class method for consistency
+        return MeteorNoiseGenerator.train_from_cmip6(
+            self,
+            experiments,
+            model,
+            variable_name,
+            n_modes=n_modes,
+            lag_order=lag_order,
+            cache_dir=cache_dir,
         )
-
-        # Create and fit noise generator
-        noise_gen = MeteorNoiseGenerator(n_modes=n_modes, lag_order=lag_order)
-        noise_gen.fit(monthly_data, variable_name)
-
-        # Cache if requested
-        if cache_dir is not None:
-            import os
-
-            os.makedirs(cache_dir, exist_ok=True)
-            cache_path = os.path.join(
-                cache_dir, f"{model}_{variable_name}_noise_model.pkl"
-            )
-            noise_gen.save_model(cache_path)
-
-        return noise_gen
 
     def train_all_noise_models(
         self,
@@ -699,34 +689,15 @@ class Cmip6MeteorDataGetter:
         dict
             Nested dictionary with structure: {model: {variable: MeteorNoiseGenerator}}
         """
-        if models is None:
-            models = self.models
-        if variables is None:
-            variables = self.flds
+        from .noise_generator import MeteorNoiseGenerator
 
-        noise_models = {}
-
-        for model in models:
-            if not self.check_if_model_has_data(model):
-                print(f"Skipping {model} - no complete data available")
-                continue
-
-            noise_models[model] = {}
-
-            for variable in variables:
-                print(f"Training noise model for {model} - {variable}")
-                try:
-                    noise_gen = self.train_noise_model(
-                        experiments,
-                        model,
-                        variable,
-                        n_modes=n_modes,
-                        lag_order=lag_order,
-                        cache_dir=cache_dir,
-                    )
-                    noise_models[model][variable] = noise_gen
-                except Exception as e:
-                    print(f"Failed to train noise model for {model} - {variable}: {e}")
-                    continue
-
-        return noise_models
+        # Use the class method for batch training
+        return MeteorNoiseGenerator.train_multiple_from_cmip6(
+            self,
+            experiments,
+            models=models,
+            variables=variables,
+            n_modes=n_modes,
+            lag_order=lag_order,
+            cache_dir=cache_dir,
+        )

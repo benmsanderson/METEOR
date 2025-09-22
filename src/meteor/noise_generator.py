@@ -347,6 +347,196 @@ class MeteorNoiseGenerator:
 
         print(f"Model loaded from {filepath}")
 
+    @classmethod
+    def train_from_cmip6(
+        cls,
+        data_getter,
+        experiments,
+        model_name,
+        variable_name,
+        n_modes=10,
+        lag_order=2,
+        cache_dir=None,
+    ):
+        """
+        Train a noise generator directly from CMIP6 data getter.
+
+        This is the primary training interface that provides intuitive access
+        to noise model training from CMIP6 composite experimental data.
+
+        Parameters
+        ----------
+        data_getter : Cmip6MeteorDataGetter
+            Data getter instance with access to CMIP6 data
+        experiments : list
+            List of experiments to use for training (e.g., ["historical", "ssp245"])
+        model_name : str
+            Name of the climate model (must be available in data_getter)
+        variable_name : str
+            Variable to model (e.g., 'tas', 'pr')
+        n_modes : int, optional
+            Number of PCA modes to retain. Default is 10.
+        lag_order : int, optional
+            Lag order for VARX model. Default is 2.
+        cache_dir : str, optional
+            Directory to cache the trained model. If None, model is not cached.
+
+        Returns
+        -------
+        MeteorNoiseGenerator
+            Fitted noise generator ready for realization generation
+
+        Examples
+        --------
+        >>> # Train a temperature noise model
+        >>> noise_model = MeteorNoiseGenerator.train_from_cmip6(
+        ...     data_getter, ["historical", "ssp245"], "CanESM5", "tas",
+        ...     n_modes=8, cache_dir="./models"
+        ... )
+        >>>
+        >>> # Generate realizations
+        >>> realizations = noise_model.generate_realization(temp_trajectory)
+        """
+        # Get monthly training data
+        monthly_data = data_getter.make_meteor_training_data_composite(
+            experiments, model_name, monthly=True
+        )
+
+        # Create and fit noise generator
+        noise_gen = cls(n_modes=n_modes, lag_order=lag_order)
+        noise_gen.fit(monthly_data, variable_name)
+
+        # Cache if requested
+        if cache_dir is not None:
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_path = os.path.join(
+                cache_dir, f"{model_name}_{variable_name}_noise_model.pkl"
+            )
+            noise_gen.save_model(cache_path)
+
+        return noise_gen
+
+    @classmethod
+    def train_multiple_from_cmip6(
+        cls,
+        data_getter,
+        experiments,
+        models=None,
+        variables=None,
+        n_modes=10,
+        lag_order=2,
+        cache_dir=None,
+    ):
+        """
+        Train noise generators for multiple model/variable combinations.
+
+        This method provides batch training functionality for multiple
+        models and variables, useful for comprehensive noise model creation.
+
+        Parameters
+        ----------
+        data_getter : Cmip6MeteorDataGetter
+            Data getter instance with access to CMIP6 data
+        experiments : list
+            List of experiments to use for training
+        models : list, optional
+            List of models to train. If None, uses all available models.
+        variables : list, optional
+            List of variables to train. If None, uses all fields in data getter.
+        n_modes : int, optional
+            Number of PCA modes to retain. Default is 10.
+        lag_order : int, optional
+            Lag order for VARX model. Default is 2.
+        cache_dir : str, optional
+            Directory to cache trained models
+
+        Returns
+        -------
+        dict
+            Nested dictionary with structure: {model: {variable: MeteorNoiseGenerator}}
+
+        Examples
+        --------
+        >>> # Train noise models for all available combinations
+        >>> noise_models = MeteorNoiseGenerator.train_multiple_from_cmip6(
+        ...     data_getter, ["historical", "ssp245"],
+        ...     models=["CanESM5", "CESM2"], variables=["tas", "pr"],
+        ...     cache_dir="./models"
+        ... )
+        >>>
+        >>> # Access specific model
+        >>> tas_model = noise_models["CanESM5"]["tas"]
+        """
+        if models is None:
+            models = data_getter.models
+        if variables is None:
+            variables = data_getter.flds
+
+        noise_models = {}
+
+        for model in models:
+            if not data_getter.check_if_model_has_data(model):
+                print(f"Skipping {model} - no complete data available")
+                continue
+
+            noise_models[model] = {}
+
+            for variable in variables:
+                print(f"Training noise model for {model} - {variable}")
+                try:
+                    noise_gen = cls.train_from_cmip6(
+                        data_getter,
+                        experiments,
+                        model,
+                        variable,
+                        n_modes=n_modes,
+                        lag_order=lag_order,
+                        cache_dir=cache_dir,
+                    )
+                    noise_models[model][variable] = noise_gen
+                except Exception as e:
+                    print(f"Failed to train noise model for {model} - {variable}: {e}")
+                    continue
+
+        return noise_models
+
+    @classmethod
+    def load_from_cache(cls, cache_dir, model_name, variable_name):
+        """
+        Load a previously cached noise model.
+
+        Parameters
+        ----------
+        cache_dir : str
+            Directory containing cached models
+        model_name : str
+            Name of the climate model
+        variable_name : str
+            Name of the variable
+
+        Returns
+        -------
+        MeteorNoiseGenerator
+            Loaded noise generator
+
+        Examples
+        --------
+        >>> # Load a previously trained model
+        >>> noise_model = MeteorNoiseGenerator.load_from_cache(
+        ...     "./models", "CanESM5", "tas"
+        ... )
+        """
+        cache_path = os.path.join(
+            cache_dir, f"{model_name}_{variable_name}_noise_model.pkl"
+        )
+
+        if not os.path.exists(cache_path):
+            raise FileNotFoundError(f"No cached model found at {cache_path}")
+
+        noise_gen = cls()
+        noise_gen.load_model(cache_path)
+        return noise_gen
+
 
 def train_noise_model_from_composite(
     data_getter,
@@ -359,6 +549,7 @@ def train_noise_model_from_composite(
 ):
     """
     Convenience function to train a noise model from composite experimental data.
+
 
     Parameters
     ----------
@@ -382,21 +573,13 @@ def train_noise_model_from_composite(
     MeteorNoiseGenerator
         Fitted noise generator
     """
-    # Get monthly training data
-    monthly_data = data_getter.make_meteor_training_data_composite(
-        experiments, model_name, monthly=True
+    # Use the new class method for consistency
+    return MeteorNoiseGenerator.train_from_cmip6(
+        data_getter,
+        experiments,
+        model_name,
+        variable_name,
+        n_modes=n_modes,
+        lag_order=lag_order,
+        cache_dir=cache_dir,
     )
-
-    # Create and fit noise generator
-    noise_gen = MeteorNoiseGenerator(n_modes=n_modes, lag_order=lag_order)
-    noise_gen.fit(monthly_data, variable_name)
-
-    # Cache if requested
-    if cache_dir is not None:
-        os.makedirs(cache_dir, exist_ok=True)
-        cache_path = os.path.join(
-            cache_dir, f"{model_name}_{variable_name}_noise_model.pkl"
-        )
-        noise_gen.save_model(cache_path)
-
-    return noise_gen

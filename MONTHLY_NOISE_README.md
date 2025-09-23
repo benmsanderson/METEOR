@@ -341,6 +341,105 @@ monthly_predictions = pattern_scaling.predict_monthly_with_noise(
 )
 ```
 
+## Custom Global Temperature Training
+
+METEOR now supports using custom global mean temperature trajectories for noise model training instead of automatically computing them from the climate variable data. This enables greater flexibility in temperature-dependent seasonal modeling.
+
+### When to Use Custom Temperature
+
+- **Different smoothing approaches**: Use 20-year vs 10-year running means
+- **External datasets**: Incorporate observational or reanalysis temperature data  
+- **Climate sensitivity studies**: Apply specific warming assumptions
+- **Multi-variable consistency**: Use the same temperature across different variables
+- **Preprocessing**: Apply custom detrending or bias correction
+- **Research scenarios**: Test sensitivity to different temperature trajectories
+
+### Usage with Data Getter
+
+```python
+import numpy as np
+import xarray as xr
+from meteor import Cmip6MeteorDataGetter
+
+# Create or load your custom temperature timeseries
+# Example: 20-year smoothed global temperature
+custom_temp = xr.DataArray(
+    your_temperature_data,  # Shape: (time,)
+    coords={"time": time_coordinates},
+    dims=["time"],
+    name="global_mean_temperature"
+)
+
+# Train with custom temperature
+data_getter = Cmip6MeteorDataGetter(...)
+noise_model = data_getter.train_noise_model(
+    experiments=["historical", "ssp245"],
+    model="CanESM5",
+    variable_name="tas", 
+    custom_global_temp=custom_temp  # Use your temperature series
+)
+```
+
+### Usage with MeteorNoiseGenerator
+
+```python
+from meteor import MeteorNoiseGenerator
+
+# Load your climate variable data
+climate_data = xr.open_dataset("your_climate_data.nc")
+
+# Create custom temperature (different from auto-computation)
+custom_temp = your_temperature_processing_function(climate_data)
+
+# Train directly with custom temperature
+noise_gen = MeteorNoiseGenerator()
+noise_gen.fit(
+    climate_data.tas,
+    custom_global_temp=custom_temp,
+    n_modes=10,
+    lag_order=2
+)
+```
+
+### Batch Training with Custom Temperature
+
+```python
+# Train multiple models/variables with same custom temperature
+trained_models = data_getter.train_all_noise_models(
+    experiments=["historical", "ssp245"],
+    models=["CanESM5", "CESM2"],
+    variables=["tas", "pr"],
+    custom_global_temp=custom_temp  # Applied to all training
+)
+```
+
+### Requirements for Custom Temperature
+
+The custom temperature timeseries must:
+- **Time alignment**: Span the same time period as your training data
+- **Annual resolution**: Provide yearly temperature values
+- **Proper format**: Be an xarray.DataArray with time coordinate
+- **Units**: Typically in degrees Celsius or Kelvin (documented in attrs)
+
+Example custom temperature creation:
+```python
+# Load and process temperature data
+temperature_raw = load_your_temperature_data()
+
+# Apply your preferred smoothing
+temperature_smoothed = apply_smoothing(temperature_raw, window=20)
+
+# Create properly formatted DataArray
+custom_temp = xr.DataArray(
+    temperature_smoothed,
+    coords={"time": xr.cftime_range("1850", "2100", freq="YE")},
+    dims=["time"],
+    attrs={
+        "units": "degC", 
+        "description": "20-year smoothed global mean temperature"
+    }
+)
+```
 
 ## Usage Examples
 

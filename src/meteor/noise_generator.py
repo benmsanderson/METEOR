@@ -109,7 +109,7 @@ class MeteorNoiseGenerator:
 
         return X
 
-    def fit(self, monthly_data, variable_name):
+    def fit(self, monthly_data, variable_name, custom_global_temp=None):
         """
         Fit the noise generator to monthly climate data.
 
@@ -119,6 +119,10 @@ class MeteorNoiseGenerator:
             Monthly climate data with dimensions (month, lat, lon, ens)
         variable_name : str
             Name of the variable to model (e.g., 'tas', 'pr')
+        custom_global_temp : array-like, optional
+            Custom smoothed global mean temperature timeseries to use instead
+            of computing from the data. Must have same length as monthly_data
+            time dimension. If None, will compute from the variable data.
         """
         # Extract the variable data
         if variable_name not in monthly_data:
@@ -126,20 +130,30 @@ class MeteorNoiseGenerator:
 
         ds = monthly_data.copy()
 
-        # Calculate global mean temperature and remove ensemble mean for reference
-        t_globm = ds[variable_name].mean(dim=["lat", "lon", "ens"])
-        t_globm = t_globm - t_globm[:500].mean()  # Remove baseline
-
-        # Apply smoothing
-        t_glob = (
-            t_globm.rolling(month=60, center=True)
-            .mean()
-            .interpolate_na("month", method="nearest", fill_value="extrapolate")
-            .values
-        )
-
         # Get time coordinate
         time = ds["month"].values
+
+        # Calculate or use provided global temperature
+        if custom_global_temp is not None:
+            # Validate custom temperature array
+            if len(custom_global_temp) != len(time):
+                raise ValueError(
+                    f"custom_global_temp length ({len(custom_global_temp)}) "
+                    f"must match data time dimension ({len(time)})"
+                )
+            t_glob = np.array(custom_global_temp)
+        else:
+            # Calculate global mean temperature and remove ensemble mean for reference
+            t_globm = ds[variable_name].mean(dim=["lat", "lon", "ens"])
+            t_globm = t_globm - t_globm[:500].mean()  # Remove baseline
+
+            # Apply smoothing
+            t_glob = (
+                t_globm.rolling(month=60, center=True)
+                .mean()
+                .interpolate_na("month", method="nearest", fill_value="extrapolate")
+                .values
+            )
 
         # Create harmonic features
         X = self._create_harmonic_features(time, t_glob)
@@ -419,6 +433,7 @@ class MeteorNoiseGenerator:
         n_modes=10,
         lag_order=2,
         cache_dir=None,
+        custom_global_temp=None,
     ):
         """
         Train a noise generator directly from CMIP6 data getter.
@@ -442,6 +457,11 @@ class MeteorNoiseGenerator:
             Lag order for VARX model. Default is 2.
         cache_dir : str, optional
             Directory to cache the trained model. If None, model is not cached.
+        custom_global_temp : array-like, optional
+            Custom smoothed global mean temperature timeseries to use for training
+            instead of computing from the variable data. Must have same length as
+            the monthly data time dimension. Useful when you want to use a specific
+            temperature trajectory (e.g., from a different variable or processing).
 
         Returns
         -------
@@ -466,7 +486,9 @@ class MeteorNoiseGenerator:
 
         # Create and fit noise generator
         noise_gen = cls(n_modes=n_modes, lag_order=lag_order)
-        noise_gen.fit(monthly_data, variable_name)
+        noise_gen.fit(
+            monthly_data, variable_name, custom_global_temp=custom_global_temp
+        )
 
         # Cache if requested
         if cache_dir is not None:
@@ -488,6 +510,7 @@ class MeteorNoiseGenerator:
         n_modes=10,
         lag_order=2,
         cache_dir=None,
+        custom_global_temp=None,
     ):
         """
         Train noise generators for multiple model/variable combinations.
@@ -511,6 +534,9 @@ class MeteorNoiseGenerator:
             Lag order for VARX model. Default is 2.
         cache_dir : str, optional
             Directory to cache trained models
+        custom_global_temp : array-like, optional
+            Custom smoothed global mean temperature timeseries to use for all
+            model/variable combinations. Must have same length as monthly data.
 
         Returns
         -------
@@ -554,6 +580,7 @@ class MeteorNoiseGenerator:
                         n_modes=n_modes,
                         lag_order=lag_order,
                         cache_dir=cache_dir,
+                        custom_global_temp=custom_global_temp,
                     )
                     noise_models[model][variable] = noise_gen
                 except Exception as e:

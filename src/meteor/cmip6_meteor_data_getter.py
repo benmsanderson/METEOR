@@ -619,7 +619,14 @@ class Cmip6MeteorDataGetter:
         return make_xarray_with_correct_dims(self.flds, fld_values)
 
     def train_noise_model(
-        self, experiments, model, variable_name, n_modes=10, lag_order=2, cache_dir=None
+        self,
+        experiments,
+        model,
+        variable_name,
+        n_modes=10,
+        lag_order=2,
+        cache_dir=None,
+        custom_global_temp=None,
     ):
         """
         Train a noise generator model for a specific variable and model.
@@ -638,6 +645,9 @@ class Cmip6MeteorDataGetter:
             Lag order for VARX model. Default is 2.
         cache_dir : str, optional
             Directory to cache the trained model. If None, model is not cached.
+        custom_global_temp : xarray.DataArray, optional
+            Custom global mean temperature timeseries to use instead of computing
+            from the variable data. Must span the same time period as the training data.
 
         Returns
         -------
@@ -655,6 +665,7 @@ class Cmip6MeteorDataGetter:
             n_modes=n_modes,
             lag_order=lag_order,
             cache_dir=cache_dir,
+            custom_global_temp=custom_global_temp,
         )
 
     def train_all_noise_models(
@@ -665,6 +676,7 @@ class Cmip6MeteorDataGetter:
         n_modes=10,
         lag_order=2,
         cache_dir=None,
+        custom_global_temp=None,
     ):
         """
         Train noise models for all specified combinations of models and variables.
@@ -683,6 +695,9 @@ class Cmip6MeteorDataGetter:
             Lag order for VARX model. Default is 2.
         cache_dir : str, optional
             Directory to cache the trained models
+        custom_global_temp : xarray.DataArray, optional
+            Custom global mean temperature timeseries to use instead of computing
+            from the variable data. Must span the same time period as the training data.
 
         Returns
         -------
@@ -700,4 +715,5 @@ class Cmip6MeteorDataGetter:
             n_modes=n_modes,
             lag_order=lag_order,
             cache_dir=cache_dir,
+            custom_global_temp=custom_global_temp,
         )

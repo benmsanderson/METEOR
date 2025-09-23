@@ -171,7 +171,7 @@ class MeteorNoiseGenerator:
             else:
                 # Fall back to original method (first 42 years)
                 t_globm = t_globm - t_globm[:500].mean()  # Remove baseline
-                print("   Using first 42 years as baseline (legacy mode)")
+                print("   Using first 42 years as baseline")
 
             # Apply smoothing
             t_glob = (

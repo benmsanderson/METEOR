@@ -20,6 +20,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.decomposition import PCA
 from statsmodels.tsa.api import VAR
 import warnings
+from .prpatt import global_mean
 
 
 class MeteorNoiseGenerator:
@@ -109,7 +110,13 @@ class MeteorNoiseGenerator:
 
         return X
 
-    def fit(self, monthly_data, variable_name, custom_global_temp=None):
+    def fit(
+        self,
+        monthly_data,
+        variable_name,
+        custom_global_temp=None,
+        picontrol_baseline=None,
+    ):
         """
         Fit the noise generator to monthly climate data.
 
@@ -123,6 +130,11 @@ class MeteorNoiseGenerator:
             Custom smoothed global mean temperature timeseries to use instead
             of computing from the data. Must have same length as monthly_data
             time dimension. If None, will compute from the variable data.
+        picontrol_baseline : float or xr.DataArray, optional
+            Pre-industrial control baseline to use for temperature anomalies.
+            If provided, global temperature will be computed relative to this
+            baseline, ensuring consistency with pattern scaling. If None,
+            falls back to using first 42 years of training data as baseline.
         """
         # Extract the variable data
         if variable_name not in monthly_data:
@@ -143,9 +155,23 @@ class MeteorNoiseGenerator:
                 )
             t_glob = np.array(custom_global_temp)
         else:
-            # Calculate global mean temperature and remove ensemble mean for reference
-            t_globm = ds[variable_name].mean(dim=["lat", "lon", "ens"])
-            t_globm = t_globm - t_globm[:500].mean()  # Remove baseline
+            # Calculate latitude-weighted global mean temperature
+            t_globm = global_mean(ds[variable_name].mean(dim=["ens"]))
+
+            # Apply baseline correction
+            if picontrol_baseline is not None:
+                # Use piControl baseline for consistency with pattern scaling
+                if isinstance(picontrol_baseline, (int, float)):
+                    baseline = picontrol_baseline
+                else:
+                    # Assume it's an array-like, take mean
+                    baseline = float(np.mean(picontrol_baseline))
+                t_globm = t_globm - baseline
+                print(f"   Using piControl baseline: {baseline:.3f}")
+            else:
+                # Fall back to original method (first 42 years)
+                t_globm = t_globm - t_globm[:500].mean()  # Remove baseline
+                print("   Using first 42 years as baseline (legacy mode)")
 
             # Apply smoothing
             t_glob = (
@@ -434,6 +460,7 @@ class MeteorNoiseGenerator:
         lag_order=2,
         cache_dir=None,
         custom_global_temp=None,
+        use_picontrol_baseline=True,
     ):
         """
         Train a noise generator directly from CMIP6 data getter.
@@ -462,6 +489,10 @@ class MeteorNoiseGenerator:
             instead of computing from the variable data. Must have same length as
             the monthly data time dimension. Useful when you want to use a specific
             temperature trajectory (e.g., from a different variable or processing).
+        use_picontrol_baseline : bool, optional
+            Whether to use piControl data as baseline for temperature anomalies.
+            This ensures consistency with pattern scaling. Default is True.
+            If False, falls back to using first 42 years of training data.
 
         Returns
         -------
@@ -470,7 +501,7 @@ class MeteorNoiseGenerator:
 
         Examples
         --------
-        >>> # Train a temperature noise model
+        >>> # Train a temperature noise model with piControl baseline
         >>> noise_model = MeteorNoiseGenerator.train_from_cmip6(
         ...     data_getter, ["historical", "ssp245"], "CanESM5", "tas",
         ...     n_modes=8, cache_dir="./models"
@@ -484,10 +515,31 @@ class MeteorNoiseGenerator:
             experiments, model_name, monthly=True
         )
 
+        # Get piControl baseline if requested
+        picontrol_baseline = None
+        if use_picontrol_baseline:
+            try:
+                # Try to fetch piControl data for baseline calculation
+                picontrol_data = data_getter.get_single_var_mod_data_yearmean(
+                    "piControl", variable_name, model_name
+                )
+                picontrol_baseline = float(picontrol_data.mean().values)
+                print(
+                    f"   Fetched piControl baseline for {model_name} {variable_name}: {picontrol_baseline:.3f}"
+                )
+            except (KeyError, AttributeError) as e:
+                print(
+                    f"   Warning: Could not fetch piControl data ({e}), falling back to legacy baseline"
+                )
+                picontrol_baseline = None
+
         # Create and fit noise generator
         noise_gen = cls(n_modes=n_modes, lag_order=lag_order)
         noise_gen.fit(
-            monthly_data, variable_name, custom_global_temp=custom_global_temp
+            monthly_data,
+            variable_name,
+            custom_global_temp=custom_global_temp,
+            picontrol_baseline=picontrol_baseline,
         )
 
         # Cache if requested
@@ -511,6 +563,7 @@ class MeteorNoiseGenerator:
         lag_order=2,
         cache_dir=None,
         custom_global_temp=None,
+        use_picontrol_baseline=True,
     ):
         """
         Train noise generators for multiple model/variable combinations.
@@ -537,6 +590,10 @@ class MeteorNoiseGenerator:
         custom_global_temp : array-like, optional
             Custom smoothed global mean temperature timeseries to use for all
             model/variable combinations. Must have same length as monthly data.
+        use_picontrol_baseline : bool, optional
+            Whether to use piControl data as baseline for temperature anomalies.
+            This ensures consistency with pattern scaling. Default is True.
+            If False, falls back to using first 42 years of training data.
 
         Returns
         -------
@@ -545,7 +602,7 @@ class MeteorNoiseGenerator:
 
         Examples
         --------
-        >>> # Train noise models for all available combinations
+        >>> # Train noise models for all available combinations with piControl baseline
         >>> noise_models = MeteorNoiseGenerator.train_multiple_from_cmip6(
         ...     data_getter, ["historical", "ssp245"],
         ...     models=["CanESM5", "CESM2"], variables=["tas", "pr"],
@@ -581,6 +638,7 @@ class MeteorNoiseGenerator:
                         lag_order=lag_order,
                         cache_dir=cache_dir,
                         custom_global_temp=custom_global_temp,
+                        use_picontrol_baseline=use_picontrol_baseline,
                     )
                     noise_models[model][variable] = noise_gen
                 except Exception as e:

@@ -532,7 +532,7 @@ def get_time_name(ds):
         If there is no dimension called time or year
         in the dataset
     """
-    for time_name in ["time", "year"]:
+    for time_name in ["time", "year", "month"]:
         if time_name in ds.coords:
             return time_name
     raise RuntimeError("Couldn't find a time coordinate")

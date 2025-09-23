@@ -627,6 +627,7 @@ class Cmip6MeteorDataGetter:
         lag_order=2,
         cache_dir=None,
         custom_global_temp=None,
+        use_picontrol_baseline=True,
     ):
         """
         Train a noise generator model for a specific variable and model.
@@ -648,6 +649,10 @@ class Cmip6MeteorDataGetter:
         custom_global_temp : xarray.DataArray, optional
             Custom global mean temperature timeseries to use instead of computing
             from the variable data. Must span the same time period as the training data.
+        use_picontrol_baseline : bool, optional
+            Whether to use piControl data as baseline for temperature anomalies.
+            This ensures consistency with pattern scaling. Default is True.
+            If False, falls back to using first 42 years of training data.
 
         Returns
         -------
@@ -666,6 +671,7 @@ class Cmip6MeteorDataGetter:
             lag_order=lag_order,
             cache_dir=cache_dir,
             custom_global_temp=custom_global_temp,
+            use_picontrol_baseline=use_picontrol_baseline,
         )
 
     def train_all_noise_models(
@@ -677,6 +683,7 @@ class Cmip6MeteorDataGetter:
         lag_order=2,
         cache_dir=None,
         custom_global_temp=None,
+        use_picontrol_baseline=True,
     ):
         """
         Train noise models for all specified combinations of models and variables.
@@ -698,6 +705,10 @@ class Cmip6MeteorDataGetter:
         custom_global_temp : xarray.DataArray, optional
             Custom global mean temperature timeseries to use instead of computing
             from the variable data. Must span the same time period as the training data.
+        use_picontrol_baseline : bool, optional
+            Whether to use piControl data as baseline for temperature anomalies.
+            This ensures consistency with pattern scaling. Default is True.
+            If False, falls back to using first 42 years of training data.
 
         Returns
         -------
@@ -716,4 +727,5 @@ class Cmip6MeteorDataGetter:
             lag_order=lag_order,
             cache_dir=cache_dir,
             custom_global_temp=custom_global_temp,
+            use_picontrol_baseline=use_picontrol_baseline,
         )

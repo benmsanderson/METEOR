@@ -149,3 +149,7 @@ notebooks/*.txt
 # mac mess
 .DS_Store
 scripts/*.ipynb
+
+streamlit/cache/*.pkl
+streamlit/cache/noise_models/*
+streamlit/cache/training_data/*

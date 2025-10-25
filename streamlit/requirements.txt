@@ -1,0 +1,24 @@
+# METEOR Streamlit App Requirements
+# Install with: pip install -r streamlit_requirements.txt
+
+# Core Streamlit
+streamlit>=1.28.0
+
+# METEOR dependencies (already in requirements.txt)
+# Including here for standalone deployment
+click
+python-dotenv
+tqdm
+matplotlib>=3.4
+xarray
+netcdf4
+h5netcdf
+zarr<3
+gcsfs
+eofs
+lmfit
+ciceroscm>=1.1.2
+scikit-learn
+statsmodels
+numpy
+pandas

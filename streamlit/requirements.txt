@@ -23,5 +23,5 @@ statsmodels
 numpy
 pandas
 
-# Install meteor package from src directory (editable mode)
--e ../src
+# Install meteor package from project root (editable mode)
+-e ..

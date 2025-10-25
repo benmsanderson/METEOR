@@ -22,3 +22,6 @@ scikit-learn
 statsmodels
 numpy
 pandas
+
+# Install meteor package from src directory (editable mode)
+-e ../src

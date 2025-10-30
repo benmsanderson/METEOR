@@ -149,3 +149,5 @@ notebooks/*.txt
 # mac mess
 .DS_Store
 scripts/*.ipynb
+
+streamlit/*

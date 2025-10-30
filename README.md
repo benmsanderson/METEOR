@@ -1,165 +1,272 @@
-### METEOR
-Multivariate Emulation of Time-Evolving and Overlapping Responses
+# METEOR: Multivariate Emulation of Time-Evolving and Overlapping Responses
 
-METEOR is a fast climate emulator that combines pattern scaling for long-term climate response with stochastic noise modeling for short-term variability. It enables rapid generation of ensemble climate projections at both annual and monthly resolution by learning from CMIP6 climate model data.
-
-#### New: Monthly Climate Variability
-METEOR now includes monthly noise generation capabilities that add realistic short-term climate variability to annual pattern scaling predictions:
-- **Monthly Resolution**: Generate climate projections at monthly time scales
-- **Temperature-Dependent Seasonality**: Seasonal cycles that change with warming
-- **Stochastic Variability**: Multiple ensemble realizations for uncertainty quantification
-- **PCA/VARX Modeling**: Preserve spatial-temporal covariance from CMIP6 training data
-
-See `MONTHLY_NOISE_README.md` for complete workflow documentation.
-=======
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15732955.svg)](https://doi.org/10.5281/zenodo.15732955)
 
-# Installation
-```
+METEOR is a spatial climate emulator that rapidly generates ensemble climate projections by combining:
+- **Pattern Scaling**: Fast long-term climate response modeling
+- **Monthly Variability**: Realistic short-term climate noise and seasonality  
+- **Impact Assessment**: Climate impact calculations and ensemble analysis
+
+## Quick Start
+
+### Installation
+```bash
 git clone https://github.com/benmsanderson/METEOR.git
-```
-# First time setup:
-```
 cd METEOR
 make first-venv
-make clean
+make clean  
 make virtual-environment
-```
-
-# Update to newer version from github
-```
-git pull
-make clean
-make virtual-environment
-
-If you are still having trouble with missing packages try this:
-rm -r venv
-make first-venv
-make clean
-make virtual-environment
-```
-## Jupyter Notebooks
-The notebooks folder provides simple working examples to run the model within a Jupyter environment, and plot example output.  Installation instructions for installing Jupyterlab can be found at https://jupyter.org/install
-
-Beware that notebooks are tested as part of the test-suite on a one by one basis, so if you add a new notebook and you wnat it to be tested routinely, you need to add it. For certain notebooks the amount of downloading and running needed might not be advisable to have in the overall test suite.
-
-<code>METEOR_single_model_pattern_example.ipynb</code> produces a single pattern using CanESM2 data for the base and co2x2 experiments in PDRMIP, using input data text files stored in the <code>tests/test-data</code> folder
-
-<code>CMIP6_demo_with_residual.ipynb</code> demonstrates how to levarage the inbuilt aerosol forcing from residuals using the cmip6_meteor_data_getter functionality to get data in a minimal way.
-
-<code>CMIP6_mmdemo_with_archiving.ipynb</code> provides demonstration of the cmip6_meteor_data_getter functionality to get data as xarrays directly from the CMIP6 zarrstore to use in pattern making and predictions, archiving inputs to save runtime on multiple runs. Finally these datasets are used to provide multimodel demonstration of the METEOR emulation with both CO2-based green house gas responses, and aerosol response from residuals. **Now includes**: Monthly noise generation examples showing the complete workflow from annual pattern scaling to monthly ensemble generation.
-
-<code>METEOR_paper_figures.ipynb</code> documents the code for Figures 1 and 5--7 of the main manuscript for deriving GHG and aerosol residual patterm and globally aggregated evaluation of METEOR, including supplementary figures A4 which demonstrates how patterns are combined and B1-B8 showing individual global mean emulation behaviour of the models used as training data. It also illustrates reading and downloading (local save) training data, as well as running METEOR with this data and how to vary its inputs.
-
-<code>METEOR_paper_figures_spatial.ipynb</code> documents the generation of map comparison plots between multi-model mean emulation and CMIP6 data, figures 8 and 9. In addition it shows how the RMSE map comparison plot figure 14 was produced.
-
-<code>METEOR_paper_figures_spatial_per_model_scatter.ipynb</code> documents the generation of regional comparison scatter plots per scenario (for standard scenarios), Figure 10, and model (for ssp534), Figure 11. 
-
-<code>METEOR_paper_figures_spatial_per_model.ipynb</code> documents the generation of ssp534 plots that show precipitation change as functions of temperature change, figures 12 and 13. The notebook also documents the code for making the supplementary per model map comparisons (B9-B14). 
-
-<code>METEOR_paper_figures_timescale_eval.ipynb</code> documents the code for the supplementary figures A1--A3, illustrating an evaluation of the performance of METEOR under a varying selection of timescales. 
-
-<code>Climate_Bench_METEOR.ipynb</code> documents the calculation of ClimateBench like metrics. 
-
-Nota bene: The <code>METEOR_paper_figures_*.ipynb</code> and <code>Climate_Bench_METEOR.ipynb</code> python notebooks are excluded from the test suite and are not tested by the automated tests. Without available pre-cached data, they will require a long time to run, and for large datasets memory limitations of your computer may be an issue. Modifications or relying on these notebooks for production use is at your own risk, so proceed with caution.
-
-## scripts
-This folder contains example scripts and an example notebook, which might not work out of the box, but require data. 
-
-<code>test_install.py</code> is a test installation script that should work
-
-<code>test_cmip6_read_indata.py</code> demonstrates the cmip6_meteor_data_getter functionality only to make plots of cmip6 input data for a comprehensive list of models. Depending on the specs on your laptop you may
-run into memory issues for some of the higher resolution models, but otherwise it should work.
-
-<code>make_pattern_4xco2_plots.py</code> is a script demonstrating pattern generation from piControl and abrupt-4xco2 experiments using the cmip6datagetter for inputs, should work anywhere.
-
-<code>make_cmip6_test_plots.py</code> is a similar script, but used for testing, so might not be a good one to look at for a random user.
-
-<code>make_noresm_test.py</code> is a more comprehensive test script which relays on locally available data, which you would need to download if not run on cicero's internal servers.
-
-<code>METEOR_multi_model_pattern_example.ipynb</code> is a notebook which similarly relys on locally available data and which produces patterns and plots for four models (CanESM2, GISS-E2-R, NorESM1 and MIROC5) and three different PDRMIP experiments (base, co2x2 and sulx5) again relying on data locally available where you run. Demonstrating aerosol forcing not from a residual, but from a direct aerosol forcing experiment.
-
-## Development
-* To start developing make sure you have a github account and that you are part of the ciceroOslo team.
-* If you haven't already, [setup your github account with an ssh key](https://docs.github.com/en/enterprise-server@3.0/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account)
-* Find a suitable place where you want to start your developement either on windows or under /div/nobakcup/users/yourusername/ and change to that directory
-* Once in the preferred directory with a terminal do:
-```
-git clone git@github.com:benmsanderson/meteor.git
-```
-* To make your own branch (which you really should)
-```
-git checkout -b your-cool-branch-name
-```
-* Whenever you log in or want to check stuff
-```
-git status
-```
-
-It will tell you the branch you are on, changes since last etc
-* To commit your code changes
-```
-git add path-of-file-that-changed
-```
-
-Repeat this for all the files that you would want to commit the changes for
-```
-git commit -m "A small message to describe the changes"
-```
-
-```
-git push
-```
-
-(The last one is to push the changes to the github version. The first time you do this on a new branch you will need to set where to push to, but how to do that will be suggested when you just do git push)
-* To get new changes that have happened on the main branch is always good before you commit. To do so do:
-```
-git checkout main
-git pull
-git checkout your-cool-branch-name
-git merge main
-```
-
-If all goes well this will fill your terminal with a merge message in your default editor, which is likely vim. The message there is likely ok as it is, so to just use that as a commit message for the merge type: <code>:wq</code> which will just save and quit vim and complete the merge with the original commit message.
-
-Then finally just push your code to the web.
-```
-git push
-```
-
-The last part is just to pushed this new version of your branch again
-
-### Test suite and environment
-The code comes with a suite of tests and tools. To use this you must do:
-```
-make first-venv
-make virtual-environment
-```
-
-This should only be necessary the first time you setup the code
-You can load this environment with
-```
 source venv/bin/activate
 ```
 
-Later to update you should do:
-`make virtual-environment`
+### Basic Usage
 
-Or if you know you need updates, but aren't getting them:
+#### 1. Simple Annual Climate Projection
+```python
+from meteor import Cmip6MeteorDataGetter, MeteorPatternScaling
+from ciceroscm import input_handler
+
+# Setup data access
+data_getter = Cmip6MeteorDataGetter()
+model = "CanESM5"
+
+# Create pattern model
+pattern_model = MeteorPatternScaling(
+    "demo",
+    {"tas": 2, "pr": 2},  # 2 patterns per variable
+    lambda key: data_getter.make_meteor_training_data(key, model),
+    exp_list=["base", "co2x4"]
+)
+
+# Load scenario and predict
+emissions = input_handler.read_emissions("ssp245_em_RCMIP.txt")
+concentrations = input_handler.read_inputfile("ssp245_conc_RCMIP.txt")
+prediction = pattern_model.predict_from_combined_experiment(
+    emissions, concentrations, ["tas", "pr"]
+)
 ```
-make clean
+
+#### 2. Monthly Climate with Variability
+```python
+import numpy as np
+
+# Train monthly noise model
+noise_model = data_getter.train_noise_model(
+    experiments=["historical", "ssp245"],
+    model=model,
+    variable_name="tas",
+    n_modes=8
+)
+
+# Generate monthly climate with noise
+annual_pred = prediction["tas"]  
+monthly_base = pattern_model.to_monthly(annual_pred, start_year=1850)
+global_temp = annual_pred.mean(dim=["lat", "lon"]).values
+monthly_temp = np.repeat(global_temp, 12)
+
+noise = noise_model.generate_realization(monthly_temp, noise_only=True)
+monthly_climate = monthly_base + noise
+```
+
+#### 3. Climate Impact Assessment
+```python
+from meteor.impacts import DegreeDaysCalculator, create_impact_ensemble
+
+# Calculate cooling degree days
+cdd_calc = DegreeDaysCalculator(base_temperature=18.0, mode="cooling")
+cdd_result = cdd_calc.calculate(monthly_climate)
+
+# Create ensemble with multiple noise realizations
+ensemble = create_impact_ensemble(
+    monthly_base, cdd_calc, noise_model, global_temp, n_realizations=10
+)
+print(f"Mean CDD: {ensemble.mean():.1f}")
+print(f"Ensemble spread: {ensemble.std():.1f}")
+```
+
+See `QUICK_START.md` for detailed workflows and `MONTHLY_NOISE_README.md` for advanced monthly modeling.
+
+## Architecture Overview
+
+### Core Components
+
+| Component | Purpose | Key Classes |
+|-----------|---------|-------------|
+| **Pattern Scaling** | Annual climate projections from forcings | `MeteorPatternScaling` |
+| **Monthly Generation** | Convert annual to monthly + seasonality | `MeteorNoiseGenerator` |
+| **Data Access** | CMIP6 cloud data integration | `Cmip6MeteorDataGetter` |
+| **Impact Assessment** | Climate impact calculations | `DegreeDaysCalculator`, `ImpactEnsemble` |
+| **Plotting** | Visualization utilities | `meteor_plot_utils` |
+
+### Workflow Patterns
+
+```
+Emissions/Concentrations → Pattern Scaling → Annual Climate
+                                              ↓
+Monthly Base Climate ← to_monthly()          Annual Climate
+        ↓                                       ↓
+Monthly Climate ← + Noise ← generate_realization(global_temp)
+        ↓
+Climate Impacts ← calculate() ← Impact Calculator
+```
+
+## Documentation & Examples
+
+### Notebooks (`notebooks/`)
+- **`METEOR_single_model_pattern_example.ipynb`**: Single model pattern creation
+- **`CMIP6_demo_with_residual.ipynb`**: Aerosol forcing from residuals  
+- **`CMIP6_mmdemo_with_archiving.ipynb`**: Multi-model workflow with monthly noise ⭐
+- **`Climate_Bench_METEOR.ipynb`**: ClimateBench metrics calculation
+- **Paper Figures**: `METEOR_paper_figures*.ipynb` (research reproducibility)
+
+### Scripts (`scripts/`)
+- **`test_install.py`**: Quick installation test
+- **`test_cmip6_read_indata.py`**: CMIP6 data access demonstration
+- **`make_pattern_4xco2_plots.py`**: 4×CO₂ pattern generation example
+
+### Additional Documentation
+- **`QUICK_START.md`**: Detailed workflow examples
+- **`MONTHLY_NOISE_README.md`**: Complete monthly modeling guide
+- **`streamlit/README.md`**: Web app deployment guide
+
+## API Reference
+
+### Primary Classes
+
+#### `MeteorPatternScaling`
+```python
+# Annual climate projection engine
+model = MeteorPatternScaling(name, n_patterns_dict, data_loader, exp_list)
+prediction = model.predict_from_combined_experiment(emissions, concentrations, variables)
+monthly_data = model.to_monthly(annual_data, start_year=1850)
+```
+
+#### `MeteorNoiseGenerator`
+```python
+# Monthly climate variability modeling  
+noise_model = MeteorNoiseGenerator(n_modes=8, lag_order=1)
+noise_model.fit(monthly_climate_data, global_temp_trajectory)
+noise = noise_model.generate_realization(temp_trajectory, noise_only=True)
+```
+
+#### `Cmip6MeteorDataGetter`
+```python
+# CMIP6 data access and preprocessing
+data_getter = Cmip6MeteorDataGetter(exps=["piControl", "abrupt-4xCO2"], flds=["tas", "pr"])
+training_data = data_getter.make_meteor_training_data("base", "CanESM5")
+noise_model = data_getter.train_noise_model(experiments, model, variable, n_modes)
+```
+
+#### Impact Assessment
+```python
+# Climate impact calculations
+from meteor.impacts import DegreeDaysCalculator, create_impact_ensemble
+
+calc = DegreeDaysCalculator(base_temperature=18.0, mode="cooling")
+result = calc.calculate(climate_data)
+ensemble = create_impact_ensemble(base_climate, calc, noise_model, temp, n_realizations=10)
+```
+
+### Key Parameters
+
+| Parameter | Typical Values | Purpose |
+|-----------|---------------|----------|
+| `n_patterns` | 2-3 | Response patterns per climate variable |
+| `n_modes` | 8-12 | PCA modes for monthly variability |
+| `lag_order` | 1-3 | Temporal dependencies in VARX model |
+| `base_temperature` | 18°C (cooling), 15°C (heating) | Degree day calculation threshold |
+| `noise_only=True` | Boolean | Generate additive noise vs. full signal |
+
+### Common Workflows
+
+#### Multi-realization Ensemble
+```python
+# Generate multiple noise realizations for uncertainty quantification
+realizations = []
+for seed in range(10):
+    noise = noise_model.generate_realization(temp_trajectory, noise_only=True, random_seed=seed)
+    realizations.append(monthly_base + noise)
+ensemble = xr.concat(realizations, dim='realization')
+```
+
+#### Multi-variable Processing
+```python
+# Process temperature and precipitation together
+variables = ["tas", "pr"]
+predictions = pattern_model.predict_from_combined_experiment(emissions, concentrations, variables)
+for var in variables:
+    monthly_var = pattern_model.to_monthly(predictions[var], start_year=1850)
+    # Apply variable-specific noise models...
+```
+
+## Development & Testing
+
+### Setting Up Development Environment
+```bash
+git clone git@github.com:benmsanderson/meteor.git
+cd METEOR
+git checkout -b your-feature-branch
+make first-venv
 make virtual-environment
+source venv/bin/activate
 ```
 
-After this you should be able to run the automatic tests
-`make test` will only run the tests
-`make checks` will run the tests and formatting checks
-`make format-hecks` will run formatting checks only
+### Running Tests
+```bash
+make test          # Run test suite
+make checks        # Tests + formatting checks  
+make format-checks # Formatting only
+```
 
-Before your code branch can be merged into the main code, it has to pass all the tests
-(The makefile also has an option to run only the formatting checks)
-Tests are located in tests in tests/test-data/ data for testing against fortran runs and test input data are stored. In tests/unit there are unit tests for certain methods. In test/integration there are integration tests of the code.
-When you develop new code, try to think about what can be done to test and validate that your code does what you expect it to do, and try to integrate such tests into the automatic testing scheme.
+**Test Coverage**: 91%+ comprehensive test suite including:
+- Unit tests for individual methods (`tests/unit/`)
+- Integration tests for workflows (`tests/integration/`)  
+- Optimized with coarsened real PDRMIP data for fast execution
+- Notebook testing for key examples
 
-## General code flow
-`meteor.py` contains the main control module with the MeteorPatternScaling class for annual pattern scaling and new monthly prediction capabilities. `noise_generator.py` provides the MeteorNoiseGenerator class for monthly climate variability using PCA/VARX modeling. `prpatt.py` is a library with functions to fit parameters to define synthetic PC timeseries to processes PDRMIP output, as well as functions to convolve synthetic PCAs with user-defined forcing timeseries. `scm_forcer_engine.py` provides a wrapper to enable using the ciceroscm simple climate to estimate forcing strength from emissions. `meteor_plot_utils.py` provides some simple plotting functionality. `cmip6_meteor_data_getter.py` has functions to define and access CMIP6 data as xarrays from cloud storage, meaning you can use cmip6 data with meteor with out going through a huge download and data wrangling process before going ahead. This can also be leveraged on it's own to get cmip6 data to plot and explore, and now includes integrated training methods for monthly noise models.
+### Code Organization
+
+| Module | Purpose |
+|--------|---------|
+| `meteor.py` | Main `MeteorPatternScaling` class for annual projections |
+| `noise_generator.py` | `MeteorNoiseGenerator` for monthly variability |
+| `cmip6_meteor_data_getter.py` | CMIP6 cloud data access and preprocessing |
+| `impacts/` | Climate impact assessment framework |
+| `prpatt.py` | Pattern scaling algorithms and PDRMIP processing |
+| `scm_forcer_engine.py` | Simple climate model integration |
+| `meteor_plot_utils.py` | Visualization utilities |
+
+### Contributing
+1. Create feature branch from `main`
+2. Add tests for new functionality  
+3. Ensure all tests pass (`make checks`)
+4. Update documentation as needed
+5. Submit pull request
+
+---
+
+## Citation
+
+If you use METEOR in your research, please cite:
+
+```bibtex
+@Article{sandstad_meteor,
+AUTHOR = {Sandstad, M. and Steinert, N. J. and Baur, S. and Sanderson, B. M.},
+TITLE = {METEORv1.0.1: A novel framework for emulating multi-timescale regional climate responses},
+JOURNAL = {EGUsphere},
+VOLUME = {2025},
+YEAR = {2025},
+PAGES = {1--49},
+URL = {https://egusphere.copernicus.org/preprints/2025/egusphere-2025-1038/},
+DOI = {10.5194/egusphere-2025-1038}
+}
+```
+
+## Support
+
+- **Documentation**: See `QUICK_START.md` and `MONTHLY_NOISE_README.md`
+- **Examples**: Explore `notebooks/` directory
+- **Issues**: [GitHub Issues](https://github.com/benmsanderson/METEOR/issues)
+- **Updates**: `git pull && make virtual-environment`
+
+**Note**: Some research notebooks (`METEOR_paper_figures_*.ipynb`) require large datasets and are excluded from automated testing.

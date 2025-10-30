@@ -533,196 +533,196 @@ class MeteorPatternScaling:
                         predicted[fld] = predicted[fld] + tmp
         return predicted
 
-    def predict_monthly_with_noise(
-        self,
-        emissions_data,
-        concentrations_data,
-        flds,
-        noise_models,
-        n_realizations=1,
-        conc_run=False,
-        random_seed=None,
-    ):
-        """
-        Predict monthly patterns with stochastic noise realizations.
+    # def predict_monthly_with_noise(
+    #     self,
+    #     emissions_data,
+    #     concentrations_data,
+    #     flds,
+    #     noise_models,
+    #     n_realizations=1,
+    #     conc_run=False,
+    #     random_seed=None,
+    # ):
+    #     """
+    #     Predict monthly patterns with stochastic noise realizations.
 
-        Parameters
-        ----------
-        emissions_data : pd.DataFrame
-            Emissions data on the format used by the ciceroscm input_handler
-        concentrations_data : pd.DataFrame
-            Concentrations data on the format used by the ciceroscm input_handler
-        flds : list
-            Fields for which to calculate patterns
-        noise_models : dict
-            Dictionary with structure {fld: MeteorNoiseGenerator} containing
-            fitted noise models for each field
-        n_realizations : int, optional
-            Number of stochastic realizations to generate. Default is 1.
-        conc_run : bool, optional
-            Whether experiment should be a concentrations run
-        random_seed : int, optional
-            Random seed for reproducibility
+    #     Parameters
+    #     ----------
+    #     emissions_data : pd.DataFrame
+    #         Emissions data on the format used by the ciceroscm input_handler
+    #     concentrations_data : pd.DataFrame
+    #         Concentrations data on the format used by the ciceroscm input_handler
+    #     flds : list
+    #         Fields for which to calculate patterns
+    #     noise_models : dict
+    #         Dictionary with structure {fld: MeteorNoiseGenerator} containing
+    #         fitted noise models for each field
+    #     n_realizations : int, optional
+    #         Number of stochastic realizations to generate. Default is 1.
+    #     conc_run : bool, optional
+    #         Whether experiment should be a concentrations run
+    #     random_seed : int, optional
+    #         Random seed for reproducibility
 
-        Returns
-        -------
-        dict
-            Dictionary with structure {fld: list_of_monthly_realizations}
-            If n_realizations=1, returns {fld: monthly_realization}
-        """
-        # First get the annual mean predictions
-        annual_predictions = self.predict_from_combined_experiment(
-            emissions_data,
-            concentrations_data,
-            flds,
-            conc_run=conc_run,
-            return_patterns_per_mode=False,
-        )
+    #     Returns
+    #     -------
+    #     dict
+    #         Dictionary with structure {fld: list_of_monthly_realizations}
+    #         If n_realizations=1, returns {fld: monthly_realization}
+    #     """
+    #     # First get the annual mean predictions
+    #     annual_predictions = self.predict_from_combined_experiment(
+    #         emissions_data,
+    #         concentrations_data,
+    #         flds,
+    #         conc_run=conc_run,
+    #         return_patterns_per_mode=False,
+    #     )
 
-        monthly_predictions = {}
+    #     monthly_predictions = {}
 
-        for fld in flds:
-            if fld not in noise_models:
-                raise ValueError(f"No noise model provided for field '{fld}'")
+    #     for fld in flds:
+    #         if fld not in noise_models:
+    #             raise ValueError(f"No noise model provided for field '{fld}'")
 
-            noise_gen = noise_models[fld]
+    #         noise_gen = noise_models[fld]
 
-            # Extract global mean temperature trajectory for this field
-            # Using the annual prediction as a proxy for temperature evolution
-            if fld == "tas":
-                # For temperature, use the field itself
-                global_temp = annual_predictions[fld].mean(dim=["lat", "lon"]).values
-            else:
-                # For other variables, use temperature if available, else use the field itself
-                if "tas" in annual_predictions:
-                    global_temp = (
-                        annual_predictions["tas"].mean(dim=["lat", "lon"]).values
-                    )
-                else:
-                    # Fallback to using the field's global mean
-                    global_temp = (
-                        annual_predictions[fld].mean(dim=["lat", "lon"]).values
-                    )
+    #         # Extract global mean temperature trajectory for this field
+    #         # Using the annual prediction as a proxy for temperature evolution
+    #         if fld == "tas":
+    #             # For temperature, use the field itself
+    #             global_temp = annual_predictions[fld].mean(dim=["lat", "lon"]).values
+    #         else:
+    #             # For other variables, use temperature if available, else use the field itself
+    #             if "tas" in annual_predictions:
+    #                 global_temp = (
+    #                     annual_predictions["tas"].mean(dim=["lat", "lon"]).values
+    #                 )
+    #             else:
+    #                 # Fallback to using the field's global mean
+    #                 global_temp = (
+    #                     annual_predictions[fld].mean(dim=["lat", "lon"]).values
+    #                 )
 
-            # Expand to monthly resolution (12 months per year)
-            monthly_temp = np.repeat(global_temp, 12)
+    #         # Expand to monthly resolution (12 months per year)
+    #         monthly_temp = np.repeat(global_temp, 12)
 
-            # Generate noise realizations
-            noise_realizations = noise_gen.generate_realization(
-                monthly_temp, n_realizations=n_realizations, random_seed=random_seed
-            )
+    #         # Generate noise realizations
+    #         noise_realizations = noise_gen.generate_realization(
+    #             monthly_temp, n_realizations=n_realizations, random_seed=random_seed
+    #         )
 
-            # Convert annual predictions to monthly by simple repetition and addition
-            annual_field = annual_predictions[fld]
+    #         # Convert annual predictions to monthly by simple repetition and addition
+    #         annual_field = annual_predictions[fld]
 
-            # Expand annual to monthly
-            monthly_mean = np.repeat(annual_field.values, 12, axis=0)
+    #         # Expand annual to monthly
+    #         monthly_mean = np.repeat(annual_field.values, 12, axis=0)
 
-            if n_realizations == 1:
-                # Single realization case
-                monthly_combined = xr.DataArray(
-                    monthly_mean + noise_realizations.values,
-                    coords={
-                        "month": np.arange(len(monthly_temp)),
-                        "lat": annual_field.coords["lat"],
-                        "lon": annual_field.coords["lon"],
-                    },
-                    dims=["month", "lat", "lon"],
-                )
-                monthly_predictions[fld] = monthly_combined
-            else:
-                # Multiple realizations case
-                realizations_list = []
-                for realization in noise_realizations:
-                    monthly_combined = xr.DataArray(
-                        monthly_mean + realization.values,
-                        coords={
-                            "month": np.arange(len(monthly_temp)),
-                            "lat": annual_field.coords["lat"],
-                            "lon": annual_field.coords["lon"],
-                        },
-                        dims=["month", "lat", "lon"],
-                    )
-                    realizations_list.append(monthly_combined)
-                monthly_predictions[fld] = realizations_list
+    #         if n_realizations == 1:
+    #             # Single realization case
+    #             monthly_combined = xr.DataArray(
+    #                 monthly_mean + noise_realizations.values,
+    #                 coords={
+    #                     "month": np.arange(len(monthly_temp)),
+    #                     "lat": annual_field.coords["lat"],
+    #                     "lon": annual_field.coords["lon"],
+    #                 },
+    #                 dims=["month", "lat", "lon"],
+    #             )
+    #             monthly_predictions[fld] = monthly_combined
+    #         else:
+    #             # Multiple realizations case
+    #             realizations_list = []
+    #             for realization in noise_realizations:
+    #                 monthly_combined = xr.DataArray(
+    #                     monthly_mean + realization.values,
+    #                     coords={
+    #                         "month": np.arange(len(monthly_temp)),
+    #                         "lat": annual_field.coords["lat"],
+    #                         "lon": annual_field.coords["lon"],
+    #                     },
+    #                     dims=["month", "lat", "lon"],
+    #                 )
+    #                 realizations_list.append(monthly_combined)
+    #             monthly_predictions[fld] = realizations_list
 
-        return monthly_predictions
+    #     return monthly_predictions
 
-    def train_and_predict_monthly(
-        self,
-        data_getter,
-        training_experiments,
-        model_name,
-        emissions_data,
-        concentrations_data,
-        flds,
-        n_realizations=1,
-        n_modes=10,
-        lag_order=2,
-        cache_dir=None,
-        conc_run=False,
-        random_seed=None,
-    ):
-        """
-        Convenience method to train noise models and generate monthly predictions.
+    # def train_and_predict_monthly(
+    #     self,
+    #     data_getter,
+    #     training_experiments,
+    #     model_name,
+    #     emissions_data,
+    #     concentrations_data,
+    #     flds,
+    #     n_realizations=1,
+    #     n_modes=10,
+    #     lag_order=2,
+    #     cache_dir=None,
+    #     conc_run=False,
+    #     random_seed=None,
+    # ):
+    #     """
+    #     Convenience method to train noise models and generate monthly predictions.
 
-        Parameters
-        ----------
-        data_getter : Cmip6MeteorDataGetter
-            Data getter instance for training noise models
-        training_experiments : list
-            Experiments to use for noise training (e.g., ["historical", "ssp245"])
-        model_name : str
-            Name of the climate model to use for training
-        emissions_data : pd.DataFrame
-            Emissions data for predictions
-        concentrations_data : pd.DataFrame
-            Concentrations data for predictions
-        flds : list
-            Fields to predict
-        n_realizations : int, optional
-            Number of stochastic realizations. Default is 1.
-        n_modes : int, optional
-            Number of PCA modes for noise models. Default is 10.
-        lag_order : int, optional
-            VARX lag order for noise models. Default is 2.
-        cache_dir : str, optional
-            Directory to cache trained noise models
-        conc_run : bool, optional
-            Whether to run concentration-driven predictions
-        random_seed : int, optional
-            Random seed for reproducibility
+    #     Parameters
+    #     ----------
+    #     data_getter : Cmip6MeteorDataGetter
+    #         Data getter instance for training noise models
+    #     training_experiments : list
+    #         Experiments to use for noise training (e.g., ["historical", "ssp245"])
+    #     model_name : str
+    #         Name of the climate model to use for training
+    #     emissions_data : pd.DataFrame
+    #         Emissions data for predictions
+    #     concentrations_data : pd.DataFrame
+    #         Concentrations data for predictions
+    #     flds : list
+    #         Fields to predict
+    #     n_realizations : int, optional
+    #         Number of stochastic realizations. Default is 1.
+    #     n_modes : int, optional
+    #         Number of PCA modes for noise models. Default is 10.
+    #     lag_order : int, optional
+    #         VARX lag order for noise models. Default is 2.
+    #     cache_dir : str, optional
+    #         Directory to cache trained noise models
+    #     conc_run : bool, optional
+    #         Whether to run concentration-driven predictions
+    #     random_seed : int, optional
+    #         Random seed for reproducibility
 
-        Returns
-        -------
-        dict
-            Monthly predictions with noise
-        """
-        # Train noise models
-        print("Training noise models...")
-        noise_models = {}
-        for fld in flds:
-            print(f"Training noise model for {fld}")
-            noise_models[fld] = data_getter.train_noise_model(
-                training_experiments,
-                model_name,
-                fld,
-                n_modes=n_modes,
-                lag_order=lag_order,
-                cache_dir=cache_dir,
-            )
+    #     Returns
+    #     -------
+    #     dict
+    #         Monthly predictions with noise
+    #     """
+    #     # Train noise models
+    #     print("Training noise models...")
+    #     noise_models = {}
+    #     for fld in flds:
+    #         print(f"Training noise model for {fld}")
+    #         noise_models[fld] = data_getter.train_noise_model(
+    #             training_experiments,
+    #             model_name,
+    #             fld,
+    #             n_modes=n_modes,
+    #             lag_order=lag_order,
+    #             cache_dir=cache_dir,
+    #         )
 
-        # Generate predictions
-        print("Generating monthly predictions with noise...")
-        return self.predict_monthly_with_noise(
-            emissions_data,
-            concentrations_data,
-            flds,
-            noise_models,
-            n_realizations=n_realizations,
-            conc_run=conc_run,
-            random_seed=random_seed,
-        )
+    #     # Generate predictions
+    #     print("Generating monthly predictions with noise...")
+    #     return self.predict_monthly_with_noise(
+    #         emissions_data,
+    #         concentrations_data,
+    #         flds,
+    #         noise_models,
+    #         n_realizations=n_realizations,
+    #         conc_run=conc_run,
+    #         random_seed=random_seed,
+    #     )
 
     def to_monthly(self, annual_prediction, start_year=None):
         """

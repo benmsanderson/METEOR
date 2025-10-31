@@ -46,17 +46,17 @@ class DegreeDaysCalculator(ImpactCalculator):
         name: str = "DegreeDays",
     ):
         """
-            Initialize the Degree Days calculator.
+        Initialize the Degree Days calculator.
 
-            Args
+        Args
         ----
-                base_temperature: Base temperature in Celsius for degree day calculation.
-                                Defaults to 18.0°C (common for residential heating/cooling).
-                sigma_m_c1: Coefficient c1 for σ_m calculation (default: 1.45)
-                sigma_m_c2: Coefficient c2 for σ_m calculation (default: 0.29)
-                sigma_m_c3: Coefficient c3 for σ_m calculation (default: 0.664)
-                a_val_c1: Coefficient for 'a' value calculation (default: 1.698)
-                name: Human-readable name for this calculator
+            base_temperature: Base temperature in Celsius for degree day calculation.
+                            Defaults to 18.0°C (common for residential heating/cooling).
+            sigma_m_c1: Coefficient c1 for σ_m calculation (default: 1.45)
+            sigma_m_c2: Coefficient c2 for σ_m calculation (default: 0.29)
+            sigma_m_c3: Coefficient c3 for σ_m calculation (default: 0.664)
+            a_val_c1: Coefficient for 'a' value calculation (default: 1.698)
+            name: Human-readable name for this calculator
         """
         super().__init__(name)
         self.base_temperature = base_temperature
@@ -67,15 +67,15 @@ class DegreeDaysCalculator(ImpactCalculator):
 
     def validate_input(self, climate_data: xr.DataArray) -> None:
         """
-            Validate that input data is suitable for degree days calculation.
+        Validate that input data is suitable for degree days calculation.
 
-            Args
+        Args
         ----
-                climate_data: Input temperature data to validate
+            climate_data: Input temperature data to validate
 
-            Raises
+        Raises
         ------
-                ValueError: If input data is not suitable
+            ValueError: If input data is not suitable
         """
         if not isinstance(climate_data, xr.DataArray):
             raise ValueError("Input must be an xarray.DataArray")
@@ -112,21 +112,21 @@ class DegreeDaysCalculator(ImpactCalculator):
 
     def calculate(self, climate_data: xr.DataArray) -> ImpactResult:
         """
-            Calculate Heating and Cooling Degree Days from monthly temperature data.
+        Calculate Heating and Cooling Degree Days from monthly temperature data.
 
-            Args
+        Args
         ----
-                climate_data: xarray DataArray with monthly mean temperatures.
-                             Must have a 'month' dimension. Temperature should be in
-                             the same units as base_temperature (typically Celsius).
+            climate_data: xarray DataArray with monthly mean temperatures.
+                         Must have a 'month' dimension. Temperature should be in
+                         the same units as base_temperature (typically Celsius).
 
-            Returns
+        Returns
         -------
-                ImpactResult containing:
-                    - 'monthly_hdd': Monthly heating degree days
-                    - 'monthly_cdd': Monthly cooling degree days
-                    - 'annual_hdd': Annual total heating degree days
-                    - 'annual_cdd': Annual total cooling degree days
+            ImpactResult containing:
+                - 'monthly_hdd': Monthly heating degree days
+                - 'monthly_cdd': Monthly cooling degree days
+                - 'annual_hdd': Annual total heating degree days
+                - 'annual_cdd': Annual total cooling degree days
         """
         # Validate input
         self.validate_input(climate_data)
@@ -162,18 +162,18 @@ class DegreeDaysCalculator(ImpactCalculator):
         self, monthly_mean_temps: xr.DataArray
     ) -> Tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]:
         """
-            Core calculation of degree days using the Isaac and van Vuuren (2009) method.
+        Core calculation of degree days using the Isaac and van Vuuren (2009) method.
 
-            This method implements Equation 5 from the paper, which accounts for the
-            distribution of daily temperatures within each month.
+        This method implements Equation 5 from the paper, which accounts for the
+        distribution of daily temperatures within each month.
 
-            Args
+        Args
         ----
-                monthly_mean_temps: Monthly mean temperatures
+            monthly_mean_temps: Monthly mean temperatures
 
-            Returns
+        Returns
         -------
-                Tuple of (monthly_hdd, monthly_cdd, annual_hdd, annual_cdd)
+            Tuple of (monthly_hdd, monthly_cdd, annual_hdd, annual_cdd)
         """
         # Group by calendar month using the modulo operator to get climatology
         month_grouper = monthly_mean_temps["month"] % 12

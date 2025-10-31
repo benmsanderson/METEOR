@@ -33,13 +33,13 @@ class ImpactResult:
         calculator_name: str = "unknown",
     ):
         """
-            Initialize an ImpactResult.
+        Initialize an ImpactResult.
 
-            Args
+        Args
         ----
-                data: Dictionary mapping variable names to xarray DataArrays
-                metadata: Optional metadata about the calculation
-                calculator_name: Name of the calculator that produced this result
+            data: Dictionary mapping variable names to xarray DataArrays
+            metadata: Optional metadata about the calculation
+            calculator_name: Name of the calculator that produced this result
         """
         self.data = data
         self.metadata = metadata or {}
@@ -73,45 +73,45 @@ class ImpactCalculator(ABC):
 
     def __init__(self, name: str):
         """
-            Initialize the calculator.
+        Initialize the calculator.
 
-            Args
+        Args
         ----
-                name: Human-readable name for this calculator
+            name: Human-readable name for this calculator
         """
         self.name = name
 
     @abstractmethod
     def calculate(self, climate_data: xr.DataArray) -> ImpactResult:
         """
-            Calculate impacts from climate data.
+        Calculate impacts from climate data.
 
-            Args
+        Args
         ----
-                climate_data: xarray DataArray containing climate variables
+            climate_data: xarray DataArray containing climate variables
 
-            Returns
+        Returns
         -------
-                ImpactResult object containing calculated impacts
+            ImpactResult object containing calculated impacts
 
-            Raises
+        Raises
         ------
-                NotImplementedError: Must be implemented by subclasses
+            NotImplementedError: Must be implemented by subclasses
         """
         raise NotImplementedError("Subclasses must implement calculate()")
 
     @abstractmethod
     def validate_input(self, climate_data: xr.DataArray) -> None:
         """
-            Validate that input data is suitable for this calculator.
+        Validate that input data is suitable for this calculator.
 
-            Args
+        Args
         ----
-                climate_data: Input climate data to validate
+            climate_data: Input climate data to validate
 
-            Raises
+        Raises
         ------
-                ValueError: If input data is not suitable
+            ValueError: If input data is not suitable
         """
         raise NotImplementedError("Subclasses must implement validate_input()")
 
@@ -134,11 +134,11 @@ class ImpactEnsemble:
 
     def __init__(self, calculator: ImpactCalculator):
         """
-            Initialize the ensemble processor.
+        Initialize the ensemble processor.
 
-            Args
+        Args
         ----
-                calculator: The impact calculator to apply to ensemble members
+            calculator: The impact calculator to apply to ensemble members
         """
         self.calculator = calculator
         self.results: List[ImpactResult] = []
@@ -147,15 +147,15 @@ class ImpactEnsemble:
         self, climate_ensemble: List[xr.DataArray]
     ) -> List[ImpactResult]:
         """
-            Apply the impact calculator to each member of a climate ensemble.
+        Apply the impact calculator to each member of a climate ensemble.
 
-            Args
+        Args
         ----
-                climate_ensemble: List of climate data arrays (ensemble members)
+            climate_ensemble: List of climate data arrays (ensemble members)
 
-            Returns
+        Returns
         -------
-                List of ImpactResult objects, one per ensemble member
+            List of ImpactResult objects, one per ensemble member
         """
         self.results = []
 
@@ -176,15 +176,15 @@ class ImpactEnsemble:
 
     def ensemble_mean(self, variable: str) -> xr.DataArray:
         """
-            Calculate ensemble mean for a specific impact variable.
+        Calculate ensemble mean for a specific impact variable.
 
-            Args
+        Args
         ----
-                variable: Name of the impact variable
+            variable: Name of the impact variable
 
-            Returns
+        Returns
         -------
-                xarray DataArray containing ensemble mean
+            xarray DataArray containing ensemble mean
         """
         if not self.results:
             raise ValueError(
@@ -200,15 +200,15 @@ class ImpactEnsemble:
 
     def ensemble_std(self, variable: str) -> xr.DataArray:
         """
-            Calculate ensemble standard deviation for a specific impact variable.
+        Calculate ensemble standard deviation for a specific impact variable.
 
-            Args
+        Args
         ----
-                variable: Name of the impact variable
+            variable: Name of the impact variable
 
-            Returns
+        Returns
         -------
-                xarray DataArray containing ensemble standard deviation
+            xarray DataArray containing ensemble standard deviation
         """
         if not self.results:
             raise ValueError(
@@ -226,16 +226,16 @@ class ImpactEnsemble:
         self, variable: str, percentiles: Union[float, List[float]]
     ) -> Union[xr.DataArray, Dict[float, xr.DataArray]]:
         """
-            Calculate ensemble percentiles for a specific impact variable.
+        Calculate ensemble percentiles for a specific impact variable.
 
-            Args
+        Args
         ----
-                variable: Name of the impact variable
-                percentiles: Percentile(s) to calculate (0-100)
+            variable: Name of the impact variable
+            percentiles: Percentile(s) to calculate (0-100)
 
-            Returns
+        Returns
         -------
-                xarray DataArray (single percentile) or dict of DataArrays (multiple)
+            xarray DataArray (single percentile) or dict of DataArrays (multiple)
         """
         if not self.results:
             raise ValueError(
@@ -258,15 +258,15 @@ class ImpactEnsemble:
 
     def to_dataset(self, variables: Optional[List[str]] = None) -> xr.Dataset:
         """
-            Convert ensemble results to a single Dataset with ensemble dimension.
+        Convert ensemble results to a single Dataset with ensemble dimension.
 
-            Args
+        Args
         ----
-                variables: List of variables to include (None for all)
+            variables: List of variables to include (None for all)
 
-            Returns
+        Returns
         -------
-                xarray Dataset with ensemble dimension
+            xarray Dataset with ensemble dimension
         """
         if not self.results:
             raise ValueError(

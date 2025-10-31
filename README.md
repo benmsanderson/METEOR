@@ -115,7 +115,7 @@ Climate Impacts ← calculate() ← Impact Calculator
 ### Notebooks (`notebooks/`)
 - **`METEOR_single_model_pattern_example.ipynb`**: Single model pattern creation
 - **`CMIP6_demo_with_residual.ipynb`**: Aerosol forcing from residuals  
-- **`CMIP6_mmdemo_with_archiving.ipynb`**: Multi-model workflow with monthly noise ⭐
+- **`CMIP6_noise_model_examples.ipynb`**: Multi-model workflow with monthly noise ⭐
 - **`Climate_Bench_METEOR.ipynb`**: ClimateBench metrics calculation
 - **Paper Figures**: `METEOR_paper_figures*.ipynb` (research reproducibility)
 

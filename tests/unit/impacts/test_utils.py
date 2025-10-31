@@ -5,19 +5,20 @@ Unit tests for impacts utilities
 Tests the utility functions in impacts.utils module.
 """
 
-import pytest
-import numpy as np
-import xarray as xr
 import warnings
 
+import numpy as np
+import pytest
+import xarray as xr
+
 from meteor.impacts.utils import (
-    validate_temperature_data,
-    convert_temperature_units,
-    check_monthly_dimension,
-    ensure_spatial_coordinates,
     calculate_global_mean,
+    check_monthly_dimension,
+    convert_temperature_units,
     create_monthly_time_axis,
+    ensure_spatial_coordinates,
     group_by_season,
+    validate_temperature_data,
 )
 
 

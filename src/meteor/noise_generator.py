@@ -12,14 +12,16 @@ This module implements the methodology for:
 5. Noise-only generation for combining with annual climate projections
 """
 
+import os
+import pickle  # nosec - Used for trusted model serialization only
+import warnings
+
 import numpy as np
 import xarray as xr
-import pickle
-import os
-from sklearn.linear_model import LinearRegression
 from sklearn.decomposition import PCA
+from sklearn.linear_model import LinearRegression
 from statsmodels.tsa.api import VAR
-import warnings
+
 from .prpatt import global_mean
 
 
@@ -224,7 +226,7 @@ class MeteorNoiseGenerator:
 
         self.fitted = True
 
-        print(f"✅ Noise generator fitted successfully.")
+        print("Noise generator fitted successfully.")
         print(f"   - PCA modes: {self.n_modes}")
         print(
             f"   - Variance explained: {self.pca.explained_variance_ratio_.sum():.2%}"
@@ -437,7 +439,7 @@ class MeteorNoiseGenerator:
             Path to the saved model
         """
         with open(filepath, "rb") as f:
-            model_data = pickle.load(f)
+            model_data = pickle.load(f)  # nosec - Loading trusted model files only
 
         self.n_modes = model_data["n_modes"]
         self.lag_order = model_data["lag_order"]
@@ -695,7 +697,7 @@ def train_noise_model_from_composite(
     cache_dir=None,
 ):
     """
-    Convenience function to train a noise model from composite experimental data.
+    Train a noise model from composite experimental data.
 
 
     Parameters

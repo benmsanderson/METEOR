@@ -5,7 +5,6 @@ Integration tests for METEOR-impacts workflow
 Tests the complete workflow from METEOR outputs through impact calculations.
 """
 
-import pytest
 import numpy as np
 import xarray as xr
 

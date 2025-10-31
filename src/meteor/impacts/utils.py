@@ -7,7 +7,8 @@ impact calculators and processing workflows.
 """
 
 import warnings
-from typing import Union, Optional, Tuple
+from typing import Optional, Tuple
+
 import numpy as np
 import xarray as xr
 
@@ -25,7 +26,8 @@ def validate_temperature_data(
         expected_units: Expected units ("celsius" or "kelvin")
         temp_range: Optional tuple of (min, max) expected temperatures
 
-    Raises:
+    Raises
+    ------
         ValueError: If data validation fails
         UserWarning: If data seems suspicious but might be valid
     """
@@ -70,10 +72,12 @@ def convert_temperature_units(
         from_units: Source units ("celsius", "kelvin", "fahrenheit")
         to_units: Target units ("celsius", "kelvin", "fahrenheit")
 
-    Returns:
+    Returns
+    -------
         Converted temperature data
 
-    Raises:
+    Raises
+    ------
         ValueError: If units are not recognized
     """
     from_units = from_units.lower()
@@ -117,7 +121,8 @@ def check_monthly_dimension(data: xr.DataArray, dim_name: str = "month") -> None
         data: Data to check
         dim_name: Name of the monthly dimension
 
-    Raises:
+    Raises
+    ------
         ValueError: If monthly dimension is missing or improperly structured
     """
     if dim_name not in data.dims:
@@ -144,10 +149,12 @@ def ensure_spatial_coordinates(
         lat_name: Preferred name for latitude coordinate
         lon_name: Preferred name for longitude coordinate
 
-    Returns:
+    Returns
+    -------
         Tuple of (actual_lat_name, actual_lon_name)
 
-    Raises:
+    Raises
+    ------
         ValueError: If spatial coordinates cannot be found
     """
     # Common latitude coordinate names (filter out None)
@@ -202,7 +209,8 @@ def calculate_global_mean(
         lon_name: Name of longitude coordinate (auto-detected if None)
         weights: Optional custom weights (if None, uses cosine of latitude)
 
-    Returns:
+    Returns
+    -------
         Global mean with spatial dimensions removed
     """
     # Auto-detect coordinate names if not provided
@@ -244,7 +252,8 @@ def create_monthly_time_axis(
         n_months: Number of months
         dim_name: Name of the dimension
 
-    Returns:
+    Returns
+    -------
         DataArray with monthly time coordinates
     """
     # Create month indices (0, 1, 2, ...)
@@ -273,7 +282,8 @@ def group_by_season(
         seasons: Custom season definitions (dict mapping season names to month lists)
                 If None, uses standard meteorological seasons
 
-    Returns:
+    Returns
+    -------
         Dataset with seasonal means
     """
     if seasons is None:

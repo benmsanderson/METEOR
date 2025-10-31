@@ -1,7 +1,8 @@
+from unittest.mock import patch
+
+import numpy as np
 import pytest
 import xarray as xr
-import numpy as np
-from unittest.mock import Mock, patch
 
 from meteor import cmip6_meteor_data_getter
 
@@ -268,8 +269,8 @@ def test_train_noise_model():
 
 def test_train_noise_model_with_cache():
     """Test noise model training with caching."""
-    import tempfile
     import os
+    import tempfile
 
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
         exps=["historical", "ssp245"], dbe=["CMIP", "ScenarioMIP"]
@@ -538,7 +539,7 @@ def test_make_meteor_training_data_monthly():
                 dims=["month", "lat", "lon"],
                 coords={"month": range(12), "lat": range(10), "lon": range(10)},
             )
-            result = data_getter.make_meteor_training_data(
+            _ = data_getter.make_meteor_training_data(
                 "piControl", "CanESM5", monthly=True
             )
             assert mock_monthly.called
@@ -557,7 +558,7 @@ def test_train_multiple_noise_models():
         assert callable(getattr(data_getter, "train_all_noise_models"))
 
         # Try to call it with minimal parameters
-        result = data_getter.train_all_noise_models(
+        _ = data_getter.train_all_noise_models(
             experiments=["historical"],
             models=["CanESM5"],
             variables=["tas"],

@@ -6,10 +6,11 @@ This module provides utilities for applying impact calculators to
 climate data ensembles and managing the resulting impact ensembles.
 """
 
-from typing import List, Union, Optional
+from typing import List, Optional, Union
+
 import xarray as xr
 
-from .base import ImpactCalculator, ImpactResult, ImpactEnsemble
+from .base import ImpactCalculator, ImpactEnsemble, ImpactResult
 
 
 def apply_impact_calculator(
@@ -29,7 +30,8 @@ def apply_impact_calculator(
         ensemble_dim: If climate_data has an ensemble dimension, specify its name
                      to process each member separately
 
-    Returns:
+    Returns
+    -------
         ImpactResult (single realization) or List[ImpactResult] (ensemble)
     """
     # Handle single DataArray with ensemble dimension
@@ -69,7 +71,8 @@ def _apply_to_ensemble(
         calculator: The impact calculator to apply
         ensemble_members: List of climate data arrays
 
-    Returns:
+    Returns
+    -------
         List of ImpactResult objects
     """
     results = []
@@ -103,7 +106,8 @@ def create_impact_ensemble(
         calculator: The impact calculator to apply
         climate_ensemble: List of climate data arrays (ensemble members)
 
-    Returns:
+    Returns
+    -------
         ImpactEnsemble with calculated results
     """
     ensemble = ImpactEnsemble(calculator)
@@ -124,7 +128,8 @@ def ensemble_statistics(
         variable: Name of the impact variable to analyze
         statistics: List of statistics to calculate ('mean', 'std', 'min', 'max', 'quantile_XX')
 
-    Returns:
+    Returns
+    -------
         xarray Dataset containing the requested statistics
     """
     if not impact_results:

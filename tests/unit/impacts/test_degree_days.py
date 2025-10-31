@@ -5,14 +5,14 @@ Unit tests for degree days calculator
 Tests the DegreeDaysCalculator implementation.
 """
 
-import pytest
-import numpy as np
-import pandas as pd
-import xarray as xr
 import warnings
 
-from meteor.impacts.calculators.degree_days import DegreeDaysCalculator
+import numpy as np
+import pytest
+import xarray as xr
+
 from meteor.impacts.base import ImpactResult
+from meteor.impacts.calculators.degree_days import DegreeDaysCalculator
 
 
 class TestDegreeDaysCalculator:
@@ -215,7 +215,7 @@ class TestDegreeDaysCalculator:
         result = self.calculator.calculate(self.spatial_data)
 
         monthly_hdd = result["monthly_hdd"]
-        monthly_cdd = result["monthly_cdd"]
+        _ = result["monthly_cdd"]  # noqa: F841
 
         # Should preserve spatial dimensions
         assert "lat" in monthly_hdd.dims

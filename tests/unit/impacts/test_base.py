@@ -5,12 +5,13 @@ Unit tests for base impact classes
 Tests the core infrastructure: ImpactCalculator, ImpactResult, and ImpactEnsemble.
 """
 
-import pytest
-import numpy as np
-import xarray as xr
 from unittest.mock import Mock
 
-from meteor.impacts.base import ImpactCalculator, ImpactResult, ImpactEnsemble
+import numpy as np
+import pytest
+import xarray as xr
+
+from meteor.impacts.base import ImpactCalculator, ImpactEnsemble, ImpactResult
 
 
 class TestImpactResult:

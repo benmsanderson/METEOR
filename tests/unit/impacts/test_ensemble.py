@@ -5,17 +5,18 @@ Unit tests for ensemble processing utilities
 Tests the ensemble processing functions and utilities.
 """
 
-import pytest
-import numpy as np
-import xarray as xr
 from unittest.mock import Mock
 
+import numpy as np
+import pytest
+import xarray as xr
+
+from meteor.impacts.base import ImpactCalculator, ImpactEnsemble, ImpactResult
 from meteor.impacts.ensemble import (
     apply_impact_calculator,
     create_impact_ensemble,
     ensemble_statistics,
 )
-from meteor.impacts.base import ImpactCalculator, ImpactResult, ImpactEnsemble
 
 
 class MockCalculator(ImpactCalculator):

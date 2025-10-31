@@ -1,11 +1,12 @@
 """Tests for the prpatt pattern and processing functions."""
 
+from unittest.mock import Mock
+
 import numpy as np
 import pytest
 import xarray as xr
-from unittest.mock import Mock, patch
 
-from meteor.prpatt import expotas, make_anom, expfun, make_amat, make_pmat, wgt
+from meteor.prpatt import expfun, expotas, make_amat, make_anom, make_pmat, wgt
 
 
 class TestPrpattMathFunctions:
@@ -191,12 +192,12 @@ class TestPrpattUtilityFunctions:
         """Test that key functions can be imported."""
         # Test that main functions exist
         from meteor.prpatt import (
-            expotas,
-            make_anom,
             expfun,
-            make_amat,
-            make_pmat,
+            expotas,
             fit_timescales,
+            make_amat,
+            make_anom,
+            make_pmat,
             pmodel,
             rmodel,
         )

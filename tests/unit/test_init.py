@@ -17,10 +17,12 @@ class TestMeteorInit:
     def test_main_imports(self):
         """Test that main classes can be imported."""
         # Test that main classes are available at package level
-        from meteor import Cmip6MeteorDataGetter
-        from meteor import MeteorPatternScaling
-        from meteor import MeteorNoiseGenerator
-        from meteor import train_noise_model_from_composite
+        from meteor import (
+            Cmip6MeteorDataGetter,
+            MeteorNoiseGenerator,
+            MeteorPatternScaling,
+            train_noise_model_from_composite,
+        )
 
         # Verify they are classes/functions
         assert callable(Cmip6MeteorDataGetter)
@@ -35,9 +37,7 @@ class TestMeteorInit:
         assert hasattr(meteor, "impacts")
 
         # Test that impacts classes can be imported
-        from meteor.impacts import ImpactCalculator
-        from meteor.impacts import ImpactResult
-        from meteor.impacts import ImpactEnsemble
+        from meteor.impacts import ImpactCalculator, ImpactEnsemble, ImpactResult
         from meteor.impacts.calculators import DegreeDaysCalculator
 
         # Verify they are classes
@@ -64,7 +64,7 @@ class TestMeteorInit:
         try:
             data_getter = Cmip6MeteorDataGetter()
             assert data_getter is not None
-        except Exception as e:
+        except Exception:
             # If initialization fails due to dependencies, at least import worked
             assert "Cmip6MeteorDataGetter" in str(type(Cmip6MeteorDataGetter))
 

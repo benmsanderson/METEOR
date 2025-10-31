@@ -1,15 +1,16 @@
 """Tests for the main METEOR emulator class."""
 
+from unittest.mock import Mock, patch
+
 import numpy as np
 import pytest
 import xarray as xr
-from unittest.mock import Mock, MagicMock, patch
 
 from meteor.meteor import (
     Meteor,
-    read_training_data,
-    calculate_residual_and_do_crude_nan_cut,
     MeteorPatternScaling,
+    calculate_residual_and_do_crude_nan_cut,
+    read_training_data,
 )
 
 
@@ -102,7 +103,7 @@ class TestMeteor:
             assert self.noise_generator.generate_noise.called
             assert self.pattern_scaling_model.predict.called
 
-        except Exception as e:
+        except Exception:
             # If the mocking is complex, just verify the method exists
             assert hasattr(Meteor, "add_realisation")
 
@@ -221,13 +222,13 @@ class TestUtilityFunctions:
     def test_read_training_data_function_signature(self):
         """Test that read_training_data function exists and has right signature."""
         # Test that the function exists and can be imported
-        from meteor.meteor import read_training_data
+        from meteor.meteor import read_training_data  # noqa: F401
 
         # Test with mock data to avoid file I/O
         mock_get_data = Mock()
         mock_get_data.return_value = "test_path.nc"
 
-        exp_list = ["exp1"]
+        _ = ["exp1"]  # exp_list not used in this test
 
         # Call the mock function to verify interface
         result = mock_get_data("exp1")
@@ -304,7 +305,7 @@ class TestUtilityFunctions:
 
         # Test with empty experiment list
         try:
-            result = read_training_data(mock_get_data_no_base, [], from_file=False)
+            _ = read_training_data(mock_get_data_no_base, [], from_file=False)
             # Should handle empty list gracefully or raise error
         except Exception:
             # Either error or graceful handling is acceptable
@@ -384,7 +385,7 @@ class TestUtilityFunctions:
             # Should have same dimensions as input
             assert result.dims == daconom_field.dims
 
-        except Exception as e:
+        except Exception:
             # If function has complex dependencies, just verify it exists
             assert callable(calculate_residual_and_do_crude_nan_cut)
 
@@ -588,7 +589,7 @@ class TestMeteorPatternScaling:
         ):
             mock_instance.to_monthly(no_time_data)
 
-    def test_to_monthly_conversion(self):
+    def test_to_monthly_conversion_extended(self):
         """Test the to_monthly method to hit lines 760-817."""
         # Set seed for reproducible, fast test
         np.random.seed(42)

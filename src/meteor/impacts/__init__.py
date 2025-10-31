@@ -15,7 +15,7 @@ Example usage:
     >>> results = calculator.calculate(climate_data)
 """
 
-from .base import ImpactCalculator, ImpactResult, ImpactEnsemble
+from .base import ImpactCalculator, ImpactEnsemble, ImpactResult
 from .calculators.degree_days import DegreeDaysCalculator
 from .ensemble import (
     apply_impact_calculator,

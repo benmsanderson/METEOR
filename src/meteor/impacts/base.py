@@ -250,7 +250,7 @@ class ImpactEnsemble:
 
         if isinstance(percentiles, (int, float)):
             return ensemble_array.quantile(percentiles / 100, dim="ensemble_member")
-        
+
         return {
             p: ensemble_array.quantile(p / 100, dim="ensemble_member")
             for p in percentiles

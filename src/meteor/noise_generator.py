@@ -112,16 +112,17 @@ class MeteorNoiseGenerator:
 
         return X
 
-    def fit(  # pylint: disable=missing-type-doc
+    # pylint: disable=missing-type-doc,too-many-locals
+    def fit(
         self,
         monthly_data,
         variable_name,
-        custom_global_temp=None,  # pylint: disable=missing-type-doc
+        custom_global_temp=None,
         picontrol_baseline=None,
-    ):  # pylint: disable=too-many-locals
+    ):
         """
         Fit the noise generator to monthly climate data.
-        
+
         # pylint: disable=missing-type-doc
 
         Parameters
@@ -189,7 +190,9 @@ class MeteorNoiseGenerator:
         X = self._create_harmonic_features(time, t_glob)
 
         # Prepare data for seasonal cycle fitting
-        Y_xr = ds[variable_name].mean(dim=["ens"]).stack(space=("lat", "lon"))  # pylint: disable=invalid-name
+        Y_xr = (  # pylint: disable=invalid-name
+            ds[variable_name].mean(dim=["ens"]).stack(space=("lat", "lon"))
+        )
         Y = Y_xr.data  # pylint: disable=invalid-name
 
         # Fit seasonal cycle model
@@ -235,16 +238,17 @@ class MeteorNoiseGenerator:
         )
         print(f"   - VARX lag order: {self.lag_order}")
 
-    def generate_realization(  # pylint: disable=missing-type-doc
+    # pylint: disable=missing-type-doc,too-many-locals
+    def generate_realization(
         self,
-        global_temp_trajectory,  # pylint: disable=missing-type-doc
+        global_temp_trajectory,
         n_realizations=1,
         random_seed=None,
         noise_only=False,
-    ):  # pylint: disable=too-many-locals
+    ):
         """
         Generate stochastic climate realizations.
-        
+
         # pylint: disable=missing-type-doc
 
         Parameters
@@ -365,7 +369,8 @@ class MeteorNoiseGenerator:
 
         return realizations if n_realizations > 1 else realizations[0]
 
-    def _generate_stochastic_pcs(self, X_exog, n_time):  # pylint: disable=invalid-name
+    # pylint: disable=invalid-name
+    def _generate_stochastic_pcs(self, X_exog, n_time):
         """
         Generate stochastic principal components using fitted VARX model.
 
@@ -455,8 +460,9 @@ class MeteorNoiseGenerator:
 
         print(f"Model loaded from {filepath}")
 
+    # pylint: disable=missing-type-doc,too-many-arguments,too-many-positional-arguments,too-many-locals
     @classmethod
-    def train_from_cmip6(  # pylint: disable=missing-type-doc
+    def train_from_cmip6(
         cls,
         data_getter,
         experiments,
@@ -465,15 +471,15 @@ class MeteorNoiseGenerator:
         n_modes=10,
         lag_order=2,
         cache_dir=None,
-        custom_global_temp=None,  # pylint: disable=missing-type-doc
+        custom_global_temp=None,
         use_picontrol_baseline=True,
-    ):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    ):
         """
         Train a noise generator directly from CMIP6 data getter.
 
         This is the primary training interface that provides intuitive access
         to noise model training from CMIP6 composite experimental data.
-        
+
         # pylint: disable=missing-type-doc
 
         Parameters
@@ -560,8 +566,9 @@ class MeteorNoiseGenerator:
 
         return noise_gen
 
+    # pylint: disable=missing-type-doc,too-many-arguments,too-many-positional-arguments
     @classmethod
-    def train_multiple_from_cmip6(  # pylint: disable=missing-type-doc
+    def train_multiple_from_cmip6(
         cls,
         data_getter,
         experiments,
@@ -570,15 +577,15 @@ class MeteorNoiseGenerator:
         n_modes=10,
         lag_order=2,
         cache_dir=None,
-        custom_global_temp=None,  # pylint: disable=missing-type-doc
+        custom_global_temp=None,
         use_picontrol_baseline=True,
-    ):  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    ):
         """
         Train noise generators for multiple model/variable combinations.
 
         This method provides batch training functionality for multiple
         models and variables, useful for comprehensive noise model creation.
-        
+
         # pylint: disable=missing-type-doc
 
         Parameters
@@ -695,6 +702,7 @@ class MeteorNoiseGenerator:
         return noise_gen
 
 
+# pylint: disable=too-many-arguments,too-many-positional-arguments
 def train_noise_model_from_composite(
     data_getter,
     experiments,
@@ -703,7 +711,7 @@ def train_noise_model_from_composite(
     n_modes=10,
     lag_order=2,
     cache_dir=None,
-):  # pylint: disable=too-many-arguments,too-many-positional-arguments
+):
     """
     Train a noise model from composite experimental data.
 

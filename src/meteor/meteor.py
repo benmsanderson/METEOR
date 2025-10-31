@@ -39,7 +39,8 @@ class Meteor:
         self.X_train_ = None  # pylint: disable=invalid-name
         self.ensemble_ = None
 
-    def fit(self, X_train):  # pylint: disable=invalid-name
+    # pylint: disable=invalid-name
+    def fit(self, X_train):
         """
         "Fits" the model by providing the training data.
 
@@ -724,7 +725,8 @@ class MeteorPatternScaling:
     #         random_seed=random_seed,
     #     )
 
-    def to_monthly(self, annual_prediction, start_year=None):  # pylint: disable=too-many-locals
+    # pylint: disable=too-many-locals
+    def to_monthly(self, annual_prediction, start_year=None):
         """
         Convert annual prediction output to monthly intervals.
 

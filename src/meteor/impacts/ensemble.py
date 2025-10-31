@@ -55,9 +55,7 @@ def apply_impact_calculator(
     if isinstance(climate_data, xr.DataArray):
         return calculator.calculate(climate_data)
 
-    raise TypeError(
-        "climate_data must be an xarray.DataArray or list of DataArrays"
-    )
+    raise TypeError("climate_data must be an xarray.DataArray or list of DataArrays")
 
 
 def _apply_to_ensemble(
@@ -133,7 +131,7 @@ def ensemble_statistics(
     """
     if statistics is None:
         statistics = ["mean", "std", "min", "max"]
-        
+
     if not impact_results:
         raise ValueError("No impact results provided")
 

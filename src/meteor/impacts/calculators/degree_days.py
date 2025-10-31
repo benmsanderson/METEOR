@@ -36,6 +36,7 @@ class DegreeDaysCalculator(ImpactCalculator):
     degree days without requiring daily temperature data.
     """
 
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
     def __init__(
         self,
         base_temperature: float = 18.0,
@@ -44,7 +45,7 @@ class DegreeDaysCalculator(ImpactCalculator):
         sigma_m_c3: float = 0.664,
         a_val_c1: float = 1.698,
         name: str = "DegreeDays",
-    ):  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    ):
         """
         Initialize the Degree Days calculator.
 
@@ -157,9 +158,10 @@ class DegreeDaysCalculator(ImpactCalculator):
 
         return ImpactResult(result_data, metadata, self.name)
 
+    # pylint: disable=too-many-locals
     def _calculate_degree_days(
         self, monthly_mean_temps: xr.DataArray
-    ) -> Tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]:  # pylint: disable=too-many-locals
+    ) -> Tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]:
         """
         Core calculation of degree days using the Isaac and van Vuuren (2009) method.
 

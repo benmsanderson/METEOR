@@ -506,21 +506,20 @@ class Cmip6MeteorDataGetter:
                             exp_mapper[exp], fld, model
                         )
                     )
+            elif monthly:
+                fld_values.append(
+                    self.get_single_var_mod_data_monthly(exp, fld, model)
+                )
             else:
-                if monthly:
-                    fld_values.append(
-                        self.get_single_var_mod_data_monthly(exp, fld, model)
-                    )
-                else:
-                    fld_values.append(
-                        self.get_single_var_mod_data_yearmean(exp, fld, model)
-                    )
+                fld_values.append(
+                    self.get_single_var_mod_data_yearmean(exp, fld, model)
+                )
         training_data = make_xarray_with_correct_dims(self.flds, fld_values)
         return training_data
 
     def make_meteor_training_data_composite(
         self, exps, model, overlap=None, monthly=False
-    ):  # pylint: disable=too-many-nested-blocks
+    ):  # pylint: disable=too-many-nested-blocks,too-many-branches
         """
         Make xr.dataset with data and format used for meteor
 
@@ -628,7 +627,7 @@ class Cmip6MeteorDataGetter:
         cache_dir=None,
         custom_global_temp=None,
         use_picontrol_baseline=True,
-    ):
+    ):  # pylint: disable=too-many-arguments,too-many-positional-arguments
         """
         Train a noise generator model for a specific variable and model.
 
@@ -659,7 +658,7 @@ class Cmip6MeteorDataGetter:
         MeteorNoiseGenerator
             Fitted noise generator
         """
-        from .noise_generator import MeteorNoiseGenerator
+        from .noise_generator import MeteorNoiseGenerator  # pylint: disable=import-outside-toplevel
 
         # Use the class method for consistency
         return MeteorNoiseGenerator.train_from_cmip6(
@@ -684,7 +683,7 @@ class Cmip6MeteorDataGetter:
         cache_dir=None,
         custom_global_temp=None,
         use_picontrol_baseline=True,
-    ):
+    ):  # pylint: disable=too-many-arguments,too-many-positional-arguments
         """
         Train noise models for all specified combinations of models and variables.
 
@@ -715,7 +714,7 @@ class Cmip6MeteorDataGetter:
         dict
             Nested dictionary with structure: {model: {variable: MeteorNoiseGenerator}}
         """
-        from .noise_generator import MeteorNoiseGenerator
+        from .noise_generator import MeteorNoiseGenerator  # pylint: disable=import-outside-toplevel
 
         # Use the class method for batch training
         return MeteorNoiseGenerator.train_multiple_from_cmip6(

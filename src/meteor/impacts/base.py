@@ -170,7 +170,7 @@ class ImpactEnsemble:
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to calculate impacts for ensemble member {i}: {e}"
-                )
+                ) from e
 
         return self.results
 
@@ -250,11 +250,11 @@ class ImpactEnsemble:
 
         if isinstance(percentiles, (int, float)):
             return ensemble_array.quantile(percentiles / 100, dim="ensemble_member")
-        else:
-            return {
-                p: ensemble_array.quantile(p / 100, dim="ensemble_member")
-                for p in percentiles
-            }
+        
+        return {
+            p: ensemble_array.quantile(p / 100, dim="ensemble_member")
+            for p in percentiles
+        }
 
     def to_dataset(self, variables: Optional[List[str]] = None) -> xr.Dataset:
         """

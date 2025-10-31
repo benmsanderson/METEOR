@@ -36,10 +36,10 @@ class Meteor:
         """
         self.pattern_scaling_model_ = pattern_scaling_model
         self.noise_generator_ = noise_generator
-        self.X_train_ = None
+        self.X_train_ = None  # pylint: disable=invalid-name
         self.ensemble_ = None
 
-    def fit(self, X_train):
+    def fit(self, X_train):  # pylint: disable=invalid-name
         """
         "Fits" the model by providing the training data.
 
@@ -724,7 +724,7 @@ class MeteorPatternScaling:
     #         random_seed=random_seed,
     #     )
 
-    def to_monthly(self, annual_prediction, start_year=None):
+    def to_monthly(self, annual_prediction, start_year=None):  # pylint: disable=too-many-locals
         """
         Convert annual prediction output to monthly intervals.
 

@@ -48,17 +48,16 @@ def apply_impact_calculator(
         return _apply_to_ensemble(calculator, ensemble_members)
 
     # Handle list of DataArrays (ensemble)
-    elif isinstance(climate_data, list):
+    if isinstance(climate_data, list):
         return _apply_to_ensemble(calculator, climate_data)
 
     # Handle single DataArray
-    elif isinstance(climate_data, xr.DataArray):
+    if isinstance(climate_data, xr.DataArray):
         return calculator.calculate(climate_data)
 
-    else:
-        raise TypeError(
-            "climate_data must be an xarray.DataArray or list of DataArrays"
-        )
+    raise TypeError(
+        "climate_data must be an xarray.DataArray or list of DataArrays"
+    )
 
 
 def _apply_to_ensemble(
@@ -88,7 +87,7 @@ def _apply_to_ensemble(
         except Exception as e:
             raise RuntimeError(
                 f"Failed to calculate impacts for ensemble member {i}: {e}"
-            )
+            ) from e
 
     return results
 
@@ -118,7 +117,7 @@ def create_impact_ensemble(
 def ensemble_statistics(
     impact_results: List[ImpactResult],
     variable: str,
-    statistics: List[str] = ["mean", "std", "min", "max"],
+    statistics: Optional[List[str]] = None,
 ) -> xr.Dataset:
     """
     Calculate ensemble statistics for a specific impact variable.
@@ -132,6 +131,9 @@ def ensemble_statistics(
     -------
         xarray Dataset containing the requested statistics
     """
+    if statistics is None:
+        statistics = ["mean", "std", "min", "max"]
+        
     if not impact_results:
         raise ValueError("No impact results provided")
 
@@ -164,8 +166,8 @@ def ensemble_statistics(
                 ).drop_vars(
                     "quantile", errors="ignore"
                 )  # Remove quantile coordinate
-            except (IndexError, ValueError):
-                raise ValueError(f"Invalid quantile specification: {stat}")
+            except (IndexError, ValueError) as exc:
+                raise ValueError(f"Invalid quantile specification: {stat}") from exc
         else:
             raise ValueError(f"Unknown statistic: {stat}")
 

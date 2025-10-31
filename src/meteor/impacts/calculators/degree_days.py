@@ -44,7 +44,7 @@ class DegreeDaysCalculator(ImpactCalculator):
         sigma_m_c3: float = 0.664,
         a_val_c1: float = 1.698,
         name: str = "DegreeDays",
-    ):
+    ):  # pylint: disable=too-many-arguments,too-many-positional-arguments
         """
         Initialize the Degree Days calculator.
 
@@ -102,13 +102,12 @@ class DegreeDaysCalculator(ImpactCalculator):
                     f"Temperature values seem unusual (range: {temp_min:.1f} to {temp_max:.1f}°C). "
                     "Please verify the data is correct."
                 )
-        else:
+        elif temp_max > 100:
             # Mixed range - could be Celsius with hot values or unusual units
-            if temp_max > 100:
-                warnings.warn(
-                    f"Temperature values seem unusual (range: {temp_min:.1f} to {temp_max:.1f}). "
-                    "Very high values detected - please verify units are correct."
-                )
+            warnings.warn(
+                f"Temperature values seem unusual (range: {temp_min:.1f} to {temp_max:.1f}). "
+                "Very high values detected - please verify units are correct."
+            )
 
     def calculate(self, climate_data: xr.DataArray) -> ImpactResult:
         """
@@ -160,7 +159,7 @@ class DegreeDaysCalculator(ImpactCalculator):
 
     def _calculate_degree_days(
         self, monthly_mean_temps: xr.DataArray
-    ) -> Tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]:
+    ) -> Tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]:  # pylint: disable=too-many-locals
         """
         Core calculation of degree days using the Isaac and van Vuuren (2009) method.
 
@@ -175,6 +174,7 @@ class DegreeDaysCalculator(ImpactCalculator):
         -------
             Tuple of (monthly_hdd, monthly_cdd, annual_hdd, annual_cdd)
         """
+        # pylint: disable=too-many-locals
         # Group by calendar month using the modulo operator to get climatology
         month_grouper = monthly_mean_temps["month"] % 12
         monthly_clim = monthly_mean_temps.groupby(month_grouper).mean(dim="month")

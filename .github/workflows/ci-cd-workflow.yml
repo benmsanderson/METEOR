@@ -95,11 +95,13 @@ jobs:
     - name: Test notebooks with nbval
       run: |
           pytest notebooks/CMIP6_demo_with_residual.ipynb  -r a --nbval-lax --nbval-sanitize-with tests/notebook-tests.cfg --no-cov
+          pytest notebooks/CMIP6_noise_model_examples.ipynb  -r a --nbval-lax --nbval-sanitize-with tests/notebook-tests.cfg --no-cov
           pytest notebooks/METEOR_single_model_pattern_example.ipynb -r a --nbval-lax --nbval-sanitize-with tests/notebook-tests.cfg --no-cov
     - name: Test notebooks strictly
       if: matrix.python-version == 3.9
       run: |
           pytest notebooks/CMIP6_demo_with_residual.ipynb -r a --nbval --nbval-sanitize-with tests/notebook-tests.cfg --no-cov
+          pytest notebooks/CMIP6_noise_model_examples.ipynb -r a --nbval --nbval-sanitize-with tests/notebook-tests.cfg --no-cov
           pytest notebooks/METEOR_single_model_pattern_example.ipynb -r a --nbval --nbval-sanitize-with tests/notebook-tests.cfg --no-cov
 
 

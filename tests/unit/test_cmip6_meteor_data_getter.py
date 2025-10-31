@@ -9,6 +9,9 @@ from meteor import cmip6_meteor_data_getter
 
 def test_get_unique_models():
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter()
+    # Disable caching to ensure experiment validation is checked
+    data_getter.enable_cache = False
+
     models = data_getter.get_models_avail()
     print(models)
     assert isinstance(models, list)
@@ -173,6 +176,9 @@ def test_field_validation():
 def test_experiment_validation():
     """Test experiment availability validation."""
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter()
+
+    # Disable caching to ensure experiment validation is checked
+    data_getter.enable_cache = False
 
     # Test accessing unsupported experiment
     with pytest.raises(
@@ -496,6 +502,9 @@ def test_training_data_error_handling():
 def test_data_retrieval_none_handling():
     """Test handling of None returns in data retrieval methods."""
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter()
+
+    # Disable caching to ensure the patch is used
+    data_getter.enable_cache = False
 
     # Test that methods handle None data gracefully
     # These target the missing lines around 430 and 461

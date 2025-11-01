@@ -1947,7 +1947,7 @@ def test_yearly_data_processing_edge_cases():
 
     # Mock the year_mean_monthly_xarray function
     with patch(
-        "src.meteor.cmip6_meteor_data_getter.year_mean_monthly_xarray"
+        "meteor.cmip6_meteor_data_getter.year_mean_monthly_xarray"
     ) as mock_year_mean:
         mock_yearly = xr.DataArray(
             np.random.rand(2, 2, 2),  # 2 years

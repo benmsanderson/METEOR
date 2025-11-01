@@ -135,8 +135,7 @@ dmypy.json
 .vscode/
 
 # Noise caches
-notebooks/noise_cache
-
+notebooks/noise_cache/*.pkl
 examples/noise_cache
 
 examples/cache

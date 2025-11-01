@@ -2041,7 +2041,7 @@ def test_monthly_data_caching_logic():
         np.random.rand(100, 2, 2),
         coords={"month": range(100), "lat": [0, 1], "lon": [0, 1]},
         dims=["month", "lat", "lon"],
-        name="tas"
+        name="tas",
     )
 
     # Mock cache to return data (correct method name)
@@ -2056,16 +2056,18 @@ def test_monthly_data_caching_logic():
 
     # Test cache miss scenario - should call the main data fetching method
     data_getter._load_from_cache = Mock(return_value=None)
-    
+
     # Create a proper mock dataset with time coordinate
-    mock_dataset = xr.Dataset({
-        "tas": xr.DataArray(
-            np.random.rand(100, 2, 2),
-            coords={"time": range(100), "lat": [0, 1], "lon": [0, 1]},
-            dims=["time", "lat", "lon"]
-        )
-    })
-    
+    mock_dataset = xr.Dataset(
+        {
+            "tas": xr.DataArray(
+                np.random.rand(100, 2, 2),
+                coords={"time": range(100), "lat": [0, 1], "lon": [0, 1]},
+                dims=["time", "lat", "lon"],
+            )
+        }
+    )
+
     data_getter.get_single_var_mod_data = Mock(return_value=mock_dataset)
     data_getter._save_to_cache = Mock()
 

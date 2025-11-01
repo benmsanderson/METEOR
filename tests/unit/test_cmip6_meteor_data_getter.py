@@ -1548,7 +1548,7 @@ def test_make_meteor_training_data_composite_with_fullback_overlap():
     )
 
     # Create a real data getter instance to test the actual method
-    from src.meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
+    from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 
     data_getter = Cmip6MeteorDataGetter(flds=["tas"])
 
@@ -1601,7 +1601,7 @@ def test_make_meteor_training_data_composite_numeric_overlap():
         dims=["month", "lat", "lon"],
     )
 
-    from src.meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
+    from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 
     data_getter = Cmip6MeteorDataGetter(flds=["tas"])
 
@@ -1830,7 +1830,7 @@ def test_error_handling_for_invalid_experiments_and_fields():
     """Test error handling for invalid experiments and fields to hit lines 585-593."""
     import pytest
 
-    from src.meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
+    from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 
     # Create a data getter with limited experiments and fields
     data_getter = Cmip6MeteorDataGetter(exps=["historical"], flds=["tas"])
@@ -1861,7 +1861,7 @@ def test_zstore_ref_error_handling():
 
     import numpy as np
 
-    from src.meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
+    from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 
     # Create a data getter
     data_getter = Cmip6MeteorDataGetter(exps=["historical"], flds=["tas"])
@@ -1917,7 +1917,7 @@ def test_yearly_data_processing_edge_cases():
     import numpy as np
     import xarray as xr
 
-    from src.meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
+    from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 
     data_getter = Cmip6MeteorDataGetter(exps=["historical"], flds=["tas"])
 
@@ -1976,7 +1976,7 @@ def test_data_fetching_with_zarr_mapper():
     import numpy as np
     import xarray as xr
 
-    from src.meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
+    from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 
     data_getter = Cmip6MeteorDataGetter(exps=["historical"], flds=["tas"])
 
@@ -2033,7 +2033,7 @@ def test_monthly_data_caching_logic():
     import numpy as np
     import xarray as xr
 
-    from src.meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
+    from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 
     data_getter = Cmip6MeteorDataGetter(exps=["historical"], flds=["tas"])
 

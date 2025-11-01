@@ -138,11 +138,13 @@ dmypy.json
 notebooks/noise_cache
 
 examples/noise_cache
+
 examples/cache
 # repository figures
 notebooks/figures/CMIP_recon_patterns
 notebooks/figures/CMIP_recon_SSP534_ts_reg
 notebooks/figures/CMIP_recon_SSPs_spatial
+notebooks/noise_cache
 notebooks/*.csv
 notebooks/*.txt
 

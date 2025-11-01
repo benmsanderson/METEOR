@@ -341,3 +341,79 @@ class TestPrpattUtilityFunctions:
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+def test_additional_prpatt_functions():
+    """Test additional prpatt functions to improve coverage."""
+    import numpy as np
+    import xarray as xr
+    from meteor.prpatt import get_lat_name, get_time_name
+
+    # Test coordinate name detection functions
+    test_dataset = xr.Dataset(
+        {
+            "tas": xr.DataArray(
+                np.random.rand(5, 3, 3),
+                dims=["time", "latitude", "longitude"],
+                coords={
+                    "time": range(5),
+                    "latitude": [0, 1, 2],
+                    "longitude": [0, 1, 2],
+                },
+            )
+        }
+    )
+
+    # Test latitude name detection
+    lat_name = get_lat_name(test_dataset["tas"])
+    assert lat_name in ["latitude", "lat"]  # Should find latitude
+
+    # Test time name detection
+    time_name = get_time_name(test_dataset["tas"])
+    assert time_name == "time"
+
+    # Test with standard lat names
+    test_dataset_standard = xr.Dataset(
+        {
+            "tas": xr.DataArray(
+                np.random.rand(5, 3, 3),
+                dims=["time", "lat", "lon"],
+                coords={"time": range(5), "lat": [0, 1, 2], "lon": [0, 1, 2]},
+            )
+        }
+    )
+
+    lat_name_std = get_lat_name(test_dataset_standard["tas"])
+    time_name_std = get_time_name(test_dataset_standard["tas"])
+    assert lat_name_std == "lat"
+    assert time_name_std == "time"
+
+
+def test_numerical_edge_cases():
+    """Test numerical edge cases to improve coverage."""
+    import numpy as np
+    import xarray as xr
+    from meteor.prpatt import global_mean
+
+    # Test global mean with edge case data
+    edge_case_data = xr.DataArray(
+        np.array([[[0.0, 1e-15], [1e15, -1e15]]]),  # Very small and very large numbers
+        dims=["time", "lat", "lon"],
+        coords={"time": [2000], "lat": [0, 1], "lon": [0, 1]},
+    )
+
+    # Test that global_mean handles extreme values
+    result = global_mean(edge_case_data)
+    assert isinstance(result, xr.DataArray)
+    assert np.isfinite(result.values).all()  # Should not produce inf or nan
+
+    # Test with all-zero data
+    zero_data = xr.DataArray(
+        np.zeros((1, 2, 2)),
+        dims=["time", "lat", "lon"],
+        coords={"time": [2000], "lat": [0, 1], "lon": [0, 1]},
+    )
+
+    zero_result = global_mean(zero_data)
+    assert isinstance(zero_result, xr.DataArray)
+    assert zero_result.values[0] == 0.0

@@ -644,6 +644,7 @@ def test_additional_edge_cases_for_coverage():
     """Test additional edge cases to improve coverage."""
     import numpy as np
     import xarray as xr
+
     from meteor.meteor import calculate_residual_and_do_crude_nan_cut
 
     # Test with NaN values in data to hit NaN handling code paths
@@ -684,9 +685,11 @@ def test_additional_edge_cases_for_coverage():
 
 def test_meteor_pattern_scaling_edge_cases():
     """Test MeteorPatternScaling edge cases for better coverage."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import MagicMock
+
     import numpy as np
     import xarray as xr
+
     from meteor import MeteorPatternScaling
 
     # Test error handling in initialization

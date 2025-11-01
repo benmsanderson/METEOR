@@ -347,6 +347,7 @@ def test_additional_prpatt_functions():
     """Test additional prpatt functions to improve coverage."""
     import numpy as np
     import xarray as xr
+
     from meteor.prpatt import get_lat_name, get_time_name
 
     # Test coordinate name detection functions
@@ -393,6 +394,7 @@ def test_numerical_edge_cases():
     """Test numerical edge cases to improve coverage."""
     import numpy as np
     import xarray as xr
+
     from meteor.prpatt import global_mean
 
     # Test global mean with edge case data

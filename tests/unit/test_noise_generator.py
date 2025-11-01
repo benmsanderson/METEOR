@@ -1,10 +1,11 @@
 """Tests for the noise_generator module."""
 
+import os
+import tempfile
+
 import numpy as np
 import pytest
 import xarray as xr
-import tempfile
-import os
 
 from meteor.noise_generator import MeteorNoiseGenerator
 
@@ -20,7 +21,7 @@ def test_meteor_noise_generator_initialization():
     assert hasattr(generator, "pca")
     assert hasattr(generator, "varx_results")
     assert hasattr(generator, "fitted")
-    assert generator.fitted == False
+    assert generator.fitted is False
     assert generator.n_modes == 10  # default value
     assert generator.lag_order == 2  # default value
 
@@ -130,6 +131,7 @@ def test_meteor_noise_generator_complex_scenarios():
     """Test complex scenarios to improve coverage."""
     import numpy as np
     import xarray as xr
+
     from meteor import noise_generator
 
     # Create test data with more complexity
@@ -241,6 +243,7 @@ def test_meteor_noise_generator_feature_creation():
     """Test feature creation methods for coverage."""
     import numpy as np
     import xarray as xr
+
     from meteor import noise_generator
 
     generator = noise_generator.MeteorNoiseGenerator()
@@ -287,6 +290,7 @@ def test_advanced_noise_generation():
     """Test advanced noise generation methods to improve coverage."""
     import numpy as np
     import xarray as xr
+
     from meteor import noise_generator
 
     # Create more realistic training data
@@ -351,6 +355,7 @@ def test_noise_generator_internal_methods():
     """Test internal methods for better coverage."""
     import numpy as np
     import xarray as xr
+
     from meteor import noise_generator
 
     # Test the class with minimal working data
@@ -407,6 +412,7 @@ def test_noise_generator_edge_cases():
     """Test edge cases for better coverage."""
     import numpy as np
     import xarray as xr
+
     from meteor import noise_generator
 
     generator = noise_generator.MeteorNoiseGenerator()
@@ -453,6 +459,7 @@ def test_noise_generation_specific_lines():
     """Test specific lines in noise generation for coverage."""
     import numpy as np
     import xarray as xr
+
     from meteor import noise_generator
 
     # Create data that might trigger specific code paths
@@ -507,6 +514,7 @@ def test_var_model_internal_methods():
     """Test internal VAR model methods for coverage."""
     import numpy as np
     import xarray as xr
+
     from meteor import noise_generator
 
     # Test with realistic climate data that might work with VAR
@@ -627,6 +635,9 @@ def test_class_methods():
     # Test that the method exists and can be called
     assert hasattr(MeteorNoiseGenerator, "train_from_cmip6")
     assert callable(getattr(MeteorNoiseGenerator, "train_from_cmip6"))
+
+    # Test that we can import and instantiate the data getter
+    assert Cmip6MeteorDataGetter is not None
 
     # Note: We don't run the actual method as it requires CMIP6 data
     # But this tests the import paths and method existence

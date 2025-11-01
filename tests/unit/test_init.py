@@ -93,6 +93,8 @@ class TestMeteorInit:
         try:
             from meteor import nonexistent_module
 
+            # Verify that this import actually failed
+            assert nonexistent_module is None, "nonexistent_module should not exist"
             # Should not reach here
             assert False, "Should have raised ImportError"
         except (ImportError, AttributeError):

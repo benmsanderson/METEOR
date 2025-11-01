@@ -723,8 +723,6 @@ def test_cache_corruption_recovery():
     """Test cache corruption recovery mechanisms."""
     import tempfile
     import os
-    import xarray as xr
-    import numpy as np
 
     with tempfile.TemporaryDirectory() as temp_dir:
         data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
@@ -751,7 +749,6 @@ def test_cache_corruption_recovery():
 def test_cache_dataarray_dataset_conversion():
     """Test DataArray/Dataset conversion in caching."""
     import tempfile
-    import os
     import xarray as xr
     import numpy as np
 
@@ -842,15 +839,12 @@ def test_error_handling_edge_cases():
 
 def test_data_retrieval_error_paths():
     """Test error paths in data retrieval methods."""
-    import numpy as np
 
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter()
 
     # Test invalid field validation (lines 594-596)
     try:
-        invalid_data = data_getter.get_single_var_mod_data(
-            "exp", "invalid_field", "model"
-        )
+        data_getter.get_single_var_mod_data("exp", "invalid_field", "model")
         # Should raise ValueError for invalid field
     except (ValueError, KeyError) as e:
         assert "does not handle" in str(e) or "invalid" in str(e).lower()
@@ -858,9 +852,7 @@ def test_data_retrieval_error_paths():
     # Test model data validation (lines 597-598)
     try:
         # Test with invalid model
-        invalid_model_data = data_getter.get_single_var_mod_data(
-            "piControl", "tas", "InvalidModel"
-        )
+        data_getter.get_single_var_mod_data("piControl", "tas", "InvalidModel")
         # Should raise KeyError for invalid model
     except (KeyError, ValueError) as e:
         assert "No" in str(e) and ("data" in str(e) or "model" in str(e))
@@ -868,7 +860,6 @@ def test_data_retrieval_error_paths():
 
 def test_data_processing_edge_cases():
     """Test edge cases in data processing methods."""
-    import numpy as np
 
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter()
 
@@ -897,14 +888,13 @@ def test_data_processing_edge_cases():
 
 def test_zstore_reference_handling():
     """Test zstore reference handling edge cases."""
-    import numpy as np
 
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter()
 
     # Test nan zstore reference handling (lines 601-602)
     try:
         # This tests the case where zstore_ref is np.nan
-        result = data_getter.get_single_var_mod_data("exp", "tas", "model")
+        data_getter.get_single_var_mod_data("exp", "tas", "model")
         # Should handle nan zstore references gracefully
     except KeyError as e:
         # Should raise KeyError for nan zstore ref
@@ -920,6 +910,9 @@ def test_complex_data_processing_paths():
     import xarray as xr
 
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter()
+    
+    # Verify data getter initialization
+    assert data_getter is not None
 
     # Test the year_mean_monthly_xarray processing (lines 646-654)
     # Create mock data to test processing logic
@@ -973,7 +966,7 @@ def test_composite_data_creation_edge_cases():
     # Test make_meteor_training_data (lines 757-762)
     try:
         # This tests the training data creation with multiple experiments
-        training_data = data_getter.make_meteor_training_data("exp", "model")
+        data_getter.make_meteor_training_data("exp", "model")
         # Should handle invalid inputs gracefully
     except (KeyError, ValueError, AttributeError):
         # Expected for invalid inputs
@@ -982,7 +975,7 @@ def test_composite_data_creation_edge_cases():
     # Test make_meteor_training_data_composite (lines 810-879)
     try:
         # Test composite data creation with multiple experiments
-        composite_data = data_getter.make_meteor_training_data_composite(
+        data_getter.make_meteor_training_data_composite(
             ["exp1", "exp2"], "model", monthly=True
         )
         # Should handle invalid inputs gracefully
@@ -992,7 +985,7 @@ def test_composite_data_creation_edge_cases():
 
     # Test with overlap parameter
     try:
-        composite_overlap = data_getter.make_meteor_training_data_composite(
+        data_getter.make_meteor_training_data_composite(
             ["exp1", "exp2"], "model", overlap=10, monthly=False
         )
         # Should handle invalid inputs gracefully
@@ -1243,8 +1236,6 @@ def test_conditional_logic_patterns():
 
 def test_complex_overlap_and_concatenation_logic():
     """Test the complex overlap and concatenation logic from lines 822-879."""
-    import numpy as np
-    import xarray as xr
 
     # Test the overlap logic patterns that appear in the missing lines
 
@@ -1535,7 +1526,7 @@ def test_ssp_experiment_handling_variations():
 
 def test_make_meteor_training_data_composite_with_fullback_overlap():
     """Test make_meteor_training_data_composite with Full-back overlap to hit lines 822-879."""
-    from unittest.mock import Mock, patch
+    from unittest.mock import Mock
     import numpy as np
     import xarray as xr
 
@@ -1666,7 +1657,7 @@ def test_utility_functions():
     assert "test" in single_ds.data_vars
 
 
-def test_cache_disabled_functionality():
+def test_cache_disabled_functionality_extended():
     """Test functionality when cache is disabled."""
     import xarray as xr
     import numpy as np
@@ -1760,8 +1751,8 @@ def test_model_data_methods():
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter()
 
     # Test model availability check
-    assert data_getter.check_if_model_has_data("CanESM5") == True
-    assert data_getter.check_if_model_has_data("NonExistentModel") == False
+    assert data_getter.check_if_model_has_data("CanESM5") is True
+    assert data_getter.check_if_model_has_data("NonExistentModel") is False
 
     # Test getting available models
     models = data_getter.get_models_avail()
@@ -1863,8 +1854,6 @@ def test_zstore_ref_error_handling():
     from src.meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
     from unittest.mock import Mock, patch
     import numpy as np
-    import pandas as pd
-    import pytest
 
     # Create a data getter
     data_getter = Cmip6MeteorDataGetter(exps=["historical"], flds=["tas"])

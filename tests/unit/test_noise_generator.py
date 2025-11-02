@@ -455,13 +455,6 @@ def test_noise_generator_edge_cases():
         pass
 
 
-
-
-
-
-
-
-
 def test_baseline_handling():
     """Test different baseline handling options."""
     np.random.seed(42)

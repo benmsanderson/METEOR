@@ -274,8 +274,6 @@ class TestPrpattUtilityFunctions:
             # If function has complex dependencies, just verify it exists
             assert callable(wgt)
 
-
-
     def test_residual_function(self):
         """Test the residual function to hit lines 406-408."""
         try:

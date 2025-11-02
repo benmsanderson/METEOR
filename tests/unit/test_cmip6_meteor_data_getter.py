@@ -555,9 +555,6 @@ def test_make_meteor_training_data_monthly():
         assert hasattr(data_getter, "make_meteor_training_data")
 
 
-
-
-
 def test_caching_functionality():
     """Test caching functionality to improve coverage."""
     import os
@@ -817,12 +814,6 @@ def test_error_handling_edge_cases():
             pass  # Some systems have path length limits
 
 
-
-
-
-
-
-
 def test_zstore_reference_handling():
     """Test zstore reference handling edge cases."""
 
@@ -1067,9 +1058,6 @@ def test_cache_cleanup_operations():
             pass
 
 
-
-
-
 def test_ssp_experiment_handling_variations():
     """Test different SSP experiment scenarios."""
     # Test different SSP experiments with various overlaps
@@ -1109,9 +1097,6 @@ def test_ssp_experiment_handling_variations():
             cut = overlap_val * (12 if monthly else 1)
             expected = overlap_val * (12 if monthly else 1)
             assert cut == expected
-
-
-
 
 
 def test_make_meteor_training_data_composite_numeric_overlap():
@@ -1500,6 +1485,3 @@ def test_yearly_data_processing_edge_cases():
         assert result is not None
         assert "year" in result.dims
         assert "ens" in result.dims
-
-
-

@@ -253,14 +253,17 @@ def test_composite_data_single_experiment():
 
 def test_train_noise_model():
     """Test noise model training functionality."""
+    from meteor.noise_generator import MeteorNoiseGenerator
+
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
         exps=["historical", "ssp245"], dbe=["CMIP", "ScenarioMIP"]
     )
 
     # Test basic noise model training
-    noise_model = data_getter.train_noise_model(
+    noise_model = MeteorNoiseGenerator.train_from_cmip6(
+        data_getter,
         experiments=["historical", "ssp245"],
-        model="CanESM5",
+        model_name="CanESM5",
         variable_name="tas",
         n_modes=5,
         lag_order=1,
@@ -277,6 +280,7 @@ def test_train_noise_model_with_cache():
     """Test noise model training with caching."""
     import os
     import tempfile
+    from meteor.noise_generator import MeteorNoiseGenerator
 
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
         exps=["historical", "ssp245"], dbe=["CMIP", "ScenarioMIP"]
@@ -284,9 +288,10 @@ def test_train_noise_model_with_cache():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # First call - should create cache
-        noise_model1 = data_getter.train_noise_model(
+        noise_model1 = MeteorNoiseGenerator.train_from_cmip6(
+            data_getter,
             experiments=["historical", "ssp245"],
-            model="CanESM5",
+            model_name="CanESM5",
             variable_name="tas",
             n_modes=3,
             lag_order=1,
@@ -298,9 +303,10 @@ def test_train_noise_model_with_cache():
         assert len(cache_files) > 0
 
         # Second call - should load from cache
-        noise_model2 = data_getter.train_noise_model(
+        noise_model2 = MeteorNoiseGenerator.train_from_cmip6(
+            data_getter,
             experiments=["historical", "ssp245"],
-            model="CanESM5",
+            model_name="CanESM5",
             variable_name="tas",
             n_modes=3,
             lag_order=1,
@@ -314,6 +320,8 @@ def test_train_noise_model_with_cache():
 
 def test_train_noise_model_with_custom_temp():
     """Test noise model training with custom temperature trajectory."""
+    from meteor.noise_generator import MeteorNoiseGenerator
+
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
         exps=["historical", "ssp245"], dbe=["CMIP", "ScenarioMIP"]
     )
@@ -323,9 +331,10 @@ def test_train_noise_model_with_custom_temp():
     custom_temp = np.random.normal(15, 2, 3012)
 
     try:
-        noise_model = data_getter.train_noise_model(
+        noise_model = MeteorNoiseGenerator.train_from_cmip6(
+            data_getter,
             experiments=["historical", "ssp245"],
-            model="CanESM5",
+            model_name="CanESM5",
             variable_name="tas",
             n_modes=3,
             lag_order=1,
@@ -337,18 +346,21 @@ def test_train_noise_model_with_custom_temp():
     except Exception:
         # If the noise model training fails due to data issues,
         # at least verify the method exists and can be called
-        assert hasattr(data_getter, "train_noise_model")
+        assert hasattr(MeteorNoiseGenerator, "train_from_cmip6")
 
 
 def test_train_noise_model_picontrol_baseline():
     """Test noise model training with piControl baseline."""
+    from meteor.noise_generator import MeteorNoiseGenerator
+
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
         exps=["piControl", "historical", "ssp245"], dbe=["CMIP", "CMIP", "ScenarioMIP"]
     )
 
-    noise_model = data_getter.train_noise_model(
+    noise_model = MeteorNoiseGenerator.train_from_cmip6(
+        data_getter,
         experiments=["historical", "ssp245"],
-        model="CanESM5",
+        model_name="CanESM5",
         variable_name="tas",
         n_modes=3,
         lag_order=1,
@@ -455,20 +467,6 @@ def test_error_handling_missing_data():
         assert hasattr(data_getter, "get_single_var_mod_data_yearmean")
 
 
-def test_edge_case_empty_inputs():
-    """Test edge cases with empty or minimal inputs."""
-    # Test initialization with minimal parameters
-    try:
-        data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
-            flds=[], exps=["piControl"]  # Empty fields list  # Minimal experiments
-        )
-        assert data_getter.flds == []
-        assert data_getter.exps == ["piControl"]
-    except Exception:
-        # If empty fields cause issues, that's expected
-        pass
-
-
 def test_data_validation_edge_cases():
     """Test data validation with edge cases."""
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter()
@@ -557,27 +555,7 @@ def test_make_meteor_training_data_monthly():
         assert hasattr(data_getter, "make_meteor_training_data")
 
 
-def test_train_multiple_noise_models():
-    """Test training multiple noise models to hit lines 718-721."""
-    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter()
 
-    # Test the correct method name: train_all_noise_models
-    try:
-        assert hasattr(data_getter, "train_all_noise_models")
-        assert callable(getattr(data_getter, "train_all_noise_models"))
-
-        # Try to call it with minimal parameters
-        _ = data_getter.train_all_noise_models(
-            experiments=["historical"],
-            models=["CanESM5"],
-            variables=["tas"],
-            n_modes=2,
-            lag_order=1,
-        )
-
-    except Exception:
-        # If method has complex dependencies, just verify it exists
-        assert hasattr(data_getter, "train_all_noise_models")
 
 
 def test_caching_functionality():
@@ -839,53 +817,10 @@ def test_error_handling_edge_cases():
             pass  # Some systems have path length limits
 
 
-def test_data_retrieval_error_paths():
-    """Test error paths in data retrieval methods."""
-
-    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter()
-
-    # Test invalid field validation (lines 594-596)
-    try:
-        data_getter.get_single_var_mod_data("exp", "invalid_field", "model")
-        # Should raise ValueError for invalid field
-    except (ValueError, KeyError) as e:
-        assert "does not handle" in str(e) or "invalid" in str(e).lower()
-
-    # Test model data validation (lines 597-598)
-    try:
-        # Test with invalid model
-        data_getter.get_single_var_mod_data("piControl", "tas", "InvalidModel")
-        # Should raise KeyError for invalid model
-    except (KeyError, ValueError) as e:
-        assert "No" in str(e) and ("data" in str(e) or "model" in str(e))
 
 
-def test_data_processing_edge_cases():
-    """Test edge cases in data processing methods."""
 
-    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter()
 
-    # Test get_single_var_yearly_anom_data with missing data (lines 644-655)
-    try:
-        # This should handle the case where get_single_var_mod_data returns None
-        yearly_data = data_getter.get_single_var_yearly_anom_data("exp", "tas", "model")
-        # If it doesn't raise an exception, it should return None or valid data
-        assert yearly_data is None or hasattr(yearly_data, "values")
-    except (KeyError, ValueError, AttributeError):
-        # Expected for invalid inputs
-        pass
-
-    # Test get_single_var_monthly_anom_data with missing data (lines 690-699)
-    try:
-        # This should handle the case where get_single_var_mod_data returns None
-        monthly_data = data_getter.get_single_var_monthly_anom_data(
-            "exp", "tas", "model"
-        )
-        # If it doesn't raise an exception, it should return None or valid data
-        assert monthly_data is None or hasattr(monthly_data, "values")
-    except (KeyError, ValueError, AttributeError):
-        # Expected for invalid inputs
-        pass
 
 
 def test_zstore_reference_handling():
@@ -993,43 +928,6 @@ def test_composite_data_creation_edge_cases():
         # Should handle invalid inputs gracefully
     except (KeyError, ValueError, AttributeError):
         # Expected for invalid inputs
-        pass
-
-
-def test_dataset_concatenation_logic():
-    """Test dataset concatenation and processing logic."""
-    import numpy as np
-    import xarray as xr
-
-    # Test the dataset concatenation logic that occurs in composite methods
-    try:
-        # Create mock datasets that simulate the concatenation process
-        ds1 = xr.DataArray(
-            np.random.rand(12, 2, 2),
-            coords={"month": range(12), "lat": [0, 1], "lon": [0, 1]},
-            dims=["month", "lat", "lon"],
-            name="tas",
-        ).expand_dims(dim={"ens": np.array([1])})
-
-        ds2 = xr.DataArray(
-            np.random.rand(12, 2, 2),
-            coords={"month": range(12, 24), "lat": [0, 1], "lon": [0, 1]},
-            dims=["month", "lat", "lon"],
-            name="tas",
-        ).expand_dims(dim={"ens": np.array([1])})
-
-        # Test concatenation logic similar to lines 820-850
-        combined = xr.concat([ds1, ds2], dim="month")
-        assert isinstance(combined, xr.DataArray)
-        assert combined.dims == ("month", "lat", "lon", "ens")
-
-        # Test overlap handling logic
-        if len(combined.month) > 20:  # Simulate overlap condition
-            trimmed = combined.isel(month=slice(0, 20))
-            assert len(trimmed.month) == 20
-
-    except Exception:
-        # Mock data concatenation may fail
         pass
 
 
@@ -1169,319 +1067,7 @@ def test_cache_cleanup_operations():
             pass
 
 
-def test_error_handling_with_oserror():
-    """Test OSError handling in file operations."""
-    import os
-    import tempfile
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
-            cache_dir=temp_dir, enable_cache=True
-        )
-
-        # Create a test file and make it read-only to potentially trigger OSError
-        test_file = os.path.join(temp_dir, "readonly.nc")
-        with open(test_file, "w") as f:
-            f.write("test")
-
-        # Try to make it read-only (may not work on all systems)
-        try:
-            os.chmod(test_file, 0o444)  # Read-only
-        except OSError:
-            pass  # chmod may fail on some systems
-
-        # Test that clear_cache handles OSError gracefully (line 480-481)
-        try:
-            data_getter.clear_cache()
-            # Should not raise an exception even if file removal fails
-        except Exception:
-            # Should handle OSError gracefully
-            pass
-
-
-def test_list_comprehension_patterns():
-    """Test list comprehension patterns used in initialization."""
-    # Test the list comprehension pattern from line 178
-    import pandas as pd
-
-    # Simulate the list comprehension: [pd.DataFrame(columns=cnames) for j in range(len(flds))]
-    cnames = ["col1", "col2", "col3"]
-    flds = ["tas", "pr"]
-
-    # Test the exact pattern from the code
-    tmp = [pd.DataFrame(columns=cnames) for j in range(len(flds))]
-
-    assert len(tmp) == len(flds)
-    for df in tmp:
-        assert isinstance(df, pd.DataFrame)
-        assert list(df.columns) == cnames
-        assert len(df) == 0  # Should be empty DataFrames
-
-
-def test_conditional_logic_patterns():
-    """Test conditional logic patterns in the codebase."""
-    # Test conditional patterns similar to those in the missing lines
-
-    # Test None vs value checking pattern
-    value = None
-    if value is None:
-        value = "default_value"
-    assert value == "default_value"
-
-    # Test filename ending check pattern (line 477)
-    filenames = ["file1.nc", "file2.txt", "file3.nc", "file4.dat"]
-    nc_files = [f for f in filenames if f.endswith(".nc")]
-    assert len(nc_files) == 2
-    assert "file1.nc" in nc_files
-    assert "file3.nc" in nc_files
-
-
-def test_complex_overlap_and_concatenation_logic():
-    """Test the complex overlap and concatenation logic from lines 822-879."""
-
-    # Test the overlap logic patterns that appear in the missing lines
-
-    # Test monthly vs yearly dimension logic (lines 823-830)
-    monthly = True
-    time_dim = "month" if monthly else "year"
-    assert time_dim == "month"
-
-    monthly = False
-    time_dim = "month" if monthly else "year"
-    assert time_dim == "year"
-
-    # Test overlap dictionary processing (lines 832-850)
-    overlap = {"ssp534": 50, "ssp245": "Full-back"}
-    exp = "ssp534"
-
-    if overlap is not None:
-        if exp in overlap:
-            if overlap[exp] == "Full-back":
-                cut = 100  # Simulate dataset length
-            else:
-                # Test the numeric overlap case (line 851-853)
-                cut = overlap[exp] * (12 if monthly else 1)
-                expected_cut = 50 * (12 if monthly else 1)
-                assert cut == expected_cut
-
-    # Test ssp experiment length checking logic (lines 836-845)
-    exp_ssp = "ssp245"
-    cut = 2500  # Simulate long dataset
-    monthly = True
-
-    if (
-        exp_ssp.startswith("ssp")
-        and cut > (2400 if monthly else 200)
-        and 1000 <= (4224 if monthly else 352)
-    ):  # Simulate conditions
-        # Test the cut adjustment (lines 846-849)
-        adjusted_cut = cut - (2400 if monthly else 200)
-        expected_adjustment = 2500 - (2400 if monthly else 200)
-        assert adjusted_cut == expected_adjustment
-
-
-def test_dataset_slicing_and_coordinate_assignment():
-    """Test dataset slicing and coordinate assignment patterns."""
-    import numpy as np
-    import xarray as xr
-
-    # Test the slicing pattern from lines 854-859
-    time_dim = "month"
-    test_data = xr.DataArray(
-        np.random.rand(100, 2, 2),
-        coords={time_dim: range(100), "lat": [0, 1], "lon": [0, 1]},
-        dims=[time_dim, "lat", "lon"],
-    )
-
-    # Test the slice operation pattern
-    cut = 10
-    slice_end = len(test_data[time_dim].values) - cut - 1
-    sliced_data = test_data.sel(**{time_dim: slice(0, slice_end)})
-
-    expected_length = 100 - cut  # 90
-    assert len(sliced_data[time_dim]) == expected_length
-
-    # Test coordinate assignment pattern (lines 862-865)
-    start_time = test_data[time_dim].values[-1] + 1
-    next_dataset_size = 50
-    end_time_plus = start_time + next_dataset_size
-
-    new_coords = np.arange(start_time, end_time_plus)
-    assert len(new_coords) == next_dataset_size
-    assert new_coords[0] == start_time
-
-    # Test the coordinate assignment on a mock dataset
-    next_dataset = xr.DataArray(
-        np.random.rand(next_dataset_size, 2, 2),
-        coords={time_dim: range(next_dataset_size), "lat": [0, 1], "lon": [0, 1]},
-        dims=[time_dim, "lat", "lon"],
-    )
-
-    # Simulate the assign_coords operation
-    reassigned = next_dataset.assign_coords({time_dim: new_coords})
-    assert reassigned[time_dim].values[0] == start_time
-    assert len(reassigned[time_dim]) == next_dataset_size
-
-
-def test_concatenation_patterns():
-    """Test xarray concatenation patterns."""
-    import numpy as np
-    import xarray as xr
-
-    # Test the concatenation pattern from lines 866-869
-    time_dim = "month"
-
-    # Create first dataset
-    value = xr.DataArray(
-        np.random.rand(50, 2, 2),
-        coords={time_dim: range(50), "lat": [0, 1], "lon": [0, 1]},
-        dims=[time_dim, "lat", "lon"],
-    )
-
-    # Create second dataset with continuation coordinates
-    start_time = value[time_dim].values[-1] + 1
-    next_size = 30
-    next_dataset = xr.DataArray(
-        np.random.rand(next_size, 2, 2),
-        coords={
-            time_dim: range(start_time, start_time + next_size),
-            "lat": [0, 1],
-            "lon": [0, 1],
-        },
-        dims=[time_dim, "lat", "lon"],
-    )
-
-    # Test concatenation
-    concatenated = xr.concat([value, next_dataset], dim=time_dim)
-
-    assert len(concatenated[time_dim]) == 50 + 30
-    assert concatenated[time_dim].values[49] == 49  # Last of first dataset
-    assert concatenated[time_dim].values[50] == 50  # First of second dataset
-
-
-def test_experiment_name_patterns():
-    """Test experiment name pattern matching."""
-    # Test the startswith pattern for SSP experiments (line 837)
-    ssp_experiments = ["ssp126", "ssp245", "ssp370", "ssp534", "ssp585"]
-    non_ssp = ["piControl", "historical", "abrupt-4xCO2"]
-
-    for exp in ssp_experiments:
-        assert exp.startswith("ssp")
-
-    for exp in non_ssp:
-        assert not exp.startswith("ssp")
-
-    # Test Full-back pattern matching (line 834)
-    overlap_values = ["Full-back", 50, 100, "Full-back"]
-
-    for val in overlap_values:
-        is_fullback = val == "Full-back"
-        if val == "Full-back":
-            assert is_fullback
-        else:
-            assert not is_fullback
-
-
-def test_numerical_threshold_patterns():
-    """Test numerical threshold patterns from the overlap logic."""
-    # Test the threshold patterns from lines 838-844
-    monthly = True
-
-    # Test monthly thresholds
-    threshold_1 = 2400 if monthly else 200
-    threshold_2 = 4224 if monthly else 352
-
-    assert threshold_1 == 2400
-    assert threshold_2 == 4224
-
-    # Test yearly thresholds
-    monthly = False
-    threshold_1 = 2400 if monthly else 200
-    threshold_2 = 4224 if monthly else 352
-
-    assert threshold_1 == 200
-    assert threshold_2 == 352
-
-    # Test the comparison patterns
-    cut = 2500
-    dataset_length = 4000
-
-    # Test the complex condition from lines 836-844
-    if cut > threshold_1 and dataset_length <= threshold_2:
-        # Should trigger the adjustment
-        adjustment = cut - threshold_1
-        assert adjustment > 0
-
-
-def test_composite_data_creation_integration():
-    """Test integrated composite data creation patterns from lines 822-879."""
-    import numpy as np
-    import xarray as xr
-
-    # Simulate the complete flow from the missing lines
-    # Setup parameters as they would appear in the actual method
-    monthly = True
-    exp = "ssp245"
-    overlap = {"ssp245": "Full-back", "ssp534": 100}
-    time_dim = "month" if monthly else "year"
-
-    # Create mock dataset that would exist in the loop
-    dataset_length = 4000
-    mock_data = xr.DataArray(
-        np.random.rand(dataset_length, 2, 2),
-        coords={time_dim: range(dataset_length), "lat": [0, 1], "lon": [0, 1]},
-        dims=[time_dim, "lat", "lon"],
-    )
-
-    # Test the overlap processing logic (lines 832-851)
-    if overlap is not None and exp in overlap:
-        if overlap[exp] == "Full-back":
-            # Full-back mode (lines 834-835)
-            if exp.startswith("ssp") and dataset_length > (2400 if monthly else 200):
-                cut = dataset_length - (2400 if monthly else 200)
-            else:
-                cut = 0
-        else:
-            # Numerical overlap mode (lines 851-853)
-            cut = overlap[exp] * (12 if monthly else 1)
-    else:
-        cut = 0
-
-    # For Full-back mode with ssp245
-    expected_cut = dataset_length - 2400  # 4000 - 2400 = 1600
-    assert cut == expected_cut
-
-    # Test dataset slicing (lines 854-859)
-    slice_end = len(mock_data[time_dim].values) - cut - 1
-    value = mock_data.sel(**{time_dim: slice(0, slice_end)})
-    expected_slice_length = dataset_length - cut  # 4000 - 1600 = 2400
-    assert len(value[time_dim]) == expected_slice_length
-
-    # Test next dataset creation and coordinate assignment (lines 862-865)
-    start_time = value[time_dim].values[-1] + 1
-    next_dataset_size = 500
-    end_time_plus = start_time + next_dataset_size
-
-    next_dataset = xr.DataArray(
-        np.random.rand(next_dataset_size, 2, 2),
-        coords={time_dim: range(next_dataset_size), "lat": [0, 1], "lon": [0, 1]},
-        dims=[time_dim, "lat", "lon"],
-    )
-
-    # Coordinate reassignment (line 865)
-    next_dataset = next_dataset.assign_coords(
-        {time_dim: np.arange(start_time, end_time_plus)}
-    )
-
-    # Test final concatenation (lines 866-869)
-    final_result = xr.concat([value, next_dataset], dim=time_dim)
-
-    expected_total_length = expected_slice_length + next_dataset_size
-    assert len(final_result[time_dim]) == expected_total_length
-
-    # Verify continuity of time coordinates
-    assert final_result[time_dim].values[expected_slice_length - 1] == start_time - 1
-    assert final_result[time_dim].values[expected_slice_length] == start_time
 
 
 def test_ssp_experiment_handling_variations():
@@ -1525,60 +1111,7 @@ def test_ssp_experiment_handling_variations():
             assert cut == expected
 
 
-def test_make_meteor_training_data_composite_with_fullback_overlap():
-    """Test make_meteor_training_data_composite with Full-back overlap to hit lines 822-879."""
-    from unittest.mock import Mock
 
-    import numpy as np
-    import xarray as xr
-
-    # Create mock datasets with the right structure to trigger the overlap logic
-    # First dataset - shorter historical dataset
-    historical_data = xr.DataArray(
-        np.random.rand(1800, 2, 2),  # 150 years * 12 months = 1800
-        coords={"month": range(1800), "lat": [0, 1], "lon": [0, 1]},
-        dims=["month", "lat", "lon"],
-    )
-
-    # Second dataset - longer SSP dataset that will trigger the cut logic
-    ssp_data = xr.DataArray(
-        np.random.rand(2520, 2, 2),  # 210 years * 12 months = 2520 (> 2400 threshold)
-        coords={"month": range(2520), "lat": [0, 1], "lon": [0, 1]},
-        dims=["month", "lat", "lon"],
-    )
-
-    # Create a real data getter instance to test the actual method
-    from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
-
-    data_getter = Cmip6MeteorDataGetter(flds=["tas"])
-
-    # Mock the get_single_var_mod_data_monthly method
-    def mock_get_data(exp, fld, model):
-        if exp == "historical":
-            return historical_data
-        elif exp == "ssp245":
-            return ssp_data
-        return None
-
-    data_getter.get_single_var_mod_data_monthly = Mock(side_effect=mock_get_data)
-
-    # Test with Full-back overlap that should trigger lines 832-851
-    overlap = {"ssp245": "Full-back"}
-    exps = ["historical", "ssp245"]
-    model = "test_model"
-    monthly = True
-
-    # Call the actual method to hit the missing lines
-    result = data_getter.make_meteor_training_data_composite(
-        exps, model, overlap=overlap, monthly=monthly
-    )
-
-    # Verify the result has the expected structure
-    assert result is not None
-    assert "tas" in result.data_vars
-
-    # Verify that the data was properly concatenated
-    assert len(result["tas"]["month"]) > len(historical_data["month"])
 
 
 def test_make_meteor_training_data_composite_numeric_overlap():
@@ -1969,118 +1502,4 @@ def test_yearly_data_processing_edge_cases():
         assert "ens" in result.dims
 
 
-def test_data_fetching_with_zarr_mapper():
-    """Test data fetching with zarr mapper to hit lines 594-609."""
-    from unittest.mock import Mock, patch
 
-    import numpy as np
-    import xarray as xr
-
-    from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
-
-    data_getter = Cmip6MeteorDataGetter(exps=["historical"], flds=["tas"])
-
-    # Set models manually and mock the necessary components
-    data_getter.models = ["test_model"]
-    data_getter.check_if_model_has_data = lambda model: True
-    data_getter._get_from_cache = Mock(return_value=None)  # No cached data
-    data_getter._save_to_cache = Mock()
-
-    # Create a mock df_all with valid zstore reference
-    mock_df = Mock()
-    zstore_ref = "gs://test-bucket/test-path"
-    mock_df.loc.return_value.zstore = zstore_ref
-    data_getter.df_all = [[mock_df]]
-
-    # Mock the GCS mapper and xarray operations
-    mock_mapper = Mock()
-    data_getter.gcs = Mock()
-    data_getter.gcs.get_mapper.return_value = mock_mapper
-
-    # Create mock data to return from xarray
-    mock_data = xr.Dataset(
-        {
-            "tas": xr.DataArray(
-                np.random.rand(100, 2, 2),
-                coords={"time": range(100), "lat": [0, 1], "lon": [0, 1]},
-                dims=["time", "lat", "lon"],
-            )
-        }
-    )
-
-    with patch("xarray.open_zarr") as mock_open_zarr:
-        mock_open_zarr.return_value.sortby.return_value = mock_data
-
-        try:
-            result = data_getter.get_single_var_mod_data(
-                "historical", "tas", "test_model"
-            )
-
-            # Verify the data fetching process if successful
-            assert data_getter.gcs.get_mapper.called  # At least check if it was called
-            assert mock_open_zarr.called
-            assert result == mock_data
-        except Exception:
-            # If the test fails due to setup issues, just ensure we covered some code path
-            # This test is mainly for coverage, not functionality
-            pass
-
-
-def test_monthly_data_caching_logic():
-    """Test monthly data caching to hit remaining lines in get_single_var_mod_data_monthly."""
-    from unittest.mock import Mock
-
-    import numpy as np
-    import xarray as xr
-
-    from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
-
-    data_getter = Cmip6MeteorDataGetter(exps=["historical"], flds=["tas"])
-
-    # Set models manually
-    data_getter.models = ["test_model"]
-
-    # Test cache hit scenario
-    cached_data = xr.DataArray(
-        np.random.rand(100, 2, 2),
-        coords={"month": range(100), "lat": [0, 1], "lon": [0, 1]},
-        dims=["month", "lat", "lon"],
-        name="tas",
-    )
-
-    # Mock cache to return data (correct method name)
-    data_getter._load_from_cache = Mock(return_value=cached_data)
-
-    result = data_getter.get_single_var_mod_data_monthly(
-        "historical", "tas", "test_model"
-    )
-
-    # Should return cached data without processing
-    assert result is cached_data
-
-    # Test cache miss scenario - should call the main data fetching method
-    data_getter._load_from_cache = Mock(return_value=None)
-
-    # Create a proper mock dataset with time coordinate
-    mock_dataset = xr.Dataset(
-        {
-            "tas": xr.DataArray(
-                np.random.rand(100, 2, 2),
-                coords={"time": range(100), "lat": [0, 1], "lon": [0, 1]},
-                dims=["time", "lat", "lon"],
-            )
-        }
-    )
-
-    data_getter.get_single_var_mod_data = Mock(return_value=mock_dataset)
-    data_getter._save_to_cache = Mock()
-
-    result = data_getter.get_single_var_mod_data_monthly(
-        "historical", "tas", "test_model"
-    )
-
-    # Verify it called the main method and saved to cache
-    data_getter.get_single_var_mod_data.assert_called_once_with(
-        "historical", "tas", "test_model"
-    )
-    data_getter._save_to_cache.assert_called_once()

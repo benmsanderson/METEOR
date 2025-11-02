@@ -274,40 +274,7 @@ class TestPrpattUtilityFunctions:
             # If function has complex dependencies, just verify it exists
             assert callable(wgt)
 
-    def test_weighted_difference_calculation(self):
-        """Test function that uses weighted difference calculation to hit lines 406-408."""
-        try:
-            # This test targets the missing lines 406-408 which are the return statement
-            # in a function that calculates weighted differences
 
-            # Create simple test data
-            test_data = np.array([[1, 2], [3, 4]])
-            mode_weights = np.array([0.5, 0.8])
-
-            # Mock a simple model function for testing
-            def simple_model(params, n_points):
-                return (
-                    np.ones((n_points, 2)) * params[0]
-                    if params
-                    else np.zeros((n_points, 2))
-                )
-
-            # Test parameters
-            test_params = [1.0]
-
-            # Calculate tiled weights (mimicking lines 405-406)
-            wgtt = np.tile(mode_weights.T, (test_data.shape[0], 1))
-
-            # Calculate weighted difference (line 407)
-            result = wgtt * (test_data - simple_model(test_params, test_data.shape[0]))
-
-            # Verify the calculation worked
-            assert isinstance(result, np.ndarray)
-            assert result.shape == test_data.shape
-
-        except Exception:
-            # If calculation has issues, just pass
-            pass
 
     def test_residual_function(self):
         """Test the residual function to hit lines 406-408."""

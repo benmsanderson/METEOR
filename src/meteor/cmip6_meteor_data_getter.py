@@ -3,6 +3,7 @@ Module to get CMIP6 data and convert to format that can be used for METEOR
 """
 
 import hashlib
+import logging
 import os
 
 import gcsfs
@@ -291,7 +292,18 @@ class Cmip6MeteorDataGetter:
         self.cache_dir = cache_dir
 
         if self.enable_cache:
-            os.makedirs(self.cache_dir, exist_ok=True)
+            try:
+                os.makedirs(self.cache_dir, exist_ok=True)
+                logging.info(
+                    f"Setting up local cache for CMIP6 data at: {self.cache_dir}. "
+                    f"This will improve performance by storing downloaded data locally."
+                )
+            except (OSError, PermissionError) as e:
+                logging.warning(
+                    f"Failed to create cache directory at {self.cache_dir}: {e}. "
+                    f"Disabling cache functionality."
+                )
+                self.enable_cache = False
 
         df = pd.read_csv(
             "https://storage.googleapis.com/cmip6/cmip6-zarr-consolidated-stores.csv",
@@ -462,8 +474,12 @@ class Cmip6MeteorDataGetter:
             data_to_save.attrs["cache_timestamp"] = pd.Timestamp.now().isoformat()
 
             data_to_save.to_netcdf(cache_path)
-        except (OSError, ValueError):
+        except (OSError, ValueError) as e:
             # Failed to cache, but don't raise error
+            logging.warning(
+                f"Failed to save data to cache at {cache_path}: {e}. "
+                f"Continuing without caching."
+            )
             pass
 
     def clear_cache(self):
@@ -572,13 +588,14 @@ class Cmip6MeteorDataGetter:
             is not among the models that has complete data for all the combinations of experiments
             and fields that the instance holds.
         """
-        # Generate cache key
-        cache_key = self._generate_cache_key("get_single_var_mod_data", exp, fld, model)
-
-        # Try to load from cache
-        cached_data = self._load_from_cache(cache_key)
-        if cached_data is not None:
-            return cached_data
+        # Try to load from cache first if caching is enabled
+        if self.enable_cache:
+            cache_key = self._generate_cache_key(
+                "get_single_var_mod_data", exp, fld, model
+            )
+            cached_data = self._load_from_cache(cache_key)
+            if cached_data is not None:
+                return cached_data
 
         # Original logic for data fetching
         if exp not in self.exps:
@@ -603,8 +620,9 @@ class Cmip6MeteorDataGetter:
         mapper = self.gcs.get_mapper(zstore_ref)
         fld_data = xr.open_zarr(mapper, decode_times=False).sortby("time")
 
-        # Save to cache
-        self._save_to_cache(cache_key, fld_data)
+        # Save to cache if caching is enabled
+        if self.enable_cache:
+            self._save_to_cache(cache_key, fld_data)
 
         return fld_data
 
@@ -626,15 +644,14 @@ class Cmip6MeteorDataGetter:
         xr.DataArrray
             Data converted from monthly to yearly mean data and including and extra flat ens dimension
         """
-        # Generate cache key
-        cache_key = self._generate_cache_key(
-            "get_single_var_mod_data_yearmean", exp, fld, model
-        )
-
-        # Try to load from cache
-        cached_data = self._load_from_cache(cache_key, expected_type="DataArray")
-        if cached_data is not None:
-            return cached_data
+        # Try to load from cache first if caching is enabled
+        if self.enable_cache:
+            cache_key = self._generate_cache_key(
+                "get_single_var_mod_data_yearmean", exp, fld, model
+            )
+            cached_data = self._load_from_cache(cache_key, expected_type="DataArray")
+            if cached_data is not None:
+                return cached_data
 
         # Original logic
         ds = self.get_single_var_mod_data(exp, fld, model)
@@ -649,8 +666,9 @@ class Cmip6MeteorDataGetter:
             dim={"ens": np.array([1])}
         )  # .assign_coords({'ens':1})
 
-        # Save to cache
-        self._save_to_cache(cache_key, var_yearly)
+        # Save to cache if caching is enabled
+        if self.enable_cache:
+            self._save_to_cache(cache_key, var_yearly)
 
         return var_yearly
 
@@ -672,15 +690,14 @@ class Cmip6MeteorDataGetter:
         xr.DataArrray
             Monthly data with time dimension preserved and including an extra flat ens dimension
         """
-        # Generate cache key
-        cache_key = self._generate_cache_key(
-            "get_single_var_mod_data_monthly", exp, fld, model
-        )
-
-        # Try to load from cache
-        cached_data = self._load_from_cache(cache_key, expected_type="DataArray")
-        if cached_data is not None:
-            return cached_data
+        # Try to load from cache first if caching is enabled
+        if self.enable_cache:
+            cache_key = self._generate_cache_key(
+                "get_single_var_mod_data_monthly", exp, fld, model
+            )
+            cached_data = self._load_from_cache(cache_key, expected_type="DataArray")
+            if cached_data is not None:
+                return cached_data
 
         # Original logic
         ds = self.get_single_var_mod_data(exp, fld, model)
@@ -693,8 +710,9 @@ class Cmip6MeteorDataGetter:
         ).rename({"time": "month"})
         var_monthly = var_monthly.expand_dims(dim={"ens": np.array([1])})
 
-        # Save to cache
-        self._save_to_cache(cache_key, var_monthly)
+        # Save to cache if caching is enabled
+        if self.enable_cache:
+            self._save_to_cache(cache_key, var_monthly)
 
         return var_monthly
 
@@ -720,15 +738,14 @@ class Cmip6MeteorDataGetter:
         xr.Dataset
             Dataset with yearly data on the format usable for METEOR (or monthly if monthly=True)
         """
-        # Generate cache key
-        cache_key = self._generate_cache_key(
-            "make_meteor_training_data", exp, model, exp_mapper, monthly=monthly
-        )
-
-        # Try to load from cache
-        cached_data = self._load_from_cache(cache_key)
-        if cached_data is not None:
-            return cached_data
+        # Try to load from cache first if caching is enabled
+        if self.enable_cache:
+            cache_key = self._generate_cache_key(
+                "make_meteor_training_data", exp, model, exp_mapper, monthly=monthly
+            )
+            cached_data = self._load_from_cache(cache_key)
+            if cached_data is not None:
+                return cached_data
 
         # Original logic
         if not exp_mapper:
@@ -756,8 +773,9 @@ class Cmip6MeteorDataGetter:
                 )
         training_data = make_xarray_with_correct_dims(self.flds, fld_values)
 
-        # Save to cache
-        self._save_to_cache(cache_key, training_data)
+        # Save to cache if caching is enabled
+        if self.enable_cache:
+            self._save_to_cache(cache_key, training_data)
 
         return training_data
 
@@ -796,15 +814,18 @@ class Cmip6MeteorDataGetter:
         xr.Dataset
             Dataset with yearly data on the format usable for METEOR (or monthly if monthly=True)
         """
-        # Generate cache key
-        cache_key = self._generate_cache_key(
-            "make_meteor_training_data_composite", exps, model, overlap, monthly=monthly
-        )
-
-        # Try to load from cache
-        cached_data = self._load_from_cache(cache_key)
-        if cached_data is not None:
-            return cached_data
+        # Try to load from cache first if caching is enabled
+        if self.enable_cache:
+            cache_key = self._generate_cache_key(
+                "make_meteor_training_data_composite",
+                exps,
+                model,
+                overlap,
+                monthly=monthly,
+            )
+            cached_data = self._load_from_cache(cache_key)
+            if cached_data is not None:
+                return cached_data
 
         # Original logic - TODO: Add support for cutting forward.
         fld_values = []
@@ -873,7 +894,8 @@ class Cmip6MeteorDataGetter:
 
         result = make_xarray_with_correct_dims(self.flds, fld_values)
 
-        # Save to cache
-        self._save_to_cache(cache_key, result)
+        # Save to cache if caching is enabled
+        if self.enable_cache:
+            self._save_to_cache(cache_key, result)
 
         return result

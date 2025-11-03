@@ -10,7 +10,7 @@ from typing import List, Optional, Union
 
 import xarray as xr
 
-from .base import ImpactCalculator, ImpactEnsemble, ImpactResult
+from .impacts_core import ImpactCalculator, ImpactEnsemble, ImpactResult
 
 
 def apply_impact_calculator(
@@ -24,15 +24,27 @@ def apply_impact_calculator(
     This function handles both single realizations and ensembles,
     providing a unified interface for impact calculations.
 
-    Args:
-        calculator: The impact calculator to apply
-        climate_data: Either a single DataArray or list of DataArrays (ensemble)
-        ensemble_dim: If climate_data has an ensemble dimension, specify its name
-                     to process each member separately
+    Parameters
+    ----------
+    calculator : ImpactCalculator
+        The impact calculator to apply
+    climate_data : Union[xr.DataArray, List[xr.DataArray]]
+        Either a single DataArray or list of DataArrays (ensemble)
+    ensemble_dim : str, optional
+        If climate_data has an ensemble dimension, specify its name
+        to process each member separately
 
     Returns
     -------
+    Union[ImpactResult, List[ImpactResult]]
         ImpactResult (single realization) or List[ImpactResult] (ensemble)
+
+    Raises
+    ------
+    ValueError
+        If ensemble dimension not found in climate_data
+    TypeError
+        If climate_data is not the correct type
     """
     # Handle single DataArray with ensemble dimension
     if isinstance(climate_data, xr.DataArray) and ensemble_dim is not None:
@@ -64,13 +76,22 @@ def _apply_to_ensemble(
     """
     Apply calculator to each member of an ensemble.
 
-    Args:
-        calculator: The impact calculator to apply
-        ensemble_members: List of climate data arrays
+    Parameters
+    ----------
+    calculator : ImpactCalculator
+        The impact calculator to apply
+    ensemble_members : List[xr.DataArray]
+        List of climate data arrays
 
     Returns
     -------
+    List[ImpactResult]
         List of ImpactResult objects
+
+    Raises
+    ------
+    RuntimeError
+        If calculation fails for any ensemble member
     """
     results = []
 
@@ -99,12 +120,16 @@ def create_impact_ensemble(
     This is a convenience function that creates an ImpactEnsemble object
     and immediately calculates impacts for all ensemble members.
 
-    Args:
-        calculator: The impact calculator to apply
-        climate_ensemble: List of climate data arrays (ensemble members)
+    Parameters
+    ----------
+    calculator : ImpactCalculator
+        The impact calculator to apply
+    climate_ensemble : List[xr.DataArray]
+        List of climate data arrays (ensemble members)
 
     Returns
     -------
+    ImpactEnsemble
         ImpactEnsemble with calculated results
     """
     ensemble = ImpactEnsemble(calculator)
@@ -120,14 +145,24 @@ def ensemble_statistics(
     """
     Calculate ensemble statistics for a specific impact variable.
 
-    Args:
-        impact_results: List of ImpactResult objects from ensemble calculation
-        variable: Name of the impact variable to analyze
-        statistics: List of statistics to calculate ('mean', 'std', 'min', 'max', 'quantile_XX')
+    Parameters
+    ----------
+    impact_results : List[ImpactResult]
+        List of ImpactResult objects from ensemble calculation
+    variable : str
+        Name of the impact variable to analyze
+    statistics : List[str], optional
+        List of statistics to calculate ('mean', 'std', 'min', 'max', 'percentile_XX')
 
     Returns
     -------
+    xr.Dataset
         xarray Dataset containing the requested statistics
+
+    Raises
+    ------
+    ValueError
+        If no impact results provided or variable not found
     """
     if statistics is None:
         statistics = ["mean", "std", "min", "max"]
@@ -154,8 +189,8 @@ def ensemble_statistics(
             stats_data["ensemble_min"] = ensemble_array.min(dim="ensemble_member")
         elif stat == "max":
             stats_data["ensemble_max"] = ensemble_array.max(dim="ensemble_member")
-        elif stat.startswith("quantile_"):
-            # Extract percentile from string like 'quantile_95'
+        elif stat.startswith("percentile_"):
+            # Extract percentile from string like 'percentile_95'
             try:
                 percentile = float(stat.split("_")[1])
                 quantile = percentile / 100.0
@@ -165,7 +200,7 @@ def ensemble_statistics(
                     "quantile", errors="ignore"
                 )  # Remove quantile coordinate
             except (IndexError, ValueError) as exc:
-                raise ValueError(f"Invalid quantile specification: {stat}") from exc
+                raise ValueError(f"Invalid percentile specification: {stat}") from exc
         else:
             raise ValueError(f"Unknown statistic: {stat}")
 

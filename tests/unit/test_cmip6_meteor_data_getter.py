@@ -1,10 +1,19 @@
-from unittest.mock import patch
+import os
+import tempfile
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
 import xarray as xr
 
 from meteor import cmip6_meteor_data_getter
+from meteor.cmip6_meteor_data_getter import (
+    Cmip6MeteorDataGetter,
+    initialise_dataframe_and_models,
+    make_xarray_with_correct_dims,
+    year_mean_monthly_xarray,
+)
+from meteor.noise_generator import MeteorNoiseGenerator, train_noise_model_from_cmip6
 
 
 def test_get_unique_models():
@@ -110,15 +119,12 @@ def test_initialization():
     assert hasattr(default_getter, "check_if_model_has_data")
 
     # Test custom initialization (just verify it doesn't crash)
-    try:
-        custom_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
-            flds=["tas"], exps=["piControl", "abrupt-4xCO2", "1pctCO2"]
-        )
-        assert custom_getter.flds == ["tas"]
-        assert custom_getter.exps == ["piControl", "abrupt-4xCO2", "1pctCO2"]
-    except Exception:
-        # If custom initialization fails, at least basic initialization worked
-        pass
+
+    custom_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        flds=["tas"], exps=["piControl", "abrupt-4xCO2", "1pctCO2"]
+    )
+    assert custom_getter.flds == ["tas"]
+    assert custom_getter.exps == ["piControl", "abrupt-4xCO2", "1pctCO2"]
 
 
 def test_models_property():
@@ -253,14 +259,12 @@ def test_composite_data_single_experiment():
 
 def test_train_noise_model():
     """Test noise model training functionality."""
-    from meteor.noise_generator import MeteorNoiseGenerator
-
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
         exps=["historical", "ssp245"], dbe=["CMIP", "ScenarioMIP"]
     )
 
     # Test basic noise model training
-    noise_model = MeteorNoiseGenerator.train_from_cmip6(
+    noise_model = train_noise_model_from_cmip6(
         data_getter,
         experiments=["historical", "ssp245"],
         model_name="CanESM5",
@@ -278,17 +282,13 @@ def test_train_noise_model():
 
 def test_train_noise_model_with_cache():
     """Test noise model training with caching."""
-    import os
-    import tempfile
-    from meteor.noise_generator import MeteorNoiseGenerator
-
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
         exps=["historical", "ssp245"], dbe=["CMIP", "ScenarioMIP"]
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # First call - should create cache
-        noise_model1 = MeteorNoiseGenerator.train_from_cmip6(
+        noise_model1 = train_noise_model_from_cmip6(
             data_getter,
             experiments=["historical", "ssp245"],
             model_name="CanESM5",
@@ -303,7 +303,7 @@ def test_train_noise_model_with_cache():
         assert len(cache_files) > 0
 
         # Second call - should load from cache
-        noise_model2 = MeteorNoiseGenerator.train_from_cmip6(
+        noise_model2 = train_noise_model_from_cmip6(
             data_getter,
             experiments=["historical", "ssp245"],
             model_name="CanESM5",
@@ -320,8 +320,6 @@ def test_train_noise_model_with_cache():
 
 def test_train_noise_model_with_custom_temp():
     """Test noise model training with custom temperature trajectory."""
-    from meteor.noise_generator import MeteorNoiseGenerator
-
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
         exps=["historical", "ssp245"], dbe=["CMIP", "ScenarioMIP"]
     )
@@ -331,7 +329,7 @@ def test_train_noise_model_with_custom_temp():
     custom_temp = np.random.normal(15, 2, 3012)
 
     try:
-        noise_model = MeteorNoiseGenerator.train_from_cmip6(
+        noise_model = train_noise_model_from_cmip6(
             data_getter,
             experiments=["historical", "ssp245"],
             model_name="CanESM5",
@@ -345,19 +343,17 @@ def test_train_noise_model_with_custom_temp():
         assert noise_model is not None
     except Exception:
         # If the noise model training fails due to data issues,
-        # at least verify the method exists and can be called
-        assert hasattr(MeteorNoiseGenerator, "train_from_cmip6")
+        # at least verify the function exists and can be called
+        assert callable(train_noise_model_from_cmip6)
 
 
 def test_train_noise_model_picontrol_baseline():
     """Test noise model training with piControl baseline."""
-    from meteor.noise_generator import MeteorNoiseGenerator
-
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
         exps=["piControl", "historical", "ssp245"], dbe=["CMIP", "CMIP", "ScenarioMIP"]
     )
 
-    noise_model = MeteorNoiseGenerator.train_from_cmip6(
+    noise_model = train_noise_model_from_cmip6(
         data_getter,
         experiments=["historical", "ssp245"],
         model_name="CanESM5",
@@ -452,21 +448,6 @@ def test_error_handling_invalid_model():
         data_getter.get_single_var_mod_data_yearmean("piControl", "tas", "InvalidModel")
 
 
-def test_error_handling_missing_data():
-    """Test error handling for missing data scenarios."""
-    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter()
-
-    # Test with invalid experiment
-    try:
-        with pytest.raises((KeyError, ValueError)):
-            data_getter.get_single_var_mod_data_yearmean(
-                "invalid_exp", "tas", "CanESM5"
-            )
-    except Exception:
-        # If error handling is different, just verify function exists
-        assert hasattr(data_getter, "get_single_var_mod_data_yearmean")
-
-
 def test_data_validation_edge_cases():
     """Test data validation with edge cases."""
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter()
@@ -557,9 +538,6 @@ def test_make_meteor_training_data_monthly():
 
 def test_caching_functionality():
     """Test caching functionality to improve coverage."""
-    import os
-    import tempfile
-
     # Test with a temporary cache directory
     with tempfile.TemporaryDirectory() as temp_dir:
         data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
@@ -603,12 +581,6 @@ def test_caching_disabled():
 
 def test_cache_save_load_edge_cases():
     """Test cache save and load edge cases to improve coverage."""
-    import os
-    import tempfile
-
-    import numpy as np
-    import xarray as xr
-
     with tempfile.TemporaryDirectory() as temp_dir:
         data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
             cache_dir=temp_dir, enable_cache=True
@@ -673,8 +645,6 @@ def test_cache_save_load_edge_cases():
 
 def test_cache_error_handling():
     """Test cache error handling paths."""
-    import os
-    import tempfile
 
     # Test with valid but empty cache directory
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -697,8 +667,6 @@ def test_cache_error_handling():
 
 def test_cache_corruption_recovery():
     """Test cache corruption recovery mechanisms."""
-    import os
-    import tempfile
 
     with tempfile.TemporaryDirectory() as temp_dir:
         data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
@@ -724,10 +692,6 @@ def test_cache_corruption_recovery():
 
 def test_cache_dataarray_dataset_conversion():
     """Test DataArray/Dataset conversion in caching."""
-    import tempfile
-
-    import numpy as np
-    import xarray as xr
 
     with tempfile.TemporaryDirectory() as temp_dir:
         data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
@@ -775,8 +739,6 @@ def test_cache_dataarray_dataset_conversion():
 
 def test_cache_disabled_functionality():
     """Test functionality when cache is disabled."""
-    import numpy as np
-    import xarray as xr
 
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(enable_cache=False)
 
@@ -791,7 +753,6 @@ def test_cache_disabled_functionality():
 
 def test_error_handling_edge_cases():
     """Test error handling in edge cases."""
-    import tempfile
 
     with tempfile.TemporaryDirectory() as temp_dir:
         data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
@@ -834,8 +795,6 @@ def test_zstore_reference_handling():
 
 def test_complex_data_processing_paths():
     """Test complex data processing code paths."""
-    import numpy as np
-    import xarray as xr
 
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter()
 
@@ -855,8 +814,6 @@ def test_complex_data_processing_paths():
 
         # Test the processing logic that happens in get_single_var_yearly_anom_data
         # This covers the var_yearly assignment and coordinate operations
-        from meteor.cmip6_meteor_data_getter import year_mean_monthly_xarray
-
         var_yearly = year_mean_monthly_xarray(mock_da)
         processed = var_yearly.assign_coords(
             {"time": np.arange(len(mock_time_data) // 12)}
@@ -924,8 +881,6 @@ def test_composite_data_creation_edge_cases():
 
 def test_data_overlap_and_trimming():
     """Test data overlap and trimming functionality."""
-    import numpy as np
-    import xarray as xr
 
     # Test overlap handling in composite data creation (lines 850-870)
     try:
@@ -960,8 +915,6 @@ def test_data_overlap_and_trimming():
 
 def test_time_dimension_handling():
     """Test time dimension handling in various methods."""
-    import numpy as np
-    import xarray as xr
 
     # Test time dimension logic (lines 812-813)
     monthly_flag = True
@@ -999,8 +952,6 @@ def test_time_dimension_handling():
 
 def test_initialization_edge_cases():
     """Test initialization edge cases and defaults."""
-    from meteor.cmip6_meteor_data_getter import initialise_dataframe_and_models
-
     # Test the mdl_skipmbrs default case (lines 172-174)
     try:
         # This tests the default mdl_skipmbrs initialization
@@ -1021,8 +972,6 @@ def test_initialization_edge_cases():
 
 def test_cache_cleanup_operations():
     """Test cache cleanup and file operations."""
-    import os
-    import tempfile
 
     with tempfile.TemporaryDirectory() as temp_dir:
         data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
@@ -1101,10 +1050,6 @@ def test_ssp_experiment_handling_variations():
 
 def test_make_meteor_training_data_composite_numeric_overlap():
     """Test make_meteor_training_data_composite with numeric overlap."""
-    from unittest.mock import Mock
-
-    import numpy as np
-    import xarray as xr
 
     # Create mock datasets
     historical_data = xr.DataArray(
@@ -1118,8 +1063,6 @@ def test_make_meteor_training_data_composite_numeric_overlap():
         coords={"month": range(1020), "lat": [0, 1], "lon": [0, 1]},
         dims=["month", "lat", "lon"],
     )
-
-    from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 
     data_getter = Cmip6MeteorDataGetter(flds=["tas"])
 
@@ -1148,11 +1091,6 @@ def test_make_meteor_training_data_composite_numeric_overlap():
 
 def test_utility_functions():
     """Test utility functions for coverage."""
-    import numpy as np
-    import xarray as xr
-
-    from meteor.cmip6_meteor_data_getter import make_xarray_with_correct_dims
-
     # Test make_xarray_with_correct_dims function (lines 135-138)
     fld_names = ["temperature", "precipitation"]
     fld_values = [
@@ -1181,8 +1119,6 @@ def test_utility_functions():
 
 def test_cache_disabled_functionality_extended():
     """Test functionality when cache is disabled."""
-    import numpy as np
-    import xarray as xr
 
     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(enable_cache=False)
 
@@ -1197,10 +1133,6 @@ def test_cache_disabled_functionality_extended():
 
 def test_additional_cache_edge_cases():
     """Test additional cache edge cases."""
-    import tempfile
-
-    import numpy as np
-    import xarray as xr
 
     with tempfile.TemporaryDirectory() as temp_dir:
         data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
@@ -1286,7 +1218,6 @@ def test_model_data_methods():
 
 def test_year_mean_monthly_function():
     """Test the year_mean_monthly helper function."""
-    import numpy as np
 
     # Create test data: 2 years (24 months) of random data
     test_data = np.random.rand(24, 10, 10)  # 24 months, 10x10 spatial grid
@@ -1309,7 +1240,6 @@ def test_year_mean_monthly_function():
 def test_helper_functions():
     """Test helper functions for better coverage."""
     # Test multiply_along_axis function
-    import numpy as np
 
     array_a = np.array([[1, 2], [3, 4], [5, 6]])
     array_b = np.array([2, 3, 4])
@@ -1325,8 +1255,6 @@ def test_helper_functions():
 
 def test_year_mean_monthly_xarray():
     """Test year_mean_monthly_xarray function."""
-    import numpy as np
-    import xarray as xr
 
     # Create test monthly data
     monthly_data = xr.DataArray(
@@ -1346,9 +1274,6 @@ def test_year_mean_monthly_xarray():
 
 def test_error_handling_for_invalid_experiments_and_fields():
     """Test error handling for invalid experiments and fields to hit lines 585-593."""
-    import pytest
-
-    from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 
     # Create a data getter with limited experiments and fields
     data_getter = Cmip6MeteorDataGetter(exps=["historical"], flds=["tas"])
@@ -1375,11 +1300,6 @@ def test_error_handling_for_invalid_experiments_and_fields():
 
 def test_zstore_ref_error_handling():
     """Test error handling for missing zstore references to hit lines 600-601."""
-    from unittest.mock import Mock, patch
-
-    import numpy as np
-
-    from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 
     # Create a data getter
     data_getter = Cmip6MeteorDataGetter(exps=["historical"], flds=["tas"])
@@ -1430,12 +1350,6 @@ def test_zstore_ref_error_handling():
 
 def test_yearly_data_processing_edge_cases():
     """Test yearly data processing to hit lines 644-655."""
-    from unittest.mock import Mock, patch
-
-    import numpy as np
-    import xarray as xr
-
-    from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 
     data_getter = Cmip6MeteorDataGetter(exps=["historical"], flds=["tas"])
 

@@ -1,7 +1,10 @@
 import numpy as np
 
 from meteor import scm_forcer_engine
-from meteor.scm_forcer_engine import aerosol_priority_mapping
+from meteor.scm_forcer_engine import (
+    ScmEngineForPatternScaling,
+    aerosol_priority_mapping,
+)
 
 
 def test_forcer_engine():
@@ -82,7 +85,6 @@ def test_aerosol_priority_mapping_additional():
 def test_scm_engine_class_exists():
     """Test that SCM engine class exists and has expected attributes."""
     # Test that the class can be imported
-    from meteor.scm_forcer_engine import ScmEngineForPatternScaling
 
     # Test it's a class
     assert isinstance(ScmEngineForPatternScaling, type)
@@ -118,7 +120,6 @@ def test_scm_forcer_engine_edge_cases():
 def test_scm_forcer_engine_numerical_stability():
     """Test numerical stability of SCM forcer engine."""
     # Test aerosol priority mapping with edge cases
-    from meteor.scm_forcer_engine import aerosol_priority_mapping
 
     # Test with components that might cause conflicts
     edge_components = ["CO2", "SO2", "BC", "OC", "CH4", "N2O"]

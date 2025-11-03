@@ -6,7 +6,19 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from meteor.prpatt import expfun, expotas, make_amat, make_anom, make_pmat, wgt
+from meteor.prpatt import (
+    expfun,
+    expotas,
+    get_lat_name,
+    get_time_name,
+    global_mean,
+    make_amat,
+    make_anom,
+    make_pmat,
+    pmodel,
+    residual,
+    wgt,
+)
 
 
 class TestPrpattMathFunctions:
@@ -226,8 +238,6 @@ class TestPrpattUtilityFunctions:
 
             n_times = 10
 
-            from meteor.prpatt import pmodel
-
             result = pmodel(pars, n_times)
 
             # Should return an array
@@ -241,8 +251,6 @@ class TestPrpattUtilityFunctions:
 
         except Exception:
             # If function has complex dependencies, just verify it exists
-            from meteor.prpatt import pmodel
-
             assert callable(pmodel)
 
     def test_wgt_function(self):
@@ -277,8 +285,6 @@ class TestPrpattUtilityFunctions:
     def test_residual_function(self):
         """Test the residual function to hit lines 406-408."""
         try:
-            from meteor.prpatt import residual
-
             # Create simple test data to test the residual function
             # Mock parameters object
             class MockParams:
@@ -299,7 +305,6 @@ class TestPrpattUtilityFunctions:
 
         except Exception:
             # If function has complex dependencies, just verify it exists
-            from meteor.prpatt import residual
 
             assert callable(residual)
 
@@ -310,10 +315,6 @@ if __name__ == "__main__":
 
 def test_additional_prpatt_functions():
     """Test additional prpatt functions to improve coverage."""
-    import numpy as np
-    import xarray as xr
-
-    from meteor.prpatt import get_lat_name, get_time_name
 
     # Test coordinate name detection functions
     test_dataset = xr.Dataset(
@@ -357,10 +358,6 @@ def test_additional_prpatt_functions():
 
 def test_numerical_edge_cases():
     """Test numerical edge cases to improve coverage."""
-    import numpy as np
-    import xarray as xr
-
-    from meteor.prpatt import global_mean
 
     # Test global mean with edge case data
     edge_case_data = xr.DataArray(

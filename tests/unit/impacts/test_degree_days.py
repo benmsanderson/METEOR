@@ -6,13 +6,21 @@ Tests the DegreeDaysCalculator implementation.
 """
 
 import warnings
-
 import numpy as np
 import pytest
 import xarray as xr
 
-from meteor.impacts.base import ImpactResult
+from meteor.impacts.impacts_core import ImpactResult
 from meteor.impacts.calculators.degree_days import DegreeDaysCalculator
+
+
+def test_degree_days_calculator_init():
+    """Test calculator initialization."""
+    calc = DegreeDaysCalculator(base_temperature=20.0, sigma_m_c1=1.5, name="TestDD")
+
+    assert calc.base_temperature == 20.0
+    assert calc.sigma_m_c1 == 1.5
+    assert calc.name == "TestDD"
 
 
 class TestDegreeDaysCalculator:
@@ -68,16 +76,6 @@ class TestDegreeDaysCalculator:
             dims=["month", "lat", "lon"],
             coords={"month": np.arange(24), "lat": [50, 60], "lon": [0, 10]},
         )
-
-    def test_init(self):
-        """Test calculator initialization."""
-        calc = DegreeDaysCalculator(
-            base_temperature=20.0, sigma_m_c1=1.5, name="TestDD"
-        )
-
-        assert calc.base_temperature == 20.0
-        assert calc.sigma_m_c1 == 1.5
-        assert calc.name == "TestDD"
 
     def test_validate_input_valid(self):
         """Test validation with valid input."""
@@ -326,7 +324,6 @@ class TestDegreeDaysCalculator:
 
     def test_temperature_validation_edge_cases(self):
         """Test temperature validation with edge cases to hit lines 102, 262-268."""
-        import warnings
 
         # Test very high temperature values that trigger warning (line 102)
         # Need all 12 months to avoid the incomplete year warning

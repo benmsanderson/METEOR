@@ -176,7 +176,7 @@ class TestMeteorImpactsWorkflow:
         stats = ensemble_statistics(
             ensemble_results,
             "annual_hdd",
-            statistics=["mean", "std", "quantile_10", "quantile_90"],
+            statistics=["mean", "std", "percentile_10", "percentile_90"],
         )
 
         assert isinstance(stats, xr.Dataset)

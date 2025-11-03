@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from meteor.impacts.base import ImpactCalculator, ImpactEnsemble, ImpactResult
+from meteor.impacts.impacts_core import ImpactCalculator, ImpactEnsemble, ImpactResult
 from meteor.impacts.ensemble import (
     apply_impact_calculator,
     create_impact_ensemble,
@@ -173,7 +173,9 @@ class TestEnsembleStatistics:
     def test_custom_statistics(self):
         """Test with custom statistics list."""
         stats = ensemble_statistics(
-            self.results, "test_var", statistics=["mean", "quantile_50", "quantile_90"]
+            self.results,
+            "test_var",
+            statistics=["mean", "percentile_50", "percentile_90"],
         )
 
         assert "ensemble_mean" in stats
@@ -181,15 +183,15 @@ class TestEnsembleStatistics:
         assert "ensemble_p90" in stats
         assert "ensemble_std" not in stats  # Not requested
 
-    def test_quantile_statistics(self):
-        """Test quantile statistics."""
+    def test_percentile_statistics(self):
+        """Test percentile statistics."""
         stats = ensemble_statistics(
             self.results,
             "test_var",
-            statistics=["quantile_0", "quantile_50", "quantile_100"],
+            statistics=["percentile_0", "percentile_50", "percentile_100"],
         )
 
-        # quantile_0 should equal min, quantile_100 should equal max
+        # percentile_0 should equal min, percentile_100 should equal max
         # For our test data: [1,2,3], [2,3,4], [3,4,5]
         # min = [1,2,3], p50 = [2,3,4], max = [3,4,5]
         expected_min = np.array([1, 2, 3])
@@ -215,10 +217,10 @@ class TestEnsembleStatistics:
         with pytest.raises(ValueError, match="Unknown statistic: invalid_stat"):
             ensemble_statistics(self.results, "test_var", statistics=["invalid_stat"])
 
-    def test_invalid_quantile(self):
-        """Test with invalid quantile specification."""
-        with pytest.raises(ValueError, match="Invalid quantile specification"):
-            ensemble_statistics(self.results, "test_var", statistics=["quantile_bad"])
+    def test_invalid_percentile(self):
+        """Test with invalid percentile specification."""
+        with pytest.raises(ValueError, match="Invalid percentile specification"):
+            ensemble_statistics(self.results, "test_var", statistics=["percentile_bad"])
 
     def test_dataset_attributes(self):
         """Test that output dataset has proper attributes."""

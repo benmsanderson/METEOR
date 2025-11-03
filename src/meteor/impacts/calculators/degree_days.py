@@ -20,7 +20,7 @@ from typing import Tuple
 import numpy as np
 import xarray as xr
 
-from ..base import ImpactCalculator, ImpactResult
+from ..impacts_core import ImpactCalculator, ImpactResult
 
 
 class DegreeDaysCalculator(ImpactCalculator):
@@ -49,15 +49,21 @@ class DegreeDaysCalculator(ImpactCalculator):
         """
         Initialize the Degree Days calculator.
 
-        Args
-        ----
-            base_temperature: Base temperature in Celsius for degree day calculation.
-                            Defaults to 18.0°C (common for residential heating/cooling).
-            sigma_m_c1: Coefficient c1 for σ_m calculation (default: 1.45)
-            sigma_m_c2: Coefficient c2 for σ_m calculation (default: 0.29)
-            sigma_m_c3: Coefficient c3 for σ_m calculation (default: 0.664)
-            a_val_c1: Coefficient for 'a' value calculation (default: 1.698)
-            name: Human-readable name for this calculator
+        Parameters
+        ----------
+        base_temperature : float, default 18.0
+            Base temperature in Celsius for degree day calculation.
+            Defaults to 18.0°C (common for residential heating/cooling).
+        sigma_m_c1 : float, default 1.45
+            Coefficient c1 for σ_m calculation
+        sigma_m_c2 : float, default 0.29
+            Coefficient c2 for σ_m calculation
+        sigma_m_c3 : float, default 0.664
+            Coefficient c3 for σ_m calculation
+        a_val_c1 : float, default 1.698
+            Coefficient for 'a' value calculation
+        name : str, default "DegreeDays"
+            Human-readable name for this calculator
         """
         super().__init__(name)
         self.base_temperature = base_temperature
@@ -70,13 +76,15 @@ class DegreeDaysCalculator(ImpactCalculator):
         """
         Validate that input data is suitable for degree days calculation.
 
-        Args
-        ----
-            climate_data: Input temperature data to validate
+        Parameters
+        ----------
+        climate_data : xr.DataArray
+            Input temperature data to validate
 
         Raises
         ------
-            ValueError: If input data is not suitable
+        ValueError
+            If input data is not suitable
         """
         if not isinstance(climate_data, xr.DataArray):
             raise ValueError("Input must be an xarray.DataArray")
@@ -106,7 +114,7 @@ class DegreeDaysCalculator(ImpactCalculator):
         elif temp_max > 100:
             # Mixed range - could be Celsius with hot values or unusual units
             warnings.warn(
-                f"Temperature values seem unusual (range: {temp_min:.1f} to {temp_max:.1f}). "
+                f"Temperature values seem unusual (range: {temp_min:.1f} to {temp_max:.1f} Celsius). "
                 "Very high values detected - please verify units are correct."
             )
 
@@ -114,19 +122,21 @@ class DegreeDaysCalculator(ImpactCalculator):
         """
         Calculate Heating and Cooling Degree Days from monthly temperature data.
 
-        Args
-        ----
-            climate_data: xarray DataArray with monthly mean temperatures.
-                         Must have a 'month' dimension. Temperature should be in
-                         the same units as base_temperature (typically Celsius).
+        Parameters
+        ----------
+        climate_data : xr.DataArray
+            xarray DataArray with monthly mean temperatures.
+            Must have a 'month' dimension. Temperature should be in
+            the same units as base_temperature (typically Celsius).
 
         Returns
         -------
+        ImpactResult
             ImpactResult containing:
-                - 'monthly_hdd': Monthly heating degree days
-                - 'monthly_cdd': Monthly cooling degree days
-                - 'annual_hdd': Annual total heating degree days
-                - 'annual_cdd': Annual total cooling degree days
+            - 'monthly_hdd': Monthly heating degree days
+            - 'monthly_cdd': Monthly cooling degree days
+            - 'annual_hdd': Annual total heating degree days
+            - 'annual_cdd': Annual total cooling degree days
         """
         # Validate input
         self.validate_input(climate_data)
@@ -168,12 +178,14 @@ class DegreeDaysCalculator(ImpactCalculator):
         This method implements Equation 5 from the paper, which accounts for the
         distribution of daily temperatures within each month.
 
-        Args
-        ----
-            monthly_mean_temps: Monthly mean temperatures
+        Parameters
+        ----------
+        monthly_mean_temps : xr.DataArray
+            Monthly mean temperatures
 
         Returns
         -------
+        Tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]
             Tuple of (monthly_hdd, monthly_cdd, annual_hdd, annual_cdd)
         """
         # pylint: disable=too-many-locals

@@ -4,10 +4,12 @@ import os
 import tempfile
 
 import numpy as np
-import pytest
 import xarray as xr
+import pytest
 
-from meteor.noise_generator import MeteorNoiseGenerator
+from meteor import noise_generator
+from meteor.noise_generator import MeteorNoiseGenerator, load_noise_model_from_cache
+from meteor import Cmip6MeteorDataGetter
 
 
 def test_meteor_noise_generator_initialization():
@@ -94,7 +96,7 @@ def test_meteor_noise_generator_cache_functions():
     with tempfile.TemporaryDirectory() as temp_dir:
         # Test load_from_cache with non-existent file
         with pytest.raises(FileNotFoundError):
-            MeteorNoiseGenerator.load_from_cache(temp_dir, "NonExistentModel", "tas")
+            load_noise_model_from_cache(temp_dir, "NonExistentModel", "tas")
 
 
 def test_generate_realization_not_fitted():
@@ -127,14 +129,9 @@ def test_fit_basic_functionality():
         assert True
 
 
-def test_meteor_noise_generator_complex_scenarios():
+def test_complex_scenarios():
     """Test complex scenarios to improve coverage."""
-    import numpy as np
-    import xarray as xr
-
-    from meteor import noise_generator
-
-    # Create test data with more complexity
+    # Create more realistic test data that might work better with VAR fitting
     time = np.arange(120)  # 10 years of monthly data
     lats = np.linspace(-90, 90, 5)
     lons = np.linspace(-180, 180, 6)
@@ -218,8 +215,6 @@ def test_meteor_noise_generator_complex_scenarios():
 
 def test_meteor_noise_generator_error_conditions():
     """Test error conditions to improve coverage."""
-    from meteor import noise_generator
-
     generator = noise_generator.MeteorNoiseGenerator()
 
     # Test generation before fitting (line 273)
@@ -241,10 +236,6 @@ def test_meteor_noise_generator_error_conditions():
 
 def test_meteor_noise_generator_feature_creation():
     """Test feature creation methods for coverage."""
-    import numpy as np
-    import xarray as xr
-
-    from meteor import noise_generator
 
     generator = noise_generator.MeteorNoiseGenerator()
 
@@ -288,10 +279,6 @@ def test_meteor_noise_generator_feature_creation():
 
 def test_advanced_noise_generation():
     """Test advanced noise generation methods to improve coverage."""
-    import numpy as np
-    import xarray as xr
-
-    from meteor import noise_generator
 
     # Create more realistic training data
     time = np.arange(60)  # 5 years monthly
@@ -353,10 +340,6 @@ def test_advanced_noise_generation():
 
 def test_noise_generator_internal_methods():
     """Test internal methods for better coverage."""
-    import numpy as np
-    import xarray as xr
-
-    from meteor import noise_generator
 
     # Test the class with minimal working data
     generator = noise_generator.MeteorNoiseGenerator()
@@ -410,10 +393,6 @@ def test_noise_generator_internal_methods():
 
 def test_noise_generator_edge_cases():
     """Test edge cases for better coverage."""
-    import numpy as np
-    import xarray as xr
-
-    from meteor import noise_generator
 
     generator = noise_generator.MeteorNoiseGenerator()
 
@@ -488,16 +467,14 @@ def test_baseline_handling():
         pass
 
 
-def test_class_methods():
-    """Test class methods for train_from_cmip6."""
+def test_standalone_functions():
+    """Test standalone functions for training models."""
     # This will test the import paths and basic structure
     # without requiring full CMIP6 data
+    from meteor.noise_generator import train_noise_model_from_cmip6
 
-    from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
-
-    # Test that the method exists and can be called
-    assert hasattr(MeteorNoiseGenerator, "train_from_cmip6")
-    assert callable(getattr(MeteorNoiseGenerator, "train_from_cmip6"))
+    # Test that the function exists and can be called
+    assert callable(train_noise_model_from_cmip6)
 
     # Test that we can import and instantiate the data getter
     assert Cmip6MeteorDataGetter is not None

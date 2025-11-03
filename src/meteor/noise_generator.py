@@ -60,10 +60,10 @@ class MeteorNoiseGenerator:
 
         Parameters
         ----------
-        n_modes : int, optional
-            Number of PCA modes to retain. Default is 10.
-        lag_order : int, optional
-            Lag order for VARX model. Default is 2.
+        n_modes : int, default 10
+            Number of PCA modes to retain
+        lag_order : int, default 2
+            Lag order for VARX model
         """
         self.n_modes = n_modes
         self.lag_order = lag_order
@@ -249,21 +249,21 @@ class MeteorNoiseGenerator:
         """
         Generate stochastic climate realizations.
 
-        # pylint: disable=missing-type-doc
-
         Parameters
         ----------
         global_temp_trajectory : array-like
             Global temperature trajectory to drive the seasonal cycle.
             If noise_only=True, this can be any length array (values ignored for temperature effects).
-        n_realizations : int, optional
-            Number of realizations to generate. Default is 1.
+        n_realizations : int, default 1
+            Number of realizations to generate
         random_seed : int, optional
             Random seed for reproducibility
-        noise_only : bool, optional
+        noise_only : bool, default False
             If True, generate only the stochastic noise component without direct temperature
             effects or constant terms, but preserve temperature-modulated seasonal harmonics.
-            This is useful for adding to METEOR annual predictions. Default is False.        Returns
+            This is useful for adding to METEOR annual predictions.
+
+        Returns
         -------
         xr.DataArray or list of xr.DataArray
             Generated climate realizations. If noise_only=True, returns just the
@@ -460,246 +460,239 @@ class MeteorNoiseGenerator:
 
         print(f"Model loaded from {filepath}")
 
-    # pylint: disable=missing-type-doc,too-many-arguments,too-many-positional-arguments,too-many-locals
-    @classmethod
-    def train_from_cmip6(
-        cls,
-        data_getter,
-        experiments,
-        model_name,
-        variable_name,
-        n_modes=10,
-        lag_order=2,
-        cache_dir=None,
-        custom_global_temp=None,
-        use_picontrol_baseline=True,
-    ):
-        """
-        Train a noise generator directly from CMIP6 data getter.
 
-        This is the primary training interface that provides intuitive access
-        to noise model training from CMIP6 composite experimental data.
+def train_noise_model_from_cmip6(
+    data_getter,
+    experiments,
+    model_name,
+    variable_name,
+    n_modes=10,
+    lag_order=2,
+    cache_dir=None,
+    custom_global_temp=None,
+    use_picontrol_baseline=True,
+):
+    """
+    Train a noise generator from CMIP6 data.
 
-        # pylint: disable=missing-type-doc
+    This is the primary training interface that provides intuitive access
+    to noise model training from CMIP6 composite experimental data.
 
-        Parameters
-        ----------
-        data_getter : Cmip6MeteorDataGetter
-            Data getter instance with access to CMIP6 data
-        experiments : list
-            List of experiments to use for training (e.g., ["historical", "ssp245"])
-        model_name : str
-            Name of the climate model (must be available in data_getter)
-        variable_name : str
-            Variable to model (e.g., 'tas', 'pr')
-        n_modes : int, optional
-            Number of PCA modes to retain. Default is 10.
-        lag_order : int, optional
-            Lag order for VARX model. Default is 2.
-        cache_dir : str, optional
-            Directory to cache the trained model. If None, model is not cached.
-        custom_global_temp : array-like, optional
-            Custom smoothed global mean temperature timeseries to use for training
-            instead of computing from the variable data. Must have same length as
-            the monthly data time dimension. Useful when you want to use a specific
-            temperature trajectory (e.g., from a different variable or processing).
-        use_picontrol_baseline : bool, optional
-            Whether to use piControl data as baseline for temperature anomalies.
-            This ensures consistency with pattern scaling. Default is True.
-            If False, falls back to using first 42 years of training data.
+    Parameters
+    ----------
+    data_getter : Cmip6MeteorDataGetter
+        Data getter instance with access to CMIP6 data
+    experiments : list
+        List of experiments to use for training (e.g., ["historical", "ssp245"])
+    model_name : str
+        Name of the climate model (must be available in data_getter)
+    variable_name : str
+        Variable to model (e.g., 'tas', 'pr')
+    n_modes : int, default 10
+        Number of PCA modes to retain
+    lag_order : int, default 2
+        Lag order for VARX model
+    cache_dir : str, optional
+        Directory to cache the trained model. If None, model is not cached.
+    custom_global_temp : array-like, optional
+        Custom smoothed global mean temperature timeseries to use for training
+        instead of computing from the variable data. Must have same length as
+        the monthly data time dimension. Useful when you want to use a specific
+        temperature trajectory (e.g., from a different variable or processing).
+    use_picontrol_baseline : bool, default True
+        Whether to use piControl data as baseline for temperature anomalies.
+        This ensures consistency with pattern scaling.
+        If False, falls back to using first 42 years of training data.
 
-        Returns
-        -------
-        MeteorNoiseGenerator
-            Fitted noise generator ready for realization generation
+    Returns
+    -------
+    MeteorNoiseGenerator
+        Fitted noise generator ready for realization generation
 
-        Examples
-        --------
-        >>> # Train a temperature noise model with piControl baseline
-        >>> noise_model = MeteorNoiseGenerator.train_from_cmip6(
-        ...     data_getter, ["historical", "ssp245"], "CanESM5", "tas",
-        ...     n_modes=8, cache_dir="./models"
-        ... )
-        >>>
-        >>> # Generate realizations
-        >>> realizations = noise_model.generate_realization(temp_trajectory)
-        """
-        # Get monthly training data
-        monthly_data = data_getter.make_meteor_training_data_composite(
-            experiments, model_name, monthly=True
-        )
+    Examples
+    --------
+    >>> # Train a temperature noise model with piControl baseline
+    >>> noise_model = train_noise_model_from_cmip6(
+    ...     data_getter, ["historical", "ssp245"], "CanESM5", "tas",
+    ...     n_modes=8, cache_dir="./models"
+    ... )
+    >>>
+    >>> # Generate realizations
+    >>> realizations = noise_model.generate_realization(temp_trajectory)
+    """
+    # Get monthly training data
+    monthly_data = data_getter.make_meteor_training_data_composite(
+        experiments, model_name, monthly=True
+    )
 
-        # Get piControl baseline if requested
-        picontrol_baseline = None
-        if use_picontrol_baseline:
-            try:
-                # Try to fetch piControl data for baseline calculation
-                picontrol_data = data_getter.get_single_var_mod_data_yearmean(
-                    "piControl", variable_name, model_name
-                )
-                picontrol_baseline = float(picontrol_data.mean().values)
-                print(
-                    f"   Fetched piControl baseline for {model_name} {variable_name}: {picontrol_baseline:.3f}"
-                )
-            except (KeyError, AttributeError) as e:
-                print(
-                    f"   Warning: Could not fetch piControl data ({e}), falling back to legacy baseline"
-                )
-                picontrol_baseline = None
-
-        # Create and fit noise generator
-        noise_gen = cls(n_modes=n_modes, lag_order=lag_order)
-        noise_gen.fit(
-            monthly_data,
-            variable_name,
-            custom_global_temp=custom_global_temp,
-            picontrol_baseline=picontrol_baseline,
-        )
-
-        # Cache if requested
-        if cache_dir is not None:
-            os.makedirs(cache_dir, exist_ok=True)
-            cache_path = os.path.join(
-                cache_dir, f"{model_name}_{variable_name}_noise_model.pkl"
+    # Get piControl baseline if requested
+    picontrol_baseline = None
+    if use_picontrol_baseline:
+        try:
+            # Try to fetch piControl data for baseline calculation
+            picontrol_data = data_getter.get_single_var_mod_data_yearmean(
+                "piControl", variable_name, model_name
             )
-            noise_gen.save_model(cache_path)
+            picontrol_baseline = float(picontrol_data.mean().values)
+            print(
+                f"   Fetched piControl baseline for {model_name} {variable_name}: {picontrol_baseline:.3f}"
+            )
+        except (KeyError, AttributeError) as e:
+            print(
+                f"   Warning: Could not fetch piControl data ({e}), falling back to legacy baseline"
+            )
+            picontrol_baseline = None
 
-        return noise_gen
+    # Create and fit noise generator
+    noise_gen = MeteorNoiseGenerator(n_modes=n_modes, lag_order=lag_order)
+    noise_gen.fit(
+        monthly_data,
+        variable_name,
+        custom_global_temp=custom_global_temp,
+        picontrol_baseline=picontrol_baseline,
+    )
 
-    # pylint: disable=missing-type-doc,too-many-arguments,too-many-positional-arguments
-    @classmethod
-    def train_multiple_from_cmip6(
-        cls,
-        data_getter,
-        experiments,
-        models=None,
-        variables=None,
-        n_modes=10,
-        lag_order=2,
-        cache_dir=None,
-        custom_global_temp=None,
-        use_picontrol_baseline=True,
-    ):
-        """
-        Train noise generators for multiple model/variable combinations.
-
-        This method provides batch training functionality for multiple
-        models and variables, useful for comprehensive noise model creation.
-
-        # pylint: disable=missing-type-doc
-
-        Parameters
-        ----------
-        data_getter : Cmip6MeteorDataGetter
-            Data getter instance with access to CMIP6 data
-        experiments : list
-            List of experiments to use for training
-        models : list, optional
-            List of models to train. If None, uses all available models.
-        variables : list, optional
-            List of variables to train. If None, uses all fields in data getter.
-        n_modes : int, optional
-            Number of PCA modes to retain. Default is 10.
-        lag_order : int, optional
-            Lag order for VARX model. Default is 2.
-        cache_dir : str, optional
-            Directory to cache trained models
-        custom_global_temp : array-like, optional
-            Custom smoothed global mean temperature timeseries to use for all
-            model/variable combinations. Must have same length as monthly data.
-        use_picontrol_baseline : bool, optional
-            Whether to use piControl data as baseline for temperature anomalies.
-            This ensures consistency with pattern scaling. Default is True.
-            If False, falls back to using first 42 years of training data.
-
-        Returns
-        -------
-        dict
-            Nested dictionary with structure: {model: {variable: MeteorNoiseGenerator}}
-
-        Examples
-        --------
-        >>> # Train noise models for all available combinations with piControl baseline
-        >>> noise_models = MeteorNoiseGenerator.train_multiple_from_cmip6(
-        ...     data_getter, ["historical", "ssp245"],
-        ...     models=["CanESM5", "CESM2"], variables=["tas", "pr"],
-        ...     cache_dir="./models"
-        ... )
-        >>>
-        >>> # Access specific model
-        >>> tas_model = noise_models["CanESM5"]["tas"]
-        """
-        if models is None:
-            models = data_getter.models
-        if variables is None:
-            variables = data_getter.flds
-
-        noise_models = {}
-
-        for model in models:
-            if not data_getter.check_if_model_has_data(model):
-                print(f"Skipping {model} - no complete data available")
-                continue
-
-            noise_models[model] = {}
-
-            for variable in variables:
-                print(f"Training noise model for {model} - {variable}")
-                try:
-                    noise_gen = cls.train_from_cmip6(
-                        data_getter,
-                        experiments,
-                        model,
-                        variable,
-                        n_modes=n_modes,
-                        lag_order=lag_order,
-                        cache_dir=cache_dir,
-                        custom_global_temp=custom_global_temp,
-                        use_picontrol_baseline=use_picontrol_baseline,
-                    )
-                    noise_models[model][variable] = noise_gen
-                except Exception as e:  # pylint: disable=broad-exception-caught
-                    print(f"Failed to train noise model for {model} - {variable}: {e}")
-                    continue
-
-        return noise_models
-
-    @classmethod
-    def load_from_cache(cls, cache_dir, model_name, variable_name):
-        """
-        Load a previously cached noise model.
-
-        Parameters
-        ----------
-        cache_dir : str
-            Directory containing cached models
-        model_name : str
-            Name of the climate model
-        variable_name : str
-            Name of the variable
-
-        Returns
-        -------
-        MeteorNoiseGenerator
-            Loaded noise generator
-
-        Examples
-        --------
-        >>> # Load a previously trained model
-        >>> noise_model = MeteorNoiseGenerator.load_from_cache(
-        ...     "./models", "CanESM5", "tas"
-        ... )
-        """
+    # Cache if requested
+    if cache_dir is not None:
+        os.makedirs(cache_dir, exist_ok=True)
         cache_path = os.path.join(
             cache_dir, f"{model_name}_{variable_name}_noise_model.pkl"
         )
+        noise_gen.save_model(cache_path)
 
-        if not os.path.exists(cache_path):
-            raise FileNotFoundError(f"No cached model found at {cache_path}")
+    return noise_gen
 
-        noise_gen = cls()
-        noise_gen.load_model(cache_path)
-        return noise_gen
+
+def train_multiple_noise_models_from_cmip6(
+    data_getter,
+    experiments,
+    models=None,
+    variables=None,
+    n_modes=10,
+    lag_order=2,
+    cache_dir=None,
+    custom_global_temp=None,
+    use_picontrol_baseline=True,
+):
+    """
+    Train noise generators for multiple model/variable combinations.
+
+    This method provides batch training functionality for multiple
+    models and variables, useful for comprehensive noise model creation.
+
+    Parameters
+    ----------
+    data_getter : Cmip6MeteorDataGetter
+        Data getter instance with access to CMIP6 data
+    experiments : list
+        List of experiments to use for training
+    models : list, optional
+        List of models to train. If None, uses all available models.
+    variables : list, optional
+        List of variables to train. If None, uses all fields in data getter.
+    n_modes : int, default 10
+        Number of PCA modes to retain
+    lag_order : int, default 2
+        Lag order for VARX model
+    cache_dir : str, optional
+        Directory to cache trained models
+    custom_global_temp : array-like, optional
+        Custom smoothed global mean temperature timeseries to use for all
+        model/variable combinations. Must have same length as monthly data.
+    use_picontrol_baseline : bool, default True
+        Whether to use piControl data as baseline for temperature anomalies.
+        This ensures consistency with pattern scaling.
+        If False, falls back to using first 42 years of training data.
+
+    Returns
+    -------
+    dict
+        Dictionary mapping (model, variable) tuples to fitted noise generators.
+        Nested dictionary with structure: {model: {variable: MeteorNoiseGenerator}}
+
+    Examples
+    --------
+    >>> # Train noise models for all available combinations with piControl baseline
+    >>> noise_models = train_multiple_noise_models_from_cmip6(
+    ...     data_getter, ["historical", "ssp245"],
+    ...     models=["CanESM5", "CESM2"], variables=["tas", "pr"],
+    ...     cache_dir="./models"
+    ... )
+    >>>
+    >>> # Access specific model
+    >>> tas_model = noise_models["CanESM5"]["tas"]
+    """
+    if models is None:
+        models = data_getter.models
+    if variables is None:
+        variables = data_getter.flds
+
+    noise_models = {}
+
+    for model in models:
+        if not data_getter.check_if_model_has_data(model):
+            print(f"Skipping {model} - no complete data available")
+            continue
+
+        noise_models[model] = {}
+
+        for variable in variables:
+            print(f"Training noise model for {model} - {variable}")
+            try:
+                noise_gen = train_noise_model_from_cmip6(
+                    data_getter,
+                    experiments,
+                    model,
+                    variable,
+                    n_modes=n_modes,
+                    lag_order=lag_order,
+                    cache_dir=cache_dir,
+                    custom_global_temp=custom_global_temp,
+                    use_picontrol_baseline=use_picontrol_baseline,
+                )
+                noise_models[model][variable] = noise_gen
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                print(f"Failed to train noise model for {model} - {variable}: {e}")
+                continue
+
+    return noise_models
+
+
+def load_noise_model_from_cache(cache_dir, model_name, variable_name):
+    """
+    Load a previously cached noise model.
+
+    Parameters
+    ----------
+    cache_dir : str
+        Directory containing cached models
+    model_name : str
+        Name of the climate model
+    variable_name : str
+        Name of the variable
+
+    Returns
+    -------
+    MeteorNoiseGenerator
+        Loaded noise generator
+
+    Examples
+    --------
+    >>> # Load a previously trained model
+    >>> noise_model = load_noise_model_from_cache(
+    ...     "./models", "CanESM5", "tas"
+    ... )
+    """
+    cache_path = os.path.join(
+        cache_dir, f"{model_name}_{variable_name}_noise_model.pkl"
+    )
+
+    if not os.path.exists(cache_path):
+        raise FileNotFoundError(f"No cached model found at {cache_path}")
+
+    noise_gen = MeteorNoiseGenerator()
+    noise_gen.load_model(cache_path)
+    return noise_gen
 
 
 # pylint: disable=too-many-arguments,too-many-positional-arguments
@@ -715,7 +708,6 @@ def train_noise_model_from_composite(
     """
     Train a noise model from composite experimental data.
 
-
     Parameters
     ----------
     data_getter : Cmip6MeteorDataGetter
@@ -726,10 +718,10 @@ def train_noise_model_from_composite(
         Name of the climate model
     variable_name : str
         Variable to model (e.g., 'tas', 'pr')
-    n_modes : int, optional
-        Number of PCA modes. Default is 10.
-    lag_order : int, optional
-        VARX lag order. Default is 2.
+    n_modes : int, default 10
+        Number of PCA modes
+    lag_order : int, default 2
+        VARX lag order
     cache_dir : str, optional
         Directory to cache the trained model
 
@@ -738,8 +730,8 @@ def train_noise_model_from_composite(
     MeteorNoiseGenerator
         Fitted noise generator
     """
-    # Use the new class method for consistency
-    return MeteorNoiseGenerator.train_from_cmip6(
+    # Use the new function for consistency
+    return train_noise_model_from_cmip6(
         data_getter,
         experiments,
         model_name,

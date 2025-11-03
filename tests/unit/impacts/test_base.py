@@ -11,72 +11,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from meteor.impacts.base import ImpactCalculator, ImpactEnsemble, ImpactResult
-
-
-class TestImpactResult:
-    """Test ImpactResult class functionality."""
-
-    def test_init(self):
-        """Test ImpactResult initialization."""
-        data = {
-            "test_var": xr.DataArray([1, 2, 3], dims=["x"]),
-            "another_var": xr.DataArray([4, 5, 6], dims=["x"]),
-        }
-        metadata = {"test": "metadata"}
-
-        result = ImpactResult(data, metadata, "TestCalculator")
-
-        assert result.calculator_name == "TestCalculator"
-        assert result.metadata == metadata
-        assert "test_var" in result
-        assert "another_var" in result
-        np.testing.assert_array_equal(result["test_var"].values, [1, 2, 3])
-
-    def test_getitem(self):
-        """Test accessing variables by name."""
-        data = {"var1": xr.DataArray([1, 2, 3], dims=["x"])}
-        result = ImpactResult(data)
-
-        retrieved = result["var1"]
-        np.testing.assert_array_equal(retrieved.values, [1, 2, 3])
-
-    def test_contains(self):
-        """Test checking if variables exist."""
-        data = {"var1": xr.DataArray([1, 2, 3], dims=["x"])}
-        result = ImpactResult(data)
-
-        assert "var1" in result
-        assert "var2" not in result
-
-    def test_keys(self):
-        """Test getting variable names."""
-        data = {
-            "var1": xr.DataArray([1, 2, 3], dims=["x"]),
-            "var2": xr.DataArray([4, 5, 6], dims=["x"]),
-        }
-        result = ImpactResult(data)
-
-        keys = list(result.keys())
-        assert "var1" in keys
-        assert "var2" in keys
-        assert len(keys) == 2
-
-    def test_to_dataset(self):
-        """Test conversion to xarray Dataset."""
-        data = {
-            "var1": xr.DataArray([1, 2, 3], dims=["x"]),
-            "var2": xr.DataArray([4, 5, 6], dims=["x"]),
-        }
-        metadata = {"source": "test"}
-        result = ImpactResult(data, metadata)
-
-        dataset = result.to_dataset()
-
-        assert isinstance(dataset, xr.Dataset)
-        assert "var1" in dataset
-        assert "var2" in dataset
-        assert dataset.attrs["source"] == "test"
+from meteor.impacts.impacts_core import ImpactCalculator, ImpactEnsemble, ImpactResult
 
 
 class MockCalculator(ImpactCalculator):
@@ -95,44 +30,127 @@ class MockCalculator(ImpactCalculator):
             raise ValueError("Input must be DataArray")
 
 
-class TestImpactCalculator:
-    """Test ImpactCalculator abstract base class."""
+# ImpactResult tests
+def test_impact_result_init():
+    """Test ImpactResult initialization."""
+    data = {
+        "test_var": xr.DataArray([1, 2, 3], dims=["x"]),
+        "another_var": xr.DataArray([4, 5, 6], dims=["x"]),
+    }
+    metadata = {"test": "metadata"}
 
-    def test_abstract_methods(self):
-        """Test that abstract methods raise NotImplementedError."""
-        # Can't instantiate abstract class directly
-        with pytest.raises(TypeError):
-            ImpactCalculator("test")
+    result = ImpactResult(data, metadata, "TestCalculator")
 
-    def test_mock_calculator(self):
-        """Test using mock calculator implementation."""
-        calc = MockCalculator()
+    assert result.calculator_name == "TestCalculator"
+    assert result.metadata == metadata
+    assert "test_var" in result
+    assert "another_var" in result
+    np.testing.assert_array_equal(result["test_var"].values, [1, 2, 3])
 
-        # Test string representation
-        assert "MockCalculator" in str(calc)
-        assert "MockCalculator" in repr(calc)
 
-        # Test calculation
-        test_data = xr.DataArray([1, 2, 3], dims=["x"])
-        result = calc.calculate(test_data)
+def test_impact_result_getitem():
+    """Test accessing variables by name."""
+    data = {"var1": xr.DataArray([1, 2, 3], dims=["x"])}
+    result = ImpactResult(data)
 
-        assert isinstance(result, ImpactResult)
-        assert "squared" in result
-        assert "doubled" in result
-        np.testing.assert_array_equal(result["squared"].values, [1, 4, 9])
-        np.testing.assert_array_equal(result["doubled"].values, [2, 4, 6])
+    retrieved = result["var1"]
+    np.testing.assert_array_equal(retrieved.values, [1, 2, 3])
 
-    def test_validation(self):
-        """Test input validation."""
-        calc = MockCalculator()
 
-        # Valid input should not raise
-        valid_data = xr.DataArray([1, 2, 3], dims=["x"])
-        calc.validate_input(valid_data)
+def test_impact_result_contains():
+    """Test checking if variables exist."""
+    data = {"var1": xr.DataArray([1, 2, 3], dims=["x"])}
+    result = ImpactResult(data)
 
-        # Invalid input should raise
-        with pytest.raises(ValueError):
-            calc.validate_input([1, 2, 3])  # Not a DataArray
+    assert "var1" in result
+    assert "var2" not in result
+
+
+def test_impact_result_keys():
+    """Test getting variable names."""
+    data = {
+        "var1": xr.DataArray([1, 2, 3], dims=["x"]),
+        "var2": xr.DataArray([4, 5, 6], dims=["x"]),
+    }
+    result = ImpactResult(data)
+
+    keys = list(result.keys())
+    assert "var1" in keys
+    assert "var2" in keys
+    assert len(keys) == 2
+
+
+def test_impact_result_to_dataset():
+    """Test conversion to xarray Dataset."""
+    data = {
+        "var1": xr.DataArray([1, 2, 3], dims=["x"]),
+        "var2": xr.DataArray([4, 5, 6], dims=["x"]),
+    }
+    metadata = {"source": "test"}
+    result = ImpactResult(data, metadata)
+
+    dataset = result.to_dataset()
+
+    assert isinstance(dataset, xr.Dataset)
+    assert "var1" in dataset
+    assert "var2" in dataset
+    assert dataset.attrs["source"] == "test"
+
+
+def test_impact_result_str_representation():
+    """Test ImpactResult string representation."""
+    result = ImpactResult(data={}, metadata={}, calculator_name="test")
+    result_str = str(result)
+    assert "ImpactResult" in result_str
+
+
+def test_impact_result_dict_conversion():
+    """Test ImpactResult dict conversion by accessing data directly."""
+    test_data = {"test_var": np.array([1, 2, 3])}
+    result = ImpactResult(data=test_data, metadata={}, calculator_name="test")
+    result_dict = dict(result)
+    assert "test_var" in result_dict
+    assert np.array_equal(result_dict["test_var"], np.array([1, 2, 3]))
+
+
+# ImpactCalculator tests
+def test_impact_calculator_abstract_methods():
+    """Test that abstract methods raise NotImplementedError."""
+    # Can't instantiate abstract class directly
+    with pytest.raises(TypeError):
+        ImpactCalculator("test")
+
+
+def test_impact_calculator_mock_implementation():
+    """Test using mock calculator implementation."""
+    calc = MockCalculator()
+
+    # Test string representation
+    assert "MockCalculator" in str(calc)
+    assert "MockCalculator" in repr(calc)
+
+    # Test calculation
+    test_data = xr.DataArray([1, 2, 3], dims=["x"])
+    result = calc.calculate(test_data)
+
+    assert isinstance(result, ImpactResult)
+    assert "squared" in result
+    assert "doubled" in result
+    np.testing.assert_array_equal(result["squared"].values, [1, 4, 9])
+    np.testing.assert_array_equal(result["doubled"].values, [2, 4, 6])
+
+
+def test_impact_calculator_validation():
+    """Test input validation."""
+    calc = MockCalculator()
+
+    # Valid input should not raise
+    valid_data = xr.DataArray([1, 2, 3], dims=["x"])
+    calc.validate_input(valid_data)
+
+    # Invalid input should raise
+    with pytest.raises(ValueError):
+        calc.validate_input([1, 2, 3])  # Not a DataArray
 
 
 class TestImpactEnsemble:
@@ -251,18 +269,6 @@ class TestImpactEnsemble:
 
     def test_additional_edge_cases(self):
         """Test additional edge cases to improve coverage."""
-        # Test ImpactResult str representation
-        result = ImpactResult(data={}, metadata={}, calculator_name="test")
-        result_str = str(result)
-        assert "ImpactResult" in result_str
-
-        # Test ImpactResult dict conversion by accessing data directly
-        test_data = {"test_var": np.array([1, 2, 3])}
-        result = ImpactResult(data=test_data, metadata={}, calculator_name="test")
-        result_dict = dict(result)
-        assert "test_var" in result_dict
-        assert np.array_equal(result_dict["test_var"], np.array([1, 2, 3]))
-
         # Test ensemble error handling for empty results
         ensemble = ImpactEnsemble(self.calculator)
         with pytest.raises(ValueError, match="No ensemble results available"):

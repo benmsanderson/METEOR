@@ -158,8 +158,6 @@ class TestResidualCalculation:
 
     def test_residual_with_scattered_nans_error(self):
         """Test residual calculation with scattered NaNs to hit line 168."""
-        from meteor.meteor import calculate_residual_and_do_crude_nan_cut
-
         # Create data where global mean will have scattered NaNs
         # Strategy: create spatial data where some time steps have all NaN in some locations
         # but not consistently at the end
@@ -191,8 +189,6 @@ class TestResidualCalculation:
 
     def test_residual_with_trailing_nans_success(self):
         """Test residual calculation with trailing NaNs (should work)."""
-        from meteor.meteor import calculate_residual_and_do_crude_nan_cut
-
         # Create data with NaN values only at the end
         data_values = np.ones((4, 2, 2))  # 4 time steps
         data_values[-2:, :, :] = np.nan  # last 2 time steps: all NaN
@@ -222,8 +218,6 @@ class TestUtilityFunctions:
     def test_read_training_data_function_signature(self):
         """Test that read_training_data function exists and has right signature."""
         # Test that the function exists and can be imported
-        from meteor.meteor import read_training_data  # noqa: F401
-
         # Test with mock data to avoid file I/O
         mock_get_data = Mock()
         mock_get_data.return_value = "test_path.nc"

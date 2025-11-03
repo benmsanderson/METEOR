@@ -21,15 +21,21 @@ def validate_temperature_data(
     """
     Validate temperature data for impact calculations.
 
-    Args:
-        data: Temperature data to validate
-        expected_units: Expected units ("celsius" or "kelvin")
-        temp_range: Optional tuple of (min, max) expected temperatures
+    Parameters
+    ----------
+    data : xr.DataArray
+        Temperature data to validate
+    expected_units : str, default "celsius"
+        Expected units ("celsius" or "kelvin")
+    temp_range : Tuple[float, float], optional
+        Optional tuple of (min, max) expected temperatures
 
     Raises
     ------
-        ValueError: If data validation fails
-        UserWarning: If data seems suspicious but might be valid
+    ValueError
+        If data validation fails
+    UserWarning
+        If data seems suspicious but might be valid
     """
     if not isinstance(data, xr.DataArray):
         raise ValueError("Temperature data must be an xarray.DataArray")
@@ -67,18 +73,24 @@ def convert_temperature_units(
     """
     Convert temperature data between different units.
 
-    Args:
-        data: Temperature data to convert
-        from_units: Source units ("celsius", "kelvin", "fahrenheit")
-        to_units: Target units ("celsius", "kelvin", "fahrenheit")
+    Parameters
+    ----------
+    data : xr.DataArray
+        Temperature data to convert
+    from_units : str
+        Source units ("celsius", "kelvin", "fahrenheit")
+    to_units : str
+        Target units ("celsius", "kelvin", "fahrenheit")
 
     Returns
     -------
+    xr.DataArray
         Converted temperature data
 
     Raises
     ------
-        ValueError: If units are not recognized
+    ValueError
+        If units are not recognized
     """
     from_units = from_units.lower()
     to_units = to_units.lower()
@@ -117,13 +129,17 @@ def check_monthly_dimension(data: xr.DataArray, dim_name: str = "month") -> None
     """
     Check that data has a properly structured monthly dimension.
 
-    Args:
-        data: Data to check
-        dim_name: Name of the monthly dimension
+    Parameters
+    ----------
+    data : xr.DataArray
+        Data to check
+    dim_name : str, default "month"
+        Name of the monthly dimension
 
     Raises
     ------
-        ValueError: If monthly dimension is missing or improperly structured
+    ValueError
+        If monthly dimension is missing or improperly structured
     """
     if dim_name not in data.dims:
         raise ValueError(f"Data must have a '{dim_name}' dimension")
@@ -144,18 +160,24 @@ def ensure_spatial_coordinates(
     """
     Ensure data has spatial coordinates and return their names.
 
-    Args:
-        data: Data to check
-        lat_name: Preferred name for latitude coordinate
-        lon_name: Preferred name for longitude coordinate
+    Parameters
+    ----------
+    data : xr.DataArray
+        Data to check
+    lat_name : str, optional
+        Preferred name for latitude coordinate
+    lon_name : str, optional
+        Preferred name for longitude coordinate
 
     Returns
     -------
+    Tuple[str, str]
         Tuple of (actual_lat_name, actual_lon_name)
 
     Raises
     ------
-        ValueError: If spatial coordinates cannot be found
+    ValueError
+        If spatial coordinates cannot be found
     """
     # Common latitude coordinate names (filter out None)
     lat_variants = [
@@ -194,66 +216,24 @@ def ensure_spatial_coordinates(
     return actual_lat, actual_lon
 
 
-def calculate_global_mean(
-    data: xr.DataArray,
-    lat_name: Optional[str] = None,
-    lon_name: Optional[str] = None,
-    weights: Optional[xr.DataArray] = None,
-) -> xr.DataArray:
-    """
-    Calculate area-weighted global mean of spatial data.
-
-    Args:
-        data: Spatial data to average
-        lat_name: Name of latitude coordinate (auto-detected if None)
-        lon_name: Name of longitude coordinate (auto-detected if None)
-        weights: Optional custom weights (if None, uses cosine of latitude)
-
-    Returns
-    -------
-        Global mean with spatial dimensions removed
-    """
-    # Auto-detect coordinate names if not provided
-    if lat_name is None or lon_name is None:
-        actual_lat, actual_lon = ensure_spatial_coordinates(data, lat_name, lon_name)
-        if lat_name is None:
-            lat_name = actual_lat
-        if lon_name is None:
-            lon_name = actual_lon
-
-    if weights is None:
-        # Use cosine of latitude as weights
-        lat_rad = np.deg2rad(data[lat_name])
-        weights = np.cos(lat_rad)
-
-        # Broadcast weights to match data dimensions
-        if lon_name in data.dims:
-            weights = weights * xr.ones_like(data[lon_name])
-
-    # Calculate weighted mean
-    weighted_data = data * weights
-    global_mean = weighted_data.sum(dim=[lat_name, lon_name]) / weights.sum()
-
-    # Update attributes
-    global_mean.attrs.update(data.attrs)
-    global_mean.attrs["operation"] = "area_weighted_global_mean"
-
-    return global_mean
-
-
 def create_monthly_time_axis(
     start_year: int, n_months: int, dim_name: str = "month"
 ) -> xr.DataArray:
     """
     Create a monthly time axis for METEOR data.
 
-    Args:
-        start_year: Starting year (e.g., 1850)
-        n_months: Number of months
-        dim_name: Name of the dimension
+    Parameters
+    ----------
+    start_year : int
+        Starting year (e.g., 1850)
+    n_months : int
+        Number of months
+    dim_name : str, default "month"
+        Name of the dimension
 
     Returns
     -------
+    xr.DataArray
         DataArray with monthly time coordinates
     """
     # Create month indices (0, 1, 2, ...)
@@ -276,14 +256,19 @@ def group_by_season(
     """
     Group monthly data by seasons.
 
-    Args:
-        data: Monthly data to group
-        month_dim: Name of the monthly dimension
-        seasons: Custom season definitions (dict mapping season names to month lists)
-                If None, uses standard meteorological seasons
+    Parameters
+    ----------
+    data : xr.DataArray
+        Monthly data to group
+    month_dim : str, default "month"
+        Name of the monthly dimension
+    seasons : dict, optional
+        Custom season definitions (dict mapping season names to month lists)
+        If None, uses standard meteorological seasons
 
     Returns
     -------
+    xr.Dataset
         Dataset with seasonal means
     """
     if seasons is None:

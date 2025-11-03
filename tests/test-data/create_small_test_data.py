@@ -15,8 +15,8 @@ def create_small_test_data():
 
     # Load original test data
     print("Loading original test data...")
-    base_ds = xr.open_dataset("tests/test-data/pdrmip-base_T42_ANN.nc")
-    co2x2_ds = xr.open_dataset("tests/test-data/pdrmip-co2x2_T42_ANN.nc")
+    base_ds = xr.open_dataset("pdrmip-base_T42_ANN.nc")
+    co2x2_ds = xr.open_dataset("pdrmip-co2x2_T42_ANN.nc")
 
     print(f"Original base file size: {base_ds.nbytes / 1024**2:.1f} MB")
     print(f"Original co2x2 file size: {co2x2_ds.nbytes / 1024**2:.1f} MB")
@@ -44,11 +44,11 @@ def create_small_test_data():
     ).mean()
 
     # Create output directory if it doesn't exist
-    os.makedirs("tests/test-data/small", exist_ok=True)
+    os.makedirs("small", exist_ok=True)
 
     # Save small files
-    output_base = "tests/test-data/small/pdrmip-base_small.nc"
-    output_co2x2 = "tests/test-data/small/pdrmip-co2x2_small.nc"
+    output_base = "small/pdrmip-base_small.nc"
+    output_co2x2 = "small/pdrmip-co2x2_small.nc"
 
     print(f"Saving coarsened base dataset to {output_base}...")
     base_small.to_netcdf(output_base)
@@ -86,7 +86,7 @@ def create_small_test_data():
     # Ensure no NaN values in the composite dataset
     composite_small = composite_small.fillna(0.0)
 
-    output_composite = "tests/test-data/small/pdrmip-composite_small.nc"
+    output_composite = "small/pdrmip-composite_small.nc"
     print(f"Saving coarsened composite dataset to {output_composite}...")
     composite_small.to_netcdf(output_composite)
 

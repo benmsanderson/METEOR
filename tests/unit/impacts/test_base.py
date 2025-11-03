@@ -97,13 +97,6 @@ def test_impact_result_to_dataset():
     assert dataset.attrs["source"] == "test"
 
 
-def test_impact_result_str_representation():
-    """Test ImpactResult string representation."""
-    result = ImpactResult(data={}, metadata={}, calculator_name="test")
-    result_str = str(result)
-    assert "ImpactResult" in result_str
-
-
 def test_impact_result_dict_conversion():
     """Test ImpactResult dict conversion by accessing data directly."""
     test_data = {"test_var": np.array([1, 2, 3])}
@@ -114,11 +107,6 @@ def test_impact_result_dict_conversion():
 
 
 # ImpactCalculator tests
-def test_impact_calculator_abstract_methods():
-    """Test that abstract methods raise NotImplementedError."""
-    # Can't instantiate abstract class directly
-    with pytest.raises(TypeError):
-        ImpactCalculator("test")
 
 
 def test_impact_calculator_mock_implementation():

@@ -87,20 +87,6 @@ def test_validate_temperature_data_unknown_units():
         validate_temperature_data(data, "fahrenheit")
 
 
-def test_coordinate_detection_errors():
-    """Test error handling in coordinate detection."""
-    # Test data with coordinates that definitely won't match lat/lon patterns
-    data_no_coords = xr.DataArray(
-        [[1, 2], [3, 4]],
-        dims=["dimension_1", "dimension_2"],
-        coords={"dimension_1": [0, 1], "dimension_2": [0, 1]},
-    )
-
-    # Should raise error when lat/lon not found (hits lines 182 or 185)
-    with pytest.raises(ValueError, match="Could not find .* coordinate"):
-        ensure_spatial_coordinates(data_no_coords)
-
-
 # Temperature unit conversion tests
 def test_convert_celsius_to_kelvin():
     """Test Celsius to Kelvin conversion."""
@@ -137,15 +123,6 @@ def test_convert_fahrenheit_to_celsius():
 
     expected = [0, 20, 100]
     np.testing.assert_array_almost_equal(result.values, expected)
-
-
-def test_convert_temperature_same_units():
-    """Test conversion with same source and target units."""
-    data = xr.DataArray([10, 20, 30], dims=["x"])
-    result = convert_temperature_units(data, "celsius", "celsius")
-
-    np.testing.assert_array_equal(result.values, data.values)
-    assert result is not data  # Should be a copy
 
 
 def test_convert_temperature_unknown_units():

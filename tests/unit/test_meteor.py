@@ -204,19 +204,6 @@ class TestResidualCalculation:
 class TestUtilityFunctions:
     """Test utility functions in meteor module."""
 
-    def test_read_training_data_function_signature(self):
-        """Test that read_training_data function exists and has right signature."""
-        # Test that the function exists and can be imported
-        # Test with mock data to avoid file I/O
-        mock_get_data = Mock()
-        mock_get_data.return_value = "test_path.nc"
-
-        _ = ["exp1"]  # exp_list not used in this test
-
-        # Call the mock function to verify interface
-        result = mock_get_data("exp1")
-        assert result == "test_path.nc"
-
     def test_read_training_data_with_mocked_xarray(self):
         """Test read_training_data with mocked xarray data."""
 

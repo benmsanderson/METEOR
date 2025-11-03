@@ -13,7 +13,7 @@ from meteor.cmip6_meteor_data_getter import (
     make_xarray_with_correct_dims,
     year_mean_monthly_xarray,
 )
-from meteor.noise_generator import MeteorNoiseGenerator, train_noise_model_from_cmip6
+from meteor.noise_generator import train_noise_model_from_cmip6
 
 
 def test_get_unique_models():
@@ -1321,7 +1321,7 @@ def test_cache_directory_creation_error_handling():
 
             # Should not raise exception, just log warning and continue
             try:
-                data_getter = Cmip6MeteorDataGetter(
+                _ = Cmip6MeteorDataGetter(
                     cache_dir="/root/forbidden", enable_cache=True
                 )
                 # If we get here, it handled the error gracefully

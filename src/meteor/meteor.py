@@ -534,7 +534,6 @@ class MeteorPatternScaling:
                         predicted[fld] = predicted[fld] + tmp
         return predicted
 
-   
     # pylint: disable=too-many-locals
     def to_monthly(self, annual_prediction, start_year=None):
         """

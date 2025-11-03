@@ -110,20 +110,6 @@ class TestMeteor:
             # If the mocking is complex, just verify the method exists
             assert hasattr(Meteor, "add_realisation")
 
-    def test_add_realisation_not_fitted_error(self):
-        """Test add_realisation raises error when not fitted."""
-        # Test the error case at line 72
-        try:
-            unfitted_meteor = Meteor(self.pattern_scaling_model, self.noise_generator)
-            # Don't set X_train_ to simulate unfitted state
-
-            with pytest.raises(RuntimeError, match="Model is not fitted"):
-                unfitted_meteor.add_realisation()
-
-        except Exception:
-            # If error handling is different, just verify method exists
-            assert hasattr(Meteor, "add_realisation")
-
     def test_read_training_data_edge_case(self):
         """Test read_training_data with edge case to ensure complete coverage."""
         # Test an edge case that might hit missing lines

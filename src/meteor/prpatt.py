@@ -602,8 +602,6 @@ def global_mean(
     xarray.Dataset or xarray.DataArray
         Global mean with spatial dimensions removed
     """
-    from typing import Optional, Union
-
     # Auto-detect latitude coordinate if not provided
     if lat_name is None:
         lat_name = get_lat_name(ds)

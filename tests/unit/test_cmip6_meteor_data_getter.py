@@ -1,6 +1,6 @@
 import os
 import tempfile
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -9,9 +9,7 @@ import xarray as xr
 from meteor import cmip6_meteor_data_getter
 from meteor.cmip6_meteor_data_getter import (
     Cmip6MeteorDataGetter,
-    initialise_dataframe_and_models,
     make_xarray_with_correct_dims,
-    year_mean_monthly_xarray,
 )
 from meteor.noise_generator import train_noise_model_from_cmip6
 

@@ -295,13 +295,16 @@ class Cmip6MeteorDataGetter:
             try:
                 os.makedirs(self.cache_dir, exist_ok=True)
                 logging.info(
-                    f"Setting up local cache for CMIP6 data at: {self.cache_dir}. "
-                    f"This will improve performance by storing downloaded data locally."
+                    "Setting up local cache for CMIP6 data at: %s. "
+                    "This will improve performance by storing downloaded data locally.",
+                    self.cache_dir,
                 )
-            except (OSError, PermissionError) as e:
+            except OSError as e:
                 logging.warning(
-                    f"Failed to create cache directory at {self.cache_dir}: {e}. "
-                    f"Disabling cache functionality."
+                    "Failed to create cache directory at %s: %s. "
+                    "Disabling cache functionality.",
+                    self.cache_dir,
+                    e,
                 )
                 self.enable_cache = False
 
@@ -477,10 +480,11 @@ class Cmip6MeteorDataGetter:
         except (OSError, ValueError) as e:
             # Failed to cache, but don't raise error
             logging.warning(
-                f"Failed to save data to cache at {cache_path}: {e}. "
-                f"Continuing without caching."
+                "Failed to save data to cache at %s: %s. "
+                "Continuing without caching.",
+                cache_path,
+                e,
             )
-            pass
 
     def clear_cache(self):
         """

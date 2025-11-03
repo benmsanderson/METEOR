@@ -461,6 +461,7 @@ class MeteorNoiseGenerator:
         print(f"Model loaded from {filepath}")
 
 
+# pylint: disable=too-many-arguments,too-many-positional-arguments,missing-type-doc
 def train_noise_model_from_cmip6(
     data_getter,
     experiments,
@@ -563,6 +564,7 @@ def train_noise_model_from_cmip6(
     return noise_gen
 
 
+# pylint: disable=too-many-arguments,too-many-positional-arguments,missing-type-doc
 def train_multiple_noise_models_from_cmip6(
     data_getter,
     experiments,
@@ -695,7 +697,7 @@ def load_noise_model_from_cache(cache_dir, model_name, variable_name):
     return noise_gen
 
 
-# pylint: disable=too-many-arguments,too-many-positional-arguments
+# pylint: disable=too-many-arguments,too-many-positional-arguments,missing-type-doc
 def train_noise_model_from_composite(
     data_getter,
     experiments,

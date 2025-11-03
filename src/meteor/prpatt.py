@@ -568,6 +568,7 @@ def get_lat_name(ds):
     raise RuntimeError(f"Couldn't find a latitude coordinate. Tried: {lat_variants}")
 
 
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-branches
 def global_mean(
     ds,
     lat_name=None,

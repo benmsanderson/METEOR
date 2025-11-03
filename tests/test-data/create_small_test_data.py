@@ -92,7 +92,7 @@ def create_small_test_data():
     composite_small.to_netcdf(output_composite)
 
     # Print size comparison
-    print(f"\nSize comparison:")
+    print("\nSize comparison:")
     print(
         f"Original base: {base_ds.nbytes / 1024**2:.1f} MB -> Small: {base_small.nbytes / 1024:.1f} KB"
     )
@@ -114,7 +114,7 @@ def create_small_test_data():
     print(f"Coordinates: {list(test_base.coords)}")
 
     # Check that temporal structure is preserved
-    print(f"\nTemporal structure preserved:")
+    print("\nTemporal structure preserved:")
     print(
         f"Base years: {test_base.year.values[0]} to {test_base.year.values[-1]} ({len(test_base.year)} years)"
     )
@@ -126,7 +126,7 @@ def create_small_test_data():
     )
 
     # Check spatial reduction
-    print(f"\nSpatial reduction:")
+    print("\nSpatial reduction:")
     print(
         f"Original spatial grid: {len(base_ds.lat)} x {len(base_ds.lon)} = {len(base_ds.lat) * len(base_ds.lon)} points"
     )

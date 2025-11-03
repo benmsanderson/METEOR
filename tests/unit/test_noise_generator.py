@@ -4,12 +4,11 @@ import os
 import tempfile
 
 import numpy as np
-import xarray as xr
 import pytest
+import xarray as xr
 
-from meteor import noise_generator
+from meteor import Cmip6MeteorDataGetter, noise_generator
 from meteor.noise_generator import MeteorNoiseGenerator, load_noise_model_from_cache
-from meteor import Cmip6MeteorDataGetter
 
 
 def test_meteor_noise_generator_initialization():

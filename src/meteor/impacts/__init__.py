@@ -15,13 +15,13 @@ Example usage:
     >>> results = calculator.calculate(climate_data)
 """
 
-from .impacts_core import ImpactCalculator, ImpactEnsemble, ImpactResult
 from .calculators.degree_days import DegreeDaysCalculator
 from .ensemble import (
     apply_impact_calculator,
     create_impact_ensemble,
     ensemble_statistics,
 )
+from .impacts_core import ImpactCalculator, ImpactEnsemble, ImpactResult
 
 __all__ = [
     "ImpactCalculator",

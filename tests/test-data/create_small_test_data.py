@@ -5,9 +5,10 @@ This script takes the existing test data and creates much smaller versions
 by coarsening the spatial resolution while preserving the temporal structure.
 """
 
-import xarray as xr
-import numpy as np
 import os
+
+import numpy as np
+import xarray as xr
 
 
 def create_small_test_data():

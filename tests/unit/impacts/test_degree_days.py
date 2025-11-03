@@ -6,12 +6,13 @@ Tests the DegreeDaysCalculator implementation.
 """
 
 import warnings
+
 import numpy as np
 import pytest
 import xarray as xr
 
-from meteor.impacts.impacts_core import ImpactResult
 from meteor.impacts.calculators.degree_days import DegreeDaysCalculator
+from meteor.impacts.impacts_core import ImpactResult
 
 
 def test_degree_days_calculator_init():

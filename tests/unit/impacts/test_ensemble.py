@@ -11,12 +11,12 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from meteor.impacts.impacts_core import ImpactCalculator, ImpactEnsemble, ImpactResult
 from meteor.impacts.ensemble import (
     apply_impact_calculator,
     create_impact_ensemble,
     ensemble_statistics,
 )
+from meteor.impacts.impacts_core import ImpactCalculator, ImpactEnsemble, ImpactResult
 
 
 class MockCalculator(ImpactCalculator):

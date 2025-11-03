@@ -525,16 +525,17 @@ class TestMeteorPatternScaling:
 
 def test_unfitted_ensemble_generator_error():
     """Test that calling predict on unfitted ensemble generator raises appropriate error."""
-    from meteor.meteor import Meteor
     from unittest.mock import Mock
-    
+
+    from meteor.meteor import Meteor
+
     # Create mocks for required dependencies
     mock_pattern_model = Mock()
     mock_noise_gen = Mock()
-    
+
     # Create generator with mocks
     generator = Meteor(mock_pattern_model, mock_noise_gen)
-    
+
     # Attempt to use without fitting should raise RuntimeError (tests lines 70-75)
     with pytest.raises(RuntimeError, match="Model is not fitted"):
         generator.add_realisation()

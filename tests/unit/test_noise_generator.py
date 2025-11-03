@@ -481,3 +481,60 @@ def test_standalone_functions():
 
     # Note: We don't run the actual method as it requires CMIP6 data
     # But this tests the import paths and method existence
+
+
+def test_custom_global_temp_validation_error():
+    """Test validation error when custom global temperature has wrong length."""
+    generator = MeteorNoiseGenerator()
+
+    # Create test data with 12 months
+    time = np.arange(12)
+    data = xr.DataArray(
+        np.random.rand(12, 3, 3),
+        dims=["month", "lat", "lon"],
+        coords={"month": time, "lat": [0, 1, 2], "lon": [0, 1, 2]},
+    )
+    dataset = xr.Dataset({"tas": data})
+
+    # Provide global temperature with wrong length (6 months instead of 12)
+    wrong_length_temp = np.array([1, 2, 3, 4, 5, 6])
+
+    with pytest.raises(ValueError, match="custom_global_temp length"):
+        generator.fit(dataset, "tas", custom_global_temp=wrong_length_temp)
+
+
+def test_variable_not_found_validation_error():
+    """Test error when requested variable is not in dataset."""
+    generator = MeteorNoiseGenerator()
+
+    # Create dataset without 'tas' variable
+    data = xr.DataArray(
+        np.random.rand(12, 3, 3),
+        dims=["month", "lat", "lon"],
+        coords={"month": np.arange(12), "lat": [0, 1, 2], "lon": [0, 1, 2]},
+    )
+    dataset = xr.Dataset({"temperature": data})  # Wrong variable name
+
+    with pytest.raises(ValueError, match="Variable 'tas' not found"):
+        generator.fit(dataset, "tas")  # Requesting 'tas' but dataset has 'temperature'
+
+
+def test_save_model_before_fitting_error():
+    """Test error when trying to save unfitted model."""
+    generator = MeteorNoiseGenerator()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = os.path.join(tmpdir, "model.pkl")
+
+        with pytest.raises(ValueError, match="Model must be fitted before saving"):
+            generator.save_model(filepath)
+
+
+def test_generate_realization_unfitted_error():
+    """Test error when generating realization before fitting."""
+    generator = MeteorNoiseGenerator()
+
+    test_trajectory = np.array([0.5, 1.0, 1.5])
+
+    with pytest.raises(ValueError, match="Model must be fitted before generating"):
+        generator.generate_realization(test_trajectory)

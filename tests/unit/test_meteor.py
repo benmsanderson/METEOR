@@ -66,8 +66,11 @@ class TestMeteor:
         # Ensemble should be a deep copy
         assert self.meteor.ensemble_ is not self.test_data
 
-    def test_add_realisation_not_fitted(self):
+    def test_add_realisation_not_fitted_error(self):
         """Test add_realisation raises error when not fitted."""
+        # Ensure model is unfitted
+        self.meteor.X_train_ = None
+
         with pytest.raises(RuntimeError, match="Model is not fitted"):
             self.meteor.add_realisation()
 

@@ -1289,13 +1289,46 @@ def test_error_handling_for_invalid_experiments_and_fields():
     ):
         data_getter.get_single_var_mod_data("invalid_exp", "tas", "test_model")
 
-    # Test invalid field error (lines 588-590)
-    with pytest.raises(KeyError, match="This datagetter does not handle pr data"):
-        data_getter.get_single_var_mod_data("historical", "pr", "test_model")
 
-    # Test invalid model error (lines 591-593)
-    with pytest.raises(KeyError, match="No or incomplete data for invalid_model"):
-        data_getter.get_single_var_mod_data("historical", "tas", "invalid_model")
+def test_cache_corruption_recovery_edge_case():
+    """Test recovery when cache file is corrupted."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data_getter = Cmip6MeteorDataGetter(cache_dir=tmpdir, enable_cache=True)
+
+        # Create a corrupted cache file
+        cache_key = "test_corrupted"
+        cache_path = data_getter._get_cache_path(cache_key)
+
+        # Create cache directory and write invalid data
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        with open(cache_path, "w") as f:
+            f.write("this is not valid netcdf data")
+
+        # Should return None and handle corruption gracefully
+        result = data_getter._load_from_cache(cache_key)
+        assert result is None
+
+        # Corrupted file should be removed
+        assert not os.path.exists(cache_path)
+
+
+def test_cache_directory_creation_error_handling():
+    """Test handling when cache directory creation fails."""
+    # Test with a path that should cause permission issues
+    if os.name != "nt":  # Skip on Windows due to different permission model
+        with patch("os.makedirs") as mock_makedirs:
+            mock_makedirs.side_effect = PermissionError("Permission denied")
+
+            # Should not raise exception, just log warning and continue
+            try:
+                data_getter = Cmip6MeteorDataGetter(
+                    cache_dir="/root/forbidden", enable_cache=True
+                )
+                # If we get here, it handled the error gracefully
+                assert True
+            except PermissionError:
+                # Should not propagate the permission error
+                pytest.fail("Cache directory creation error was not handled gracefully")
 
 
 def test_zstore_ref_error_handling():

@@ -10,10 +10,11 @@ from meteor import MeteorPatternScaling, meteor_plot_utils
 
 
 def test_various_plot_modules(test_data_dir):
+    # Use small test data for much faster testing
     canesm_basic_pattern = MeteorPatternScaling(
         "pdrmip-CanESM2-basic",
         {"tas": 2, "pr": 10},
-        lambda exp: os.path.join(test_data_dir, f"pdrmip-{exp}_T42_ANN.nc"),
+        lambda exp: os.path.join(test_data_dir, "small", f"pdrmip-{exp}_small.nc"),
         exp_list=["base", "co2x2"],
     )
 

@@ -112,3 +112,23 @@ def test_global_mean():
         dims=("year", "lat", "lon"),
     )
     assert np.allclose(prpatt.global_mean(empty_array), empty_data.mean(0))
+
+
+def test_prpatt_functions_numerical_stability():
+    """Test numerical stability of prpatt functions."""
+    # Test make_anom with extreme values
+    extreme_exp = xr.DataArray(
+        np.array([[[1e10]], [[-1e10]], [[1e-10]]]),
+        coords=([0, 1, 2], [0], [0]),
+        dims=("year", "lat", "lon"),
+    )
+
+    extreme_cnt = xr.DataArray(
+        np.array([[[0]], [[0]], [[0]]]),
+        coords=([0, 1, 2], [0], [0]),
+        dims=("year", "lat", "lon"),
+    )
+
+    extreme_anom = prpatt.make_anom(extreme_exp, extreme_cnt)
+    assert isinstance(extreme_anom, xr.DataArray)
+    assert np.isfinite(extreme_anom.values).all()

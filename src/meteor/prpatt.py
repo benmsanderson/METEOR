@@ -532,7 +532,7 @@ def get_time_name(ds):
         If there is no dimension called time or year
         in the dataset
     """
-    for time_name in ["time", "year"]:
+    for time_name in ["time", "year", "month"]:
         if time_name in ds.coords:
             return time_name
     raise RuntimeError("Couldn't find a time coordinate")
@@ -544,7 +544,7 @@ def get_lat_name(ds):
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    ds : xarray.Dataset or xarray.DataArray
 
     Returns
     -------
@@ -558,33 +558,112 @@ def get_lat_name(ds):
         If there is no dimension called lat or latitude
         in the dataset
     """
-    for lat_name in ["lat", "latitude"]:
-        if lat_name in ds.coords:
+    # Common latitude coordinate names
+    lat_variants = ["lat", "latitude", "y", "lat_rho"]
+
+    for lat_name in lat_variants:
+        if lat_name in ds.coords or lat_name in ds.dims:
             return lat_name
 
-    raise RuntimeError("Couldn't find a latitude coordinate")
+    raise RuntimeError(f"Couldn't find a latitude coordinate. Tried: {lat_variants}")
 
 
-def global_mean(ds):
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-branches
+def global_mean(
+    ds,
+    lat_name=None,
+    lon_name=None,
+    weights=None,
+    normalize_weights=True,
+    skip_dims=None,
+):
     """
-    Calculate latitude weighted global mean of xarray dataset
+    Calculate latitude weighted global mean of xarray dataset or dataarray.
+
+    This is the universal global mean function for METEOR. It can handle both
+    Datasets and DataArrays with flexible coordinate detection and weighting.
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    ds : xarray.Dataset or xarray.DataArray
+        Data to compute global mean over
+    lat_name : str, optional
+        Name of latitude coordinate (auto-detected if None)
+    lon_name : str, optional
+        Name of longitude coordinate (auto-detected if None)
+    weights : xarray.DataArray, optional
+        Custom weights for averaging (if None, uses cosine of latitude)
+    normalize_weights : bool, optional
+        Whether to normalize weights by their mean (default True for backward compatibility)
+    skip_dims : list of str, optional
+        Dimensions to skip when averaging (if None, skips 'time' and 'ens' for backward compatibility)
 
     Returns
     -------
-    xarray.DataArray
-          Global mean of the dataset over dimensions that are not
-          the time dimension, or the dimension "ens"
+    xarray.Dataset or xarray.DataArray
+        Global mean with spatial dimensions removed
     """
-    lat = ds[get_lat_name(ds)]
-    time_dim_name = get_time_name(ds)
-    weight = np.cos(np.deg2rad(lat))
-    weight = weight / weight.mean()
-    other_dims = set(ds.dims) - {time_dim_name, "ens"}
-    return (ds * weight).mean(other_dims, skipna=True)
+    # Auto-detect latitude coordinate if not provided
+    if lat_name is None:
+        lat_name = get_lat_name(ds)
+
+    # Auto-detect longitude coordinate if not provided
+    if lon_name is None:
+        lon_variants = ["lon", "longitude", "x", "lon_rho"]
+        for lon_var in lon_variants:
+            if lon_var in ds.coords or lon_var in ds.dims:
+                lon_name = lon_var
+                break
+        if lon_name is None:
+            raise RuntimeError(
+                f"Couldn't find a longitude coordinate. Tried: {lon_variants}"
+            )
+
+    # Set default skip dimensions for backward compatibility
+    if skip_dims is None:
+        skip_dims = ["time", "ens"]
+        # Add time dimension name detection for more robust backward compatibility
+        if hasattr(ds, "dims"):
+            time_variants = ["time", "month", "year"]
+            for time_var in time_variants:
+                if time_var in ds.dims and time_var not in skip_dims:
+                    skip_dims.append(time_var)
+
+    # Get spatial dimensions to average over
+    if hasattr(ds, "dims"):
+        spatial_dims = [dim for dim in ds.dims if dim not in skip_dims]
+        # Ensure lat/lon are in spatial dims if they exist
+        if lat_name in ds.dims and lat_name not in spatial_dims:
+            spatial_dims.append(lat_name)
+        if lon_name in ds.dims and lon_name not in spatial_dims:
+            spatial_dims.append(lon_name)
+    else:
+        spatial_dims = [lat_name, lon_name]
+
+    # Create weights if not provided
+    if weights is None:
+        lat = ds[lat_name]
+        weights = np.cos(np.deg2rad(lat))
+
+        # Broadcast to longitude if needed
+        if lon_name in ds.dims:
+            weights = weights * xr.ones_like(ds[lon_name])
+
+    # Normalize weights if requested (default behavior for backward compatibility)
+    if normalize_weights:
+        weights = weights / weights.mean()
+
+    # Calculate weighted mean
+    weighted_data = ds * weights
+    result = weighted_data.mean(spatial_dims, skipna=True)
+
+    # Update attributes if possible
+    if hasattr(result, "attrs"):
+        if hasattr(ds, "attrs"):
+            result.attrs.update(ds.attrs)
+        result.attrs["operation"] = "area_weighted_global_mean"
+
+    return result
 
 
 def get_timescales(anomaly_data, n_modes):

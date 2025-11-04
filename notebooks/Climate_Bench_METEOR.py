@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.17.2
+#       jupytext_version: 1.18.1
 #   kernelspec:
 #     display_name: venv
 #     language: python
@@ -26,18 +26,17 @@
 # source venv/bin/activate
 # then select the kernel 'venv' in jupyter notebook
 
-import os
+import os,sys
 
 import numpy as np
 import xarray as xr
 import pandas as pd
-from dataclasses import asdict
 import warnings
 from pandas.errors import SettingWithCopyWarning
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=(SettingWithCopyWarning))
 warnings.filterwarnings("ignore", message=".*not in pamset.*")
-
+ 
 from meteor import MeteorPatternScaling, meteor
 from meteor import prpatt
 from meteor import Cmip6MeteorDataGetter
@@ -45,25 +44,25 @@ from ciceroscm import input_handler
 
 
 
-# %%
-
-
-def nrmse_values(pred, true, alpha=5):
-
-    print(pred.dims)
-    print(true.dims)
-    gm_truth = global_mean(true).mean("time")
-    print(gm_truth)
-    nrmse_spatial = np.sqrt(global_mean(np.square(pred.mean("time") - true.mean("time"))))/np.abs(gm_truth)
-    nrmse_global = np.sqrt(np.square(global_mean(pred) - global_mean(true)).mean("time"))/np.abs(gm_truth)
-    nrmse_tot = nrmse_spatial + nrmse_global * alpha
-    return nrmse_spatial, nrmse_global, nrmse_tot
-
+# %% [markdown]
+# # Computing ClimateBench-like metrics for METEOR
+#
+# Metrics calculations as in ClimateBench 
+#
+# > Watson-Parris, D., Rao, Y., Olivié, D., Seland, Ø., Nowack, P., Camps-Valls, G., Stier, P., Bouabid, S., Dewey, M., Fons, E.,
+# Gonzalez, J., Harder, P., Jeggle, K., Lenhardt, J., Manshausen, P., Novitasari, M., Ricard, L., and Roesch, C.: ClimateBench
+# v1.0: A Benchmark for Data-Driven Climate Projections, Journal of Advances in Modeling Earth Systems, 14, e2021MS002 954,
+# #https://doi.org/https://doi.org/10.1029/2021MS002954, e2021MS002954 2021MS002954, 2022
+#
+# ## Functions for calculations
 
 # %%
 
 
 def global_mean(ds):
+    """
+    Wrapper for calculating global mean values
+    """
     try:
         gm = prpatt.global_mean(ds)
     except RuntimeError:   
@@ -74,6 +73,29 @@ def global_mean(ds):
         gm = (ds * weight).mean(other_dims, skipna=True)
     return gm
 
+
+# %%
+# Function to calculate nrmse_values as done in ClimateBench 
+# Watson-Parris, D., Rao, Y., Olivié, D., Seland, Ø., Nowack, P., Camps-Valls, G., Stier, P., Bouabid, S., Dewey, M., Fons, E.,
+# Gonzalez, J., Harder, P., Jeggle, K., Lenhardt, J., Manshausen, P., Novitasari, M., Ricard, L., and Roesch, C.: ClimateBench
+# v1.0: A Benchmark for Data-Driven Climate Projections, Journal of Advances in Modeling Earth Systems, 14, e2021MS002 954,
+# https://doi.org/https://doi.org/10.1029/2021MS002954, e2021MS002954 2021MS002954, 2022
+
+def nrmse_values(pred: xr.DataArray, true: xr.DataArray, alpha=5):
+    """
+    Compute global, spatial and combined NRMSE values
+    """
+
+    gm_truth = global_mean(true).mean("time")
+
+    nrmse_spatial = np.sqrt(global_mean(np.square(pred.mean("time") - true.mean("time"))))/np.abs(gm_truth)
+    nrmse_global = np.sqrt(np.square(global_mean(pred) - global_mean(true)).mean("time"))/np.abs(gm_truth)
+    nrmse_tot = nrmse_spatial + nrmse_global * alpha
+    return nrmse_spatial, nrmse_global, nrmse_tot
+
+
+# %% [markdown]
+# ## Ready input data for emissions to forcing
 
 # %%
 
@@ -148,8 +170,11 @@ for i,s in enumerate(['ssp534-over']):
 
 # Getting CMIP6 data from the zarrstore for tas
 
-# %%
+# %% [markdown]
+# ## Preparing data access from zarrstore
 
+# %%
+# Variables to emulate
 
 flds = ["tas","pr"]
 
@@ -178,14 +203,6 @@ elif not just_ssp534:
 #for property, value in vars(data_getter).items():
 #    print(property)
 
-
-# %%
-
-
-
-
-
-# Create training data dictionary for all selected models (may run for a while) - and save locally in 'cache' (cachedir) due to data memory requirements
 
 # %%
 
@@ -226,19 +243,42 @@ if not just_NorESMLM and just_ssp534:
 
 # # Train patterns and timescales for all models
 
-# %%
+# %% [markdown]
+# ### Help functions to handle and get data from cache or zarrstore, and do training
 
+# %%
+def get_data_from_cache_or_download(mname, exp, data_getter=data_getter):
+    if os.path.exists(f"cache/{mname}_{exp}_training_data.nc"):
+        print(f"Getting {mname} {exp} data from cache")
+        return xr.open_dataset(f"cache/{mname}_{exp}_training_data.nc")
+    print(f"Getting {mname} {exp} data from datagetter")
+    if exp in ["base", "co2x4"]:
+        return data_getter.make_meteor_training_data(exp, mname)
+    elif exp == "ssp245":
+        return data_getter.make_meteor_training_data_composite(["historical", exp], mname)
 
 def get_training_data_and_train(mname, data_getter=data_getter):
     # NBVAL_IGNORE_OUTPUT
     training_data = {
-        "base": data_getter.make_meteor_training_data("base", mname),
-        "co2x4": data_getter.make_meteor_training_data("co2x4", mname),
-        "sulxanom": data_getter.make_meteor_training_data_composite(
-            ["historical", "ssp245"], mname
-        ),
+        "base": get_data_from_cache_or_download(mname, "base", data_getter=data_getter).isel(year=slice(-200, None)),
+        "co2x4": get_data_from_cache_or_download(mname, "co2x4", data_getter=data_getter),#.isel(year=slice(0, 150)),
+        "sulxanom": get_data_from_cache_or_download(mname, "ssp245", data_getter=data_getter),
     }
+    ts_dict = {}
+    for fld in flds:
+        ts_dict[fld] = 3
+        for exp, data in training_data.items():
+            print(f"{exp} -- {fld}")
+            print("---------------")
+            print(training_data[exp].sizes)
 
+            gm_tas = global_mean(data[fld])
+            y_nan = np.isnan(gm_tas.values).sum()
+            last_tas = np.isnan(gm_tas.values[-y_nan:]).sum()
+            print(f"{exp}: total {np.isnan(data[fld].values).sum()}, years: {y_nan}, last:{last_tas}, mean: {np.mean(gm_tas)}")
+            if last_tas > 0:
+                training_data[exp] = training_data[exp].isel(year=slice(0,-last_tas))
+    #sys.exit(4)
     # create GHG modes and spatial pattern
     CMIP_pattern = MeteorPatternScaling(
             mname,
@@ -253,6 +293,11 @@ def get_training_data_and_train(mname, data_getter=data_getter):
 
 # # Get test data from file
 
+# %% [markdown]
+# ### Get ClimateBench data for comparison
+#
+# Downloaded from *Watson-Parris, D.: ClimateBench, https://doi.org/10.5281/zenodo.7064308, 2021.*
+
 # %%
 
 
@@ -266,12 +311,17 @@ CB_test_data = xr.open_dataset("outputs_ssp245.nc")
 
 # capture the spatial response of the last 20 years (2080--2100)
 
+# %% [markdown]
+# ## Emulate and compare
+#
+# ### Full loop for ClimateBench or full set of standard scenarios
+
 # %%
 
 if not just_ssp534:
     cols = []
     err_measures = ["NRMSE_spatial", "NRMSE_global", "NRMSE_total"]
-    skip_for_now = ["EC-Earth3-Veg", "NorESM2-MM"]# "FGOALS-f3-L""CESM2", "CNRM-CM6-1-HR", , "EC-Earth3", "FGOALS-f3-L"]
+    skip_for_now = [] #["EC-Earth3-Veg", "NorESM2-MM"]# "FGOALS-f3-L""CESM2", "CNRM-CM6-1-HR", , "EC-Earth3", "FGOALS-f3-L"]
 
     for nv, var in enumerate(flds): 
         for err_measure in err_measures:
@@ -283,9 +333,13 @@ if not just_ssp534:
         scoring_table_data = np.zeros((len(scenarios) , 3*len(flds)))
         print(mname)
         #sys.exit(4)
-        CMIP_pattern = get_training_data_and_train(mname)
+        try:
+            CMIP_pattern = get_training_data_and_train(mname)
+        except ValueError:
+            print(f"Pattern making not working for {mname}")
+            continue
         for nv, var in enumerate(flds):
-            shift_data = data_getter.get_single_var_mod_data_yearmean("piControl", var, mname).isel(year = slice(100, None)).mean("year")
+            shift_data = data_getter.get_single_var_mod_data_yearmean("piControl", var, mname).isel(year = slice(-200, None)).mean("year")
             for nsc, sc in enumerate(scenarios):
                 # Get native data as an xarray DataArray
                 prediction_ds = CMIP_pattern.predict_from_combined_experiment(
@@ -303,9 +357,11 @@ if not just_ssp534:
 
                     #sys.exit(4)
                 else:
-                    truth_ds = data_getter.get_single_var_mod_data_yearmean(sc, var, mname)  
-                    truth_ds = truth_ds.isel(year= slice(65, 86))
-                    if var == "tas":
+                    if os.path.exists(f"cache/{mname}_{sc}_training_data.nc"):
+                        truth_ds = xr.open_dataset(f"cache/{mname}_{sc}_training_data.nc")[var].isel(year=slice(230,251))
+                    else:
+                        truth_ds = data_getter.get_single_var_mod_data_yearmean(sc, var, mname)  
+                        truth_ds = truth_ds.isel(year= slice(65, 86))
                         truth_ds = truth_ds - shift_data
                     truth_ds = truth_ds.rename({"year": "time"})
                 ##print(prediction_ds.time.shape)
@@ -313,7 +369,7 @@ if not just_ssp534:
                 #print(t_trying)
                 prediction_ds = prediction_ds.assign_coords(time= list(t_trying))
                 prediction_ds = prediction_ds.isel(time= slice(330, 351))
-                if var == "pr" and (sc != "ssp245" or not just_NorESMLM):
+                if var == "pr" and (sc != "ssp245" or not just_NorESMLM) and not os.path.exists(f"cache/{mname}_{sc}_training_data.nc"):
                     prediction_ds = prediction_ds + shift_data                
                 #print(f"{var}, {sc}, gm: {global_mean(prediction_ds).mean('time').values}, gm_truth: {global_mean(truth_ds).mean('time').values}")
 
@@ -333,7 +389,6 @@ if not just_ssp534:
         #for mname in models:
         for sc in scenarios:
             rowhs.append(f"{mname} {sc}")
-        print(rowhs)
 
         scoring_df = pd.DataFrame(
             data = scoring_table_data,
@@ -371,7 +426,7 @@ if not just_ssp534:
 
 
 # %%
-
+# Put the results into a latex-formatted table to put into overleaf
 
 if not just_NorESMLM and not just_ssp534:
     list_scoring_dfs = []
@@ -381,13 +436,17 @@ if not just_NorESMLM and not just_ssp534:
         scoring_df = pd.read_csv(f"CB_scoring_{mname}_latex.csv")
         list_scoring_dfs.append(scoring_df)
     full_scoring_df = pd.concat(list_scoring_dfs)
-    print(full_scoring_df)
-    full_scoring_df.to_latex("CB_scoring_all_latex.txt", bold_rows=True, float_format="%.3f", label="CB_comprison_errors_all", caption = "METEOR performance for all models evaluated using the Climate bench evalutaion metrics. Note that comparison is to single ensemble members, so variability driven errors are included.")
+    full_scoring_df.set_index("Unnamed: 0", inplace=True)
+    #print(full_scoring_df)
+    full_scoring_df.to_latex("CB_scoring_all_latex.txt", float_format="%.3f", label="CB_comprison_errors_all", caption = "METEOR performance for all models evaluated using the Climate bench evaluation metrics. Note that comparison is to single ensemble members, so variability driven errors are included.")
 
 
 # # Application to new scenarios
 
 # ### SSP534-over
+
+# %% [markdown]
+# ## Loop over overshoot-scenario models
 
 # %%
 
@@ -397,21 +456,26 @@ if not just_NorESMLM and just_ssp534:
     
     cols = []
     err_measures = ["NRMSE_spatial", "NRMSE_global", "NRMSE_total"]
-    skip_for_now = []#["MIROC-ES2L"]#["CESM2-WACCM"]
+    skip_for_now_534 = []#["MIROC-ES2L"]#["CESM2-WACCM"]
     rowhs = []
     for nv, var in enumerate(flds): 
         for err_measure in err_measures:
             cols.append(f"{err_measure} for {var}")   
     for nm, mname in enumerate(models_ssp534):
         print(mname)
-        if mname in skip_for_now:
+        if mname in skip_for_now_534:
             continue
         if os.path.exists(f"CB_scoring_ssp534_{mname}.csv"):
             continue
         scoring_table_data_ssp534 = np.zeros((len(scenarios_534) , 3*len(flds)))
+
         CMIP_pattern = get_training_data_and_train(mname, data_getter=data_getter_ssp534)
         for nv, var in enumerate(flds):
-            shift_data = data_getter_ssp534.get_single_var_mod_data_yearmean("piControl", var, mname).mean("year")
+            if os.path.exists(f"cache/{mname}_base_training_data.nc"):
+                print(f"cache/{mname}_base_training_data.nc")
+                shift_data = xr.open_dataset(f"cache/{mname}_base_training_data.nc")[var].isel(year=slice(-200,None)).mean("year")
+            else:
+                shift_data = data_getter_ssp534.get_single_var_mod_data_yearmean("piControl", var, mname).isel(year=slice(-200,None)).mean("year")
             for nsc, sc in enumerate(scenarios_534):
                 # Get native data as an xarray DataArray
                 prediction_ds = CMIP_pattern.predict_from_combined_experiment(
@@ -419,17 +483,23 @@ if not just_NorESMLM and just_ssp534:
                 )[var]
                 print(mname)
                 print(sc)
-                truth_ds = data_getter_ssp534.get_single_var_mod_data_yearmean(sc, var, mname)
+                if os.path.exists(f"cache/{mname}_{sc}_training_data.nc"):
+                    print(f"cache/{mname}_{sc}_training_data.nc")
+                    truth_ds = xr.open_dataset(f"cache/{mname}_{sc}_training_data.nc")[var].isel(year=slice(230,251))
+                else:
+                    truth_ds = data_getter_ssp534.get_single_var_mod_data_yearmean(sc, var, mname)  
+                    truth_ds = truth_ds#.isel(year= slice(65, 86))
+                if var == "tas":
+                    truth_ds = truth_ds - shift_data
+                #sys.exit(4)
                 if len(truth_ds.year) == 61:
                     truth_ds = truth_ds.isel(year= slice(40, 61))
                 elif len(truth_ds.year) == 86:
                     truth_ds = truth_ds.isel(year= slice(65, 86))
                 else:
                     print(len(truth_ds.year))
-                if var == "tas":
-                    truth_ds = truth_ds - shift_data
-                truth_ds = truth_ds.rename({"year": "time"})
                 ##print(prediction_ds.time.shape)
+                truth_ds = truth_ds.rename({"year": "time"})
                 t_trying = np.arange(len(prediction_ds["time"]))
                 #print(t_trying)
                 prediction_ds = prediction_ds.assign_coords(time= list(t_trying))
@@ -458,7 +528,7 @@ if not just_NorESMLM and just_ssp534:
     for mname in models_ssp534:
         for sc in scenarios_534:
             rowhs.append(f"{mname} {sc}")
-
+    """
     scoring_df_534 = pd.DataFrame(
         data = scoring_table_data_ssp534,
         columns = cols,
@@ -466,8 +536,26 @@ if not just_NorESMLM and just_ssp534:
     )
     scoring_df_534.to_csv("CB_scoring_ssp534.csv")
     scoring_df_534.to_latex("CB_scoring_ssp534_latex.txt", bold_rows=True, float_format="{{:0.3f}}".format, label="CB_comprison_errors_ssp534", caption = "METEOR performance for the overshoot scenario ssp534 evaluated using the Climate bench evalutaion metrics. Note that comparison is to single ensemble members, so variability driven errors are included.")
+    """
+
+# %%
+# Put the results into a latex-formatted table to put into overleaf
+if not just_NorESMLM and just_ssp534:
+
+    list_scoring_dfs_534 = []
+    for mname in models_ssp534:
+        if mname in skip_for_now_534:
+            continue
+        scoring_df = pd.read_csv(f"CB_scoring_ssp534_{mname}.csv")
+        list_scoring_dfs_534.append(scoring_df)
+    full_scoring_df = pd.concat(list_scoring_dfs_534)
+    full_scoring_df.set_index("Unnamed: 0", inplace=True)
+    print(full_scoring_df)
+    full_scoring_df.to_latex("CB_scoring_all_534_latex.txt", bold_rows=True, float_format="%.3f", label="CB_comprison_errors_all", caption = "METEOR performance for all models evaluated using the Climate bench evalutaion metrics. Note that comparison is to single ensemble members, so variability driven errors are included.")
 
 
-# 
+# # Application to new scenarios
+
+# ### SSP534-over
 
 # %%

@@ -12,7 +12,7 @@ def test_meteor_scaling(test_data_dir):
     canesm_basic_pattern = MeteorPatternScaling(
         "pdrmip-CanESM2-basic",
         {"tas": 2, "pr": 10},
-        lambda exp: os.path.join(test_data_dir, f"pdrmip-{exp}_T42_ANN.nc"),
+        lambda exp: os.path.join(test_data_dir, f"small/pdrmip-{exp}_small.nc"),
         exp_list=["base", "co2x2"],
     )
     assert canesm_basic_pattern.name == "pdrmip-CanESM2-basic"
@@ -29,7 +29,7 @@ def test_meteor_scaling_scm_timseries(test_data_dir):
     canesm_basic_pattern = MeteorPatternScaling(
         "pdrmip-CanESM2-basic",
         {"tas": 2, "pr": 10},
-        lambda exp: os.path.join(test_data_dir, f"pdrmip-{exp}_T42_ANN.nc"),
+        lambda exp: os.path.join(test_data_dir, f"small/pdrmip-{exp}_small.nc"),
         exp_list=["base", "co2x2"],
     )
     assert canesm_basic_pattern.name == "pdrmip-CanESM2-basic"
@@ -198,7 +198,7 @@ def test_return_separate_per_mode_patterns(test_data_dir):
     canesm_basic_pattern = MeteorPatternScaling(
         "pdrmip-CanESM2-basic",
         {"tas": 2, "pr": 3},
-        lambda exp: os.path.join(test_data_dir, f"pdrmip-{exp}_T42_ANN.nc"),
+        lambda exp: os.path.join(test_data_dir, f"small/pdrmip-{exp}_small.nc"),
         exp_list=["base", "co2x2"],
     )
     assert canesm_basic_pattern.name == "pdrmip-CanESM2-basic"
@@ -214,14 +214,15 @@ def test_return_separate_per_mode_patterns(test_data_dir):
     patterns = canesm_basic_pattern.predict_from_combined_experiment(
         em_data, conc_data, ["pr", "tas"], return_patterns_per_mode=True
     )
-    assert np.all(patterns["tas"].shape == (2, 351, 64, 128))
-    assert np.all(patterns["pr"].shape == (3, 351, 64, 128))
+    # Updated dimensions for coarsened data: 8x11 instead of 64x128
+    assert np.all(patterns["tas"].shape == (2, 351, 8, 11))
+    assert np.all(patterns["pr"].shape == (3, 351, 8, 11))
 
     patterns_full = canesm_basic_pattern.predict_from_combined_experiment(
         em_data, conc_data, ["pr", "tas"], return_patterns_per_mode=False
     )
-    assert np.all(patterns_full["tas"].shape == (351, 64, 128))
-    assert np.all(patterns_full["pr"].shape == (351, 64, 128))
+    assert np.all(patterns_full["tas"].shape == (351, 8, 11))
+    assert np.all(patterns_full["pr"].shape == (351, 8, 11))
 
     assert np.allclose(
         np.sum(patterns["tas"].values, axis=0), patterns_full["tas"].values

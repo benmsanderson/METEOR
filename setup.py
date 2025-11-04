@@ -29,6 +29,8 @@ REQUIREMENTS = [
     "eofs",
     "lmfit",
     "ciceroscm>=1.1.2",
+    "scikit-learn",
+    "statsmodels",
 ]
 
 REQUIREMENTS_NOTEBOOKS = ["ipywidgets", "notebook", "seaborn", "ipykernel", "cartopy"]

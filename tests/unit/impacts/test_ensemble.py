@@ -18,25 +18,7 @@ from meteor.impacts.ensemble import (
 )
 from meteor.impacts.impacts_core import ImpactCalculator, ImpactEnsemble, ImpactResult
 
-
-class MockCalculator(ImpactCalculator):
-    """Mock calculator for testing."""
-
-    def __init__(self, name="MockCalculator"):
-        super().__init__(name)
-        self.call_count = 0
-
-    def calculate(self, climate_data):
-        self.call_count += 1
-        result_data = {
-            "output": climate_data * 2,  # Simple transformation
-            "constant": xr.full_like(climate_data, self.call_count),
-        }
-        return ImpactResult(result_data, {"call_number": self.call_count}, self.name)
-
-    def validate_input(self, climate_data):
-        if not isinstance(climate_data, xr.DataArray):
-            raise ValueError("Input must be DataArray")
+from .common import MockCalculator
 
 
 class TestApplyImpactCalculator:
@@ -44,7 +26,9 @@ class TestApplyImpactCalculator:
 
     def setup_method(self):
         """Set up test fixtures."""
-        self.calculator = MockCalculator()
+        self.calculator = MockCalculator(
+            track_calls=True
+        )  # Enable call tracking for ensemble tests
 
         self.single_data = xr.DataArray([1, 2, 3], dims=["x"])
 
@@ -123,7 +107,7 @@ class TestCreateImpactEnsemble:
 
     def test_create_ensemble(self):
         """Test creating impact ensemble."""
-        calculator = MockCalculator()
+        calculator = MockCalculator(track_calls=True)
         ensemble_list = [
             xr.DataArray([1, 2, 3], dims=["x"]),
             xr.DataArray([2, 3, 4], dims=["x"]),

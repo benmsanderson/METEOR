@@ -13,21 +13,7 @@ import xarray as xr
 
 from meteor.impacts.impacts_core import ImpactCalculator, ImpactEnsemble, ImpactResult
 
-
-class MockCalculator(ImpactCalculator):
-    """Mock calculator for testing."""
-
-    def __init__(self, name="MockCalculator"):
-        super().__init__(name)
-
-    def calculate(self, climate_data):
-        # Simple mock calculation: square the input
-        result_data = {"squared": climate_data**2, "doubled": climate_data * 2}
-        return ImpactResult(result_data, {"mock": True}, self.name)
-
-    def validate_input(self, climate_data):
-        if not isinstance(climate_data, xr.DataArray):
-            raise ValueError("Input must be DataArray")
+from .common import MockCalculator
 
 
 # ImpactResult tests

@@ -94,6 +94,7 @@ test-install: $(VENV_DIR)  ## test installing works
 	python3 -m venv $(TEMPVENV)
 	$(TEMPVENV)/bin/pip install pip wheel --upgrade
 	$(TEMPVENV)/bin/pip install .
+	$(TEMPVENV)/bin/python scripts/test_install.py
 ##TODO: clear out hardcoded python3.9 reference
 virtual-environment: $(VENV_DIR)  ## update venv, create a new venv if it doesn't exist make
 	echo "If you want this to be rerun, run make clean first"

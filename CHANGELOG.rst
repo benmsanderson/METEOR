@@ -14,7 +14,7 @@ The changes listed in this file are categorised as follows:
     - Fixed: any bug fixes
     - Security: in case of vulnerabilities.
 
-[Unreleased] - Version 1.5.0
+[Version 1.5.0]
 -----------------------------
 
 ### Added

@@ -6,8 +6,8 @@ Strategy: Use mocks and fixtures, avoid unnecessary data getter initialization.
 """
 
 import os
-import tempfile
 import shutil
+import tempfile
 
 import numpy as np
 import pytest
@@ -83,7 +83,7 @@ class TestCacheCore:
         assert os.path.exists(cache_path)
 
         # 2. Validate
-        is_valid = cache_getter.is_cached(
+        cache_getter.is_cached(
             "get_single_var_mod_data_monthly", "piControl", "tas", "TestModel"
         )
         # Won't find this specific model, but validates the mechanism works

@@ -109,8 +109,198 @@
       "piControl",
       "CNRM-ESM2-1",
       "pr"
+    ],
+    [
+      "piControl",
+      "CNRM-ESM2-1",
+      "tas"
+    ],
+    [
+      "piControl",
+      "CanESM5",
+      "pr"
+    ],
+    [
+      "piControl",
+      "CanESM5",
+      "tas"
+    ],
+    [
+      "piControl",
+      "EC-Earth3-Veg",
+      "pr"
+    ],
+    [
+      "piControl",
+      "EC-Earth3-Veg",
+      "tas"
+    ],
+    [
+      "piControl",
+      "FGOALS-f3-L",
+      "pr"
+    ],
+    [
+      "piControl",
+      "FGOALS-f3-L",
+      "tas"
+    ],
+    [
+      "piControl",
+      "GFDL-ESM4",
+      "pr"
+    ],
+    [
+      "piControl",
+      "GFDL-ESM4",
+      "tas"
+    ],
+    [
+      "piControl",
+      "GISS-E2-1-H",
+      "pr"
+    ],
+    [
+      "piControl",
+      "GISS-E2-1-H",
+      "tas"
+    ],
+    [
+      "piControl",
+      "INM-CM5-0",
+      "pr"
+    ],
+    [
+      "piControl",
+      "INM-CM5-0",
+      "tas"
+    ],
+    [
+      "piControl",
+      "KACE-1-0-G",
+      "pr"
+    ],
+    [
+      "piControl",
+      "KACE-1-0-G",
+      "tas"
+    ],
+    [
+      "piControl",
+      "MIROC-ES2L",
+      "pr"
+    ],
+    [
+      "piControl",
+      "MIROC-ES2L",
+      "tas"
+    ],
+    [
+      "piControl",
+      "MPI-ESM1-2-HR",
+      "pr"
+    ],
+    [
+      "piControl",
+      "MCM-UA-1-0",
+      "pr"
+    ],
+    [
+      "piControl",
+      "MCM-UA-1-0",
+      "tas"
+    ],
+    [
+      "piControl",
+      "MPI-ESM1-2-HR",
+      "tas"
+    ],
+    [
+      "piControl",
+      "NorESM2-MM",
+      "pr"
+    ],
+    [
+      "piControl",
+      "NorESM2-MM",
+      "tas"
+    ],
+    [
+      "piControl",
+      "UKESM1-0-LL",
+      "pr"
+    ],
+    [
+      "piControl",
+      "UKESM1-0-LL",
+      "tas"
+    ],
+    [
+      "abrupt-4xCO2",
+      "ACCESS-ESM1-5",
+      "pr"
+    ],
+    [
+      "abrupt-4xCO2",
+      "ACCESS-ESM1-5",
+      "tas"
+    ],
+    [
+      "abrupt-4xCO2",
+      "AWI-CM-1-1-MR",
+      "pr"
+    ],
+    [
+      "abrupt-4xCO2",
+      "AWI-CM-1-1-MR",
+      "tas"
+    ],
+    [
+      "abrupt-4xCO2",
+      "BCC-CSM2-MR",
+      "pr"
+    ],
+    [
+      "abrupt-4xCO2",
+      "BCC-CSM2-MR",
+      "tas"
+    ],
+    [
+      "abrupt-4xCO2",
+      "CAMS-CSM1-0",
+      "pr"
+    ],
+    [
+      "abrupt-4xCO2",
+      "CAMS-CSM1-0",
+      "tas"
+    ],
+    [
+      "abrupt-4xCO2",
+      "CAS-ESM2-0",
+      "pr"
+    ],
+    [
+      "abrupt-4xCO2",
+      "CAS-ESM2-0",
+      "tas"
     ]
   ],
-  "failed_combinations": [],
-  "timestamp": 1762335853.583297
+  "failed_combinations": [
+    {
+      "scenario": "piControl",
+      "model": "MCM-UA-1-0",
+      "variable": "pr",
+      "reason": "annual: tuple.index(x): x not in tuple"
+    },
+    {
+      "scenario": "piControl",
+      "model": "MCM-UA-1-0",
+      "variable": "tas",
+      "reason": "annual: tuple.index(x): x not in tuple"
+    }
+  ],
+  "monthly": false,
+  "cleanup": false,
+  "timestamp": 1762345074.0779479
 }

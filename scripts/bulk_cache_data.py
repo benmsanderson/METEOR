@@ -37,7 +37,7 @@ DEFAULT_SCENARIOS = [
     "ssp126",
     "ssp245",
     "ssp370",
-    "ssp585"
+    "ssp585",
 ]
 
 DEFAULT_MODELS = [
@@ -60,25 +60,35 @@ DEFAULT_MODELS = [
     "MIROC-ES2L",
     "MPI-ESM1-2-HR",
     "NorESM2-MM",
-    "UKESM1-0-LL"
+    "UKESM1-0-LL",
 ]
 
 DEFAULT_VARIABLES = ["pr", "tas"]
 
 
-def save_checkpoint(checkpoint_file: Path, scenarios: List[str], models: List[str], 
-                   variables: List[str], completed: List[tuple], failed_combinations: List):
+def save_checkpoint(
+    checkpoint_file: Path,
+    scenarios: List[str],
+    models: List[str],
+    variables: List[str],
+    completed: List[tuple],
+    failed_combinations: List,
+    monthly: bool = False,
+    cleanup: bool = False,
+):
     """Save progress checkpoint to file."""
     checkpoint_data = {
-        'scenarios': scenarios,
-        'models': models,
-        'variables': variables,
-        'completed': completed,
-        'failed_combinations': failed_combinations,
-        'timestamp': time.time()
+        "scenarios": scenarios,
+        "models": models,
+        "variables": variables,
+        "completed": completed,
+        "failed_combinations": failed_combinations,
+        "monthly": monthly,
+        "cleanup": cleanup,
+        "timestamp": time.time(),
     }
-    
-    with open(checkpoint_file, 'w') as f:
+
+    with open(checkpoint_file, "w") as f:
         json.dump(checkpoint_data, f, indent=2)
 
 
@@ -86,16 +96,20 @@ def load_checkpoint(checkpoint_file: Path):
     """Load progress checkpoint from file."""
     if not checkpoint_file.exists():
         return None
-    
+
     try:
-        with open(checkpoint_file, 'r') as f:
+        with open(checkpoint_file, "r") as f:
             return json.load(f)
     except (json.JSONDecodeError, IOError):
         return None
 
 
-def get_pending_combinations(scenarios: List[str], models: List[str], variables: List[str],
-                           completed: List[tuple]) -> List[tuple]:
+def get_pending_combinations(
+    scenarios: List[str],
+    models: List[str],
+    variables: List[str],
+    completed: List[tuple],
+) -> List[tuple]:
     """Get list of combinations that haven't been completed yet."""
     all_combinations = [(s, m, v) for s in scenarios for m in models for v in variables]
     completed_set = set(completed)
@@ -105,27 +119,27 @@ def get_pending_combinations(scenarios: List[str], models: List[str], variables:
 def parse_flexible_list(input_list: List[str]) -> List[str]:
     """
     Parse a list that may contain comma-separated values into individual items.
-    
+
     Handles both space-separated args: --models A B C
     And comma-separated args: --models A,B,C
     And mixed: --models A,B C,D
-    
+
     Args:
         input_list: List of strings from argparse
-        
+
     Returns:
         Flattened list of individual items
     """
     if not input_list:
         return []
-    
+
     result = []
     for item in input_list:
         # Split on commas and strip whitespace
-        sub_items = [s.strip() for s in item.split(',')]
+        sub_items = [s.strip() for s in item.split(",")]
         # Filter out empty strings
         result.extend([s for s in sub_items if s])
-    
+
     return result
 
 
@@ -140,7 +154,9 @@ def get_default_cache_location() -> str:
         return "<repository>/.cache/cmip6 (default)"
 
 
-def get_user_input_list(prompt: str, default_list: List[str], item_type: str = "items") -> List[str]:
+def get_user_input_list(
+    prompt: str, default_list: List[str], item_type: str = "items"
+) -> List[str]:
     """
     Get a list input from user with defaults.
 
@@ -161,7 +177,7 @@ def get_user_input_list(prompt: str, default_list: List[str], item_type: str = "
 
     if not user_input:
         return default_list
-    elif user_input.lower() == 'all':
+    elif user_input.lower() == "all":
         if item_type == "scenarios":
             # For scenarios, 'all' means the default comprehensive list
             return default_list
@@ -171,7 +187,7 @@ def get_user_input_list(prompt: str, default_list: List[str], item_type: str = "
             return default_list
     else:
         # Parse comma-separated input
-        items = [item.strip() for item in user_input.split(',')]
+        items = [item.strip() for item in user_input.split(",")]
         return [item for item in items if item]  # Remove empty strings
 
 
@@ -188,12 +204,12 @@ def get_user_boolean_input(prompt: str, default: bool = False) -> bool:
     """
     default_text = "Y/n" if default else "y/N"
     user_input = input(f"{prompt} ({default_text}): ").strip().lower()
-    
+
     if not user_input:
         return default
-    elif user_input in ['y', 'yes']:
+    elif user_input in ["y", "yes"]:
         return True
-    elif user_input in ['n', 'no']:
+    elif user_input in ["n", "no"]:
         return False
     else:
         print("Please enter 'y' for yes or 'n' for no.")
@@ -217,7 +233,7 @@ def get_cache_directory() -> Optional[Path]:
         cache_path = Path(user_input)
         if not cache_path.exists():
             create = input(f"Directory {cache_path} doesn't exist. Create it? (y/n): ")
-            if create.lower() in ['y', 'yes']:
+            if create.lower() in ["y", "yes"]:
                 cache_path.mkdir(parents=True, exist_ok=True)
                 print(f"Created cache directory: {cache_path}")
                 return cache_path
@@ -228,26 +244,32 @@ def get_cache_directory() -> Optional[Path]:
         return cache_path
 
 
-def cleanup_intermediate_files(scenario: str, model: str, variable: str, cache_dir: Optional[Path], monthly: bool = False) -> int:
+def cleanup_intermediate_files(
+    scenario: str,
+    model: str,
+    variable: str,
+    cache_dir: Optional[Path],
+    monthly: bool = False,
+) -> int:
     """
     Clean up intermediate cache files after successful training data creation.
-    
-    Removes *_raw.nc, *_yearly.nc, and *_monthly.nc files while keeping 
+
+    Removes *_raw.nc, *_yearly.nc, and *_monthly.nc files while keeping
     *_training_yearly.nc and *_training_monthly.nc files.
-    
+
     Parameters
     ----------
     scenario : str
         Scenario name
     model : str
-        Model name  
+        Model name
     variable : str
         Variable name
     cache_dir : Optional[Path]
         Cache directory path
     monthly : bool
         Whether monthly data was cached
-        
+
     Returns
     -------
     int
@@ -263,19 +285,19 @@ def cleanup_intermediate_files(scenario: str, model: str, variable: str, cache_d
             cache_dir = Path(".cache/cmip6")
     else:
         cache_dir = Path(cache_dir)
-    
+
     bytes_freed = 0
     files_to_remove = []
-    
+
     # Intermediate files to clean up
     intermediate_patterns = [
         f"{model}_{scenario}_{variable}_raw.nc",
         f"{model}_{scenario}_{variable}_yearly.nc",
     ]
-    
+
     if monthly:
         intermediate_patterns.append(f"{model}_{scenario}_{variable}_monthly.nc")
-    
+
     for pattern in intermediate_patterns:
         file_path = cache_dir / pattern
         if file_path.exists():
@@ -286,11 +308,17 @@ def cleanup_intermediate_files(scenario: str, model: str, variable: str, cache_d
                 bytes_freed += file_size
             except OSError as e:
                 print(f"Warning: Could not remove {pattern}: {e}")
-    
+
     return bytes_freed
 
 
-def confirm_caching_plan(scenarios: List[str], models: List[str], variables: List[str], monthly: bool = False, cleanup: bool = False) -> bool:
+def confirm_caching_plan(
+    scenarios: List[str],
+    models: List[str],
+    variables: List[str],
+    monthly: bool = False,
+    cleanup: bool = False,
+) -> bool:
     """Display caching plan and get user confirmation."""
     data_type = "Annual & Monthly" if monthly else "Annual"
     print("\n" + "=" * 60)
@@ -301,31 +329,39 @@ def confirm_caching_plan(scenarios: List[str], models: List[str], variables: Lis
     print(f"Variables ({len(variables)}): {', '.join(variables)}")
     print(f"Data type: {data_type}")
     total_combinations = len(scenarios) * len(models) * len(variables)
-    print(f"Total combinations: {len(scenarios)} × {len(models)} × {len(variables)} = {total_combinations}")
-    
+    print(
+        f"Total combinations: {len(scenarios)} × {len(models)} × {len(variables)} = {total_combinations}"
+    )
+
     if cleanup:
         print(f"Cleanup: Enabled (will remove intermediate files to save ~60% storage)")
-    
+
     if data_type == "Annual & Monthly":
-        print(f"\nThis will download and cache both annual and monthly data for all combinations.")
+        print(
+            f"\nThis will download and cache both annual and monthly data for all combinations."
+        )
     else:
-        print(f"\nThis will download and cache {data_type.lower()} data for all combinations.")
+        print(
+            f"\nThis will download and cache {data_type.lower()} data for all combinations."
+        )
     print("Depending on your internet connection, this may take considerable time.")
     print("=" * 60)
 
     confirm = input("Proceed with caching? (y/n): ")
-    return confirm.lower() in ['y', 'yes']
+    return confirm.lower() in ["y", "yes"]
 
 
-def cache_data_combination(scenario: str,
-                          model: str,
-                          variable: str,
-                          cache_dir: Optional[Path],
-                          current: int,
-                          total: int,
-                          failed_combinations: List,
-                          monthly: bool = False,
-                          cleanup: bool = False) -> bool:
+def cache_data_combination(
+    scenario: str,
+    model: str,
+    variable: str,
+    cache_dir: Optional[Path],
+    current: int,
+    total: int,
+    failed_combinations: List,
+    monthly: bool = False,
+    cleanup: bool = False,
+) -> bool:
     """
     Cache data for a specific scenario/model/variable combination.
 
@@ -336,10 +372,14 @@ def cache_data_combination(scenario: str,
     progress = current / total * 100
     bar_length = 30
     filled_length = int(bar_length * current / total)
-    bar = '█' * filled_length + '░' * (bar_length - filled_length)
+    bar = "█" * filled_length + "░" * (bar_length - filled_length)
 
-    print(f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-          f"Checking {scenario} - {model} - {variable}... ", end="", flush=True)
+    print(
+        f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
+        f"Checking {scenario} - {model} - {variable}... ",
+        end="",
+        flush=True,
+    )
 
     try:
         # Add a timestamp for debugging
@@ -352,49 +392,56 @@ def cache_data_combination(scenario: str,
             cache_types = [False, True]  # Annual first, then monthly
         else:
             cache_types = [False]  # Just annual
-        
+
         all_cached = True
         cached_types = []
         downloaded_types = []
-        
+
         for is_monthly in cache_types:
             # Initialize a fresh data getter for this specific scenario/variable combo
             # This avoids the issue where models are filtered out if they don't have ALL scenarios
             if cache_dir:
                 data_getter = Cmip6MeteorDataGetter(
-                    cache_dir=str(cache_dir),
-                    exps=[scenario],
-                    flds=[variable]
+                    cache_dir=str(cache_dir), exps=[scenario], flds=[variable]
                 )
             else:
-                data_getter = Cmip6MeteorDataGetter(
-                    exps=[scenario],
-                    flds=[variable]
-                )
+                data_getter = Cmip6MeteorDataGetter(exps=[scenario], flds=[variable])
 
             # Check if this specific data type is already cached (fast check)
-            if data_getter.is_cached("make_meteor_training_data", scenario, model, monthly=is_monthly):
+            if data_getter.is_cached(
+                "make_meteor_training_data", scenario, model, monthly=is_monthly
+            ):
                 cache_type = "monthly" if is_monthly else "annual"
                 cached_types.append(cache_type)
                 continue
-            
+
             # This data type is not cached
             all_cached = False
             cache_type = "monthly" if is_monthly else "annual"
-            
-            print(f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-                  f"Caching {scenario} - {model} - {variable} ({cache_type})... ", end="", flush=True)
+
+            print(
+                f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
+                f"Caching {scenario} - {model} - {variable} ({cache_type})... ",
+                end="",
+                flush=True,
+            )
             # Add periodic heartbeat for long downloads
-            heartbeat_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+            heartbeat_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
             heartbeat_active = True
             heartbeat_counter = [0]
 
             def heartbeat():
                 while heartbeat_active:
                     if time.time() - start_time > 2:  # Show after 2 seconds
-                        char = heartbeat_chars[heartbeat_counter[0] % len(heartbeat_chars)]
-                        print(f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-                              f"Caching {scenario} - {model} - {variable} ({cache_type})... {char}", end="", flush=True)
+                        char = heartbeat_chars[
+                            heartbeat_counter[0] % len(heartbeat_chars)
+                        ]
+                        print(
+                            f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
+                            f"Caching {scenario} - {model} - {variable} ({cache_type})... {char}",
+                            end="",
+                            flush=True,
+                        )
                         heartbeat_counter[0] += 1
                     time.sleep(0.3)
 
@@ -404,7 +451,9 @@ def cache_data_combination(scenario: str,
 
             try:
                 # Attempt to get the data, which will cache it
-                data = data_getter.make_meteor_training_data(scenario, model, variable, monthly=is_monthly)
+                data = data_getter.make_meteor_training_data(
+                    scenario, model, variable, monthly=is_monthly
+                )
             except KeyboardInterrupt:
                 # Allow user to interrupt gracefully
                 print(f"\n\nInterrupted by user. Progress saved.")
@@ -413,20 +462,24 @@ def cache_data_combination(scenario: str,
                 # Handle download-specific errors
                 elapsed = time.time() - start_time
                 error_msg = str(download_error)
-                
+
                 # Store detailed error for summary
-                failed_combinations.append({
-                    'scenario': scenario,
-                    'model': model,
-                    'variable': variable,
-                    'reason': f"{cache_type}: {error_msg}"
-                })
-                
+                failed_combinations.append(
+                    {
+                        "scenario": scenario,
+                        "model": model,
+                        "variable": variable,
+                        "reason": f"{cache_type}: {error_msg}",
+                    }
+                )
+
                 # Truncate very long error messages for display
                 if len(error_msg) > 100:
                     error_msg = error_msg[:97] + "..."
-                print(f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-                      f"Caching {scenario} - {model} - {variable} ({cache_type})... ✗ Error: {error_msg}")
+                print(
+                    f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
+                    f"Caching {scenario} - {model} - {variable} ({cache_type})... ✗ Error: {error_msg}"
+                )
                 heartbeat_active = False
                 return False
             finally:
@@ -436,41 +489,55 @@ def cache_data_combination(scenario: str,
                 downloaded_types.append(cache_type)
             else:
                 error_reason = f"{cache_type}: No data available"
-                failed_combinations.append({
-                    'scenario': scenario,
-                    'model': model,
-                    'variable': variable,
-                    'reason': error_reason
-                })
-                print(f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-                      f"Caching {scenario} - {model} - {variable} ({cache_type})... ✗ No data")
+                failed_combinations.append(
+                    {
+                        "scenario": scenario,
+                        "model": model,
+                        "variable": variable,
+                        "reason": error_reason,
+                    }
+                )
+                print(
+                    f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
+                    f"Caching {scenario} - {model} - {variable} ({cache_type})... ✗ No data"
+                )
                 return False
-        
+
         # Report final status for this combination
         elapsed = time.time() - start_time
-        
+
         if all_cached and not downloaded_types:
             # Everything was already cached
-            cache_desc = " & ".join(cached_types) if len(cached_types) > 1 else cached_types[0]
-            print(f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-                  f"Checking {scenario} - {model} - {variable}... ✓ Cached ({cache_desc}) ({elapsed:.1f}s)")
+            cache_desc = (
+                " & ".join(cached_types) if len(cached_types) > 1 else cached_types[0]
+            )
+            print(
+                f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
+                f"Checking {scenario} - {model} - {variable}... ✓ Cached ({cache_desc}) ({elapsed:.1f}s)"
+            )
         elif downloaded_types:
             # Some data was downloaded
             if cached_types:
                 # Mix of cached and downloaded
                 all_types = cached_types + downloaded_types
                 type_desc = " & ".join(all_types)
-                print(f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-                      f"Caching {scenario} - {model} - {variable}... ✓ Mixed ({type_desc}) ({elapsed:.1f}s)")
+                print(
+                    f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
+                    f"Caching {scenario} - {model} - {variable}... ✓ Mixed ({type_desc}) ({elapsed:.1f}s)"
+                )
             else:
                 # All downloaded
                 type_desc = " & ".join(downloaded_types)
-                print(f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-                      f"Caching {scenario} - {model} - {variable}... ✓ Downloaded ({type_desc}) ({elapsed:.1f}s)")
-        
+                print(
+                    f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
+                    f"Caching {scenario} - {model} - {variable}... ✓ Downloaded ({type_desc}) ({elapsed:.1f}s)"
+                )
+
         # Perform cleanup if requested and we have a successful result
         if cleanup:
-            bytes_freed = cleanup_intermediate_files(scenario, model, variable, cache_dir, monthly)
+            bytes_freed = cleanup_intermediate_files(
+                scenario, model, variable, cache_dir, monthly
+            )
             if bytes_freed > 0:
                 # Convert bytes to human readable format
                 if bytes_freed > 1024**3:  # GB
@@ -479,29 +546,35 @@ def cache_data_combination(scenario: str,
                     size_str = f"{bytes_freed / (1024**2):.0f}MB"
                 else:  # KB
                     size_str = f"{bytes_freed / 1024:.0f}KB"
-                
+
                 print(f"🧹 Cleaned up intermediate files ({size_str} freed)")
-        
+
         return True
     except Exception as e:
         heartbeat_active = False
-        elapsed = time.time() - start_time if 'start_time' in locals() else 0
+        elapsed = time.time() - start_time if "start_time" in locals() else 0
         error_msg = str(e)
 
         # Store detailed error for summary
-        failed_combinations.append({
-            'scenario': scenario,
-            'model': model,
-            'variable': variable,
-            'reason': error_msg
-        })
+        failed_combinations.append(
+            {
+                "scenario": scenario,
+                "model": model,
+                "variable": variable,
+                "reason": error_msg,
+            }
+        )
 
         # Truncate very long error messages for display
         if len(error_msg) > 100:
             error_msg = error_msg[:97] + "..."
-        print(f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-              f"Caching {scenario} - {model} - {variable}... ✗ Error: {error_msg} ({elapsed:.1f}s)")
+        print(
+            f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
+            f"Caching {scenario} - {model} - {variable}... ✗ Error: {error_msg} ({elapsed:.1f}s)"
+        )
         return False
+
+
 def check_model_experiments(model_name: str, variables: List[str] = None) -> dict:
     """
     Check what experiments are available for a specific model.
@@ -514,7 +587,7 @@ def check_model_experiments(model_name: str, variables: List[str] = None) -> dic
         Dictionary with experiment availability information
     """
     if variables is None:
-        variables = ['tas']
+        variables = ["tas"]
 
     # Test each default experiment individually
     test_experiments = DEFAULT_SCENARIOS
@@ -545,10 +618,10 @@ def check_model_experiments(model_name: str, variables: List[str] = None) -> dic
                     print(f"  ✗ {exp} ({var}) - Error: {str(e)[:50]}...")
 
     return {
-        'model': model_name,
-        'available_experiments': available_experiments,
-        'failed_experiments': failed_experiments,
-        'total_tested': len(test_experiments)
+        "model": model_name,
+        "available_experiments": available_experiments,
+        "failed_experiments": failed_experiments,
+        "total_tested": len(test_experiments),
     }
 
 
@@ -564,7 +637,7 @@ def check_experiment_models(experiment: str, variables: List[str] = None) -> dic
         Dictionary with model availability information
     """
     if variables is None:
-        variables = ['tas']
+        variables = ["tas"]
 
     print(f"\n🔍 Checking model availability for {experiment}...")
 
@@ -579,47 +652,70 @@ def check_experiment_models(experiment: str, variables: List[str] = None) -> dic
             print(f"    ... and {len(available_models) - 10} more")
 
         return {
-            'experiment': experiment,
-            'available_models': available_models,
-            'total_models': len(available_models)
+            "experiment": experiment,
+            "available_models": available_models,
+            "total_models": len(available_models),
         }
 
     except Exception as e:
         print(f"  ✗ Error checking {experiment}: {e}")
         return {
-            'experiment': experiment,
-            'available_models': [],
-            'total_models': 0,
-            'error': str(e)
+            "experiment": experiment,
+            "available_models": [],
+            "total_models": 0,
+            "error": str(e),
         }
 
 
 def main():
     """Main interactive caching workflow."""
     parser = argparse.ArgumentParser(description="Bulk cache METEOR data")
-    parser.add_argument("--non-interactive", action="store_true",
-                        help="Use all defaults without prompting")
-    parser.add_argument("--scenarios", nargs="+",
-                        help="Scenarios to cache", default=None)
-    parser.add_argument("--models", nargs="+",
-                        help="Models to cache", default=None)
-    parser.add_argument("--variables", nargs="+",
-                        help="Variables to cache", default=None)
-    parser.add_argument("--check-model", type=str,
-                        help="Check what experiments are available for a specific model")
-    parser.add_argument("--check-experiment", type=str,
-                       help="Check what models are available for a specific experiment")
-    parser.add_argument("--resume", type=str,
-                       help="Resume from a checkpoint file (e.g., --resume bulk_cache_checkpoint.json)")
-    parser.add_argument("--checkpoint-file", type=str, default="bulk_cache_checkpoint.json",
-                       help="Checkpoint file name (default: bulk_cache_checkpoint.json)")
-    parser.add_argument("--monthly", action="store_true",
-                       help="Cache both annual and monthly data (default: annual only)")
-    
-    parser.add_argument("--cleanup", action="store_true",
-                       help="Remove intermediate cache files after successful training data creation (saves ~60%% storage)")
+    parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Use all defaults without prompting",
+    )
+    parser.add_argument(
+        "--scenarios", nargs="+", help="Scenarios to cache", default=None
+    )
+    parser.add_argument("--models", nargs="+", help="Models to cache", default=None)
+    parser.add_argument(
+        "--variables", nargs="+", help="Variables to cache", default=None
+    )
+    parser.add_argument(
+        "--check-model",
+        type=str,
+        help="Check what experiments are available for a specific model",
+    )
+    parser.add_argument(
+        "--check-experiment",
+        type=str,
+        help="Check what models are available for a specific experiment",
+    )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        help="Resume from a checkpoint file (e.g., --resume bulk_cache_checkpoint.json)",
+    )
+    parser.add_argument(
+        "--checkpoint-file",
+        type=str,
+        default="bulk_cache_checkpoint.json",
+        help="Checkpoint file name (default: bulk_cache_checkpoint.json)",
+    )
+    parser.add_argument(
+        "--monthly",
+        action="store_true",
+        help="Cache both annual and monthly data (default: annual only)",
+    )
 
-    args = parser.parse_args()    # Handle diagnostic commands
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Remove intermediate cache files after successful training data creation (saves ~60%% storage)",
+    )
+
+    args = parser.parse_args()  # Handle diagnostic commands
     if args.check_model:
         variables = parse_flexible_list(args.variables) or DEFAULT_VARIABLES
         check_model_experiments(args.check_model, variables)
@@ -634,17 +730,19 @@ def main():
     checkpoint_file = Path(args.checkpoint_file)
     checkpoint_data = None
     completed_combinations = []
-    
+
     if args.resume:
         resume_file = Path(args.resume)
         checkpoint_data = load_checkpoint(resume_file)
         if checkpoint_data:
             print(f"📄 Resuming from checkpoint: {args.resume}")
-            scenarios = checkpoint_data['scenarios']
-            models = checkpoint_data['models'] 
-            variables = checkpoint_data['variables']
-            completed_combinations = checkpoint_data['completed']
-            failed_combinations = checkpoint_data['failed_combinations']
+            scenarios = checkpoint_data["scenarios"]
+            models = checkpoint_data["models"]
+            variables = checkpoint_data["variables"]
+            completed_combinations = [tuple(combo) for combo in checkpoint_data["completed"]]
+            failed_combinations = checkpoint_data["failed_combinations"]
+            monthly = checkpoint_data.get("monthly", False)
+            cleanup = checkpoint_data.get("cleanup", False)
             print(f"   Already completed: {len(completed_combinations)} combinations")
             print(f"   Previous failures: {len(failed_combinations)} combinations")
         else:
@@ -657,20 +755,28 @@ def main():
             if args.non_interactive:
                 # In non-interactive mode, automatically start fresh unless --resume was specified
                 print(f"📄 Found existing checkpoint file: {checkpoint_file}")
-                print(f"   {len(checkpoint_data.get('completed', []))} combinations already completed")
-                print("🗑️ Non-interactive mode: Starting fresh (use --resume to continue from checkpoint)")
+                print(
+                    f"   {len(checkpoint_data.get('completed', []))} combinations already completed"
+                )
+                print(
+                    "🗑️ Non-interactive mode: Starting fresh (use --resume to continue from checkpoint)"
+                )
                 checkpoint_data = None  # Clear checkpoint data to use normal flow
             else:
                 # Interactive mode: ask user
-                resume_choice = input(f"\n📄 Found existing checkpoint file: {checkpoint_file}\n"
-                                    f"   {len(checkpoint_data.get('completed', []))} combinations already completed\n"
-                                    f"Resume from checkpoint? (y/n): ")
-                if resume_choice.lower() in ['y', 'yes']:
-                    scenarios = checkpoint_data['scenarios']
-                    models = checkpoint_data['models']
-                    variables = checkpoint_data['variables'] 
-                    completed_combinations = checkpoint_data['completed']
-                    failed_combinations = checkpoint_data.get('failed_combinations', [])
+                resume_choice = input(
+                    f"\n📄 Found existing checkpoint file: {checkpoint_file}\n"
+                    f"   {len(checkpoint_data.get('completed', []))} combinations already completed\n"
+                    f"Resume from checkpoint? (y/n): "
+                )
+                if resume_choice.lower() in ["y", "yes"]:
+                    scenarios = checkpoint_data["scenarios"]
+                    models = checkpoint_data["models"]
+                    variables = checkpoint_data["variables"]
+                    completed_combinations = [tuple(combo) for combo in checkpoint_data["completed"]]
+                    failed_combinations = checkpoint_data.get("failed_combinations", [])
+                    monthly = checkpoint_data.get("monthly", False)
+                    cleanup = checkpoint_data.get("cleanup", False)
                     print(f"✅ Resuming from checkpoint...")
                 else:
                     print("🗑️ Starting fresh (checkpoint file will be overwritten)")
@@ -686,36 +792,52 @@ def main():
     if not checkpoint_data:
         if not args.non_interactive:
             # Interactive mode - get user preferences
-            scenarios = parse_flexible_list(args.scenarios) if args.scenarios else get_user_input_list(
-                "Select scenarios to cache:", DEFAULT_SCENARIOS, "scenarios"
+            scenarios = (
+                parse_flexible_list(args.scenarios)
+                if args.scenarios
+                else get_user_input_list(
+                    "Select scenarios to cache:", DEFAULT_SCENARIOS, "scenarios"
+                )
             )
 
-            models = parse_flexible_list(args.models) if args.models else get_user_input_list(
-                "Select models to cache:", DEFAULT_MODELS, "models"
+            models = (
+                parse_flexible_list(args.models)
+                if args.models
+                else get_user_input_list(
+                    "Select models to cache:", DEFAULT_MODELS, "models"
+                )
             )
 
-            variables = parse_flexible_list(args.variables) if args.variables else get_user_input_list(
-                "Select variables to cache:", DEFAULT_VARIABLES, "variables"
+            variables = (
+                parse_flexible_list(args.variables)
+                if args.variables
+                else get_user_input_list(
+                    "Select variables to cache:", DEFAULT_VARIABLES, "variables"
+                )
             )
 
             # Get monthly option if not specified in command line
             if args.monthly:
                 monthly = True
-                print("Monthly mode enabled via command line (will cache both annual & monthly data)")
+                print(
+                    "Monthly mode enabled via command line (will cache both annual & monthly data)"
+                )
             else:
                 monthly = get_user_boolean_input(
-                    "\nCache both annual and monthly data? (monthly data is larger but needed for some workflows)", 
-                    default=False
+                    "\nCache both annual and monthly data? (monthly data is larger but needed for some workflows)",
+                    default=False,
                 )
 
-            # Get cleanup option if not specified in command line  
+            # Get cleanup option if not specified in command line
             if args.cleanup:
                 cleanup = True
-                print("Cleanup mode enabled via command line (will remove intermediate files)")
+                print(
+                    "Cleanup mode enabled via command line (will remove intermediate files)"
+                )
             else:
                 cleanup = get_user_boolean_input(
-                    "\nRemove intermediate cache files after successful caching? (saves ~60% storage)", 
-                    default=False
+                    "\nRemove intermediate cache files after successful caching? (saves ~60% storage)",
+                    default=False,
                 )
 
             cache_dir = get_cache_directory()
@@ -738,17 +860,23 @@ def main():
 
             print("Non-interactive mode:")
             print(f"  Scenarios ({len(scenarios)}): {', '.join(scenarios)}")
-            print(f"  Models ({len(models)}): {', '.join(models[:3])}{'...' if len(models) > 3 else ''}")
+            print(
+                f"  Models ({len(models)}): {', '.join(models[:3])}{'...' if len(models) > 3 else ''}"
+            )
             print(f"  Variables ({len(variables)}): {', '.join(variables)}")
             print(f"  Data type: {'Annual & Monthly' if monthly else 'Annual'}")
-            print(f"  Total combinations: {len(scenarios) * len(models) * len(variables)}")
+            print(
+                f"  Total combinations: {len(scenarios) * len(models) * len(variables)}"
+            )
             if cleanup:
-                print(f"  Cleanup: Enabled (will remove intermediate files to save ~60% storage)")
+                print(
+                    f"  Cleanup: Enabled (will remove intermediate files to save ~60% storage)"
+                )
 
             # Show default cache location
             default_cache = get_default_cache_location()
             print(f"  Cache location: {default_cache}")
-        
+
         completed_combinations = []
         failed_combinations = []
     else:
@@ -757,23 +885,27 @@ def main():
 
     # Get pending combinations (skip already completed ones)
     if checkpoint_data:
-        pending_combinations = get_pending_combinations(scenarios, models, variables, completed_combinations)
+        pending_combinations = get_pending_combinations(
+            scenarios, models, variables, completed_combinations
+        )
         print(f"\n📋 Resuming progress:")
         print(f"   Total combinations: {len(scenarios) * len(models) * len(variables)}")
         print(f"   Already completed: {len(completed_combinations)}")
         print(f"   Remaining to process: {len(pending_combinations)}")
     else:
-        pending_combinations = [(s, m, v) for s in scenarios for m in models for v in variables]
+        pending_combinations = [
+            (s, m, v) for s in scenarios for m in models for v in variables
+        ]
 
     # Begin caching process
     total_combinations = len(scenarios) * len(models) * len(variables)
     remaining_combinations = len(pending_combinations)
-    
+
     print(f"\nStarting bulk caching process...")
     # Begin caching process
     total_combinations = len(scenarios) * len(models) * len(variables)
     remaining_combinations = len(pending_combinations)
-    
+
     print(f"\nStarting bulk caching process...")
     print(f"Will process {remaining_combinations} combinations total")
     print("Progress: [████████████████████████████████] 100%")
@@ -788,7 +920,15 @@ def main():
     for scenario, model, variable in pending_combinations:
         current += 1
         success = cache_data_combination(
-            scenario, model, variable, cache_dir, current, total_combinations, failed_combinations, monthly, cleanup
+            scenario,
+            model,
+            variable,
+            cache_dir,
+            current,
+            total_combinations,
+            failed_combinations,
+            monthly,
+            cleanup,
         )
         if success:
             successful += 1
@@ -798,7 +938,16 @@ def main():
 
         # Save checkpoint every 5 items and at the end
         if current % 5 == 0 or current == total_combinations:
-            save_checkpoint(checkpoint_file, scenarios, models, variables, completed_combinations, failed_combinations)
+            save_checkpoint(
+                checkpoint_file,
+                scenarios,
+                models,
+                variables,
+                completed_combinations,
+                failed_combinations,
+                monthly,
+                cleanup,
+            )
 
         # Show estimated time remaining every 10 items
         if current % 10 == 0 or current == total_combinations:
@@ -808,7 +957,9 @@ def main():
                 remaining = (total_combinations - current) * avg_time
                 eta_mins = remaining / 60
                 # Progress checkpoint
-                print(f"\n    Progress: {current}/{total_combinations} completed ({successful} successful, {failed} failed)")
+                print(
+                    f"\n    Progress: {current}/{total_combinations} completed ({successful} successful, {failed} failed)"
+                )
                 print(f"    ETA: {eta_mins:.1f} minutes remaining")
                 print(f"    Checkpoint saved: {checkpoint_file}")
 
@@ -837,10 +988,12 @@ def main():
         # Group failures by reason
         failure_reasons = {}
         for failure in failed_combinations:
-            reason = failure['reason']
+            reason = failure["reason"]
             if reason not in failure_reasons:
                 failure_reasons[reason] = []
-            failure_reasons[reason].append(f"{failure['scenario']} - {failure['model']} - {failure['variable']}")
+            failure_reasons[reason].append(
+                f"{failure['scenario']} - {failure['model']} - {failure['variable']}"
+            )
 
         for reason, combinations in failure_reasons.items():
             print(f"\n🔍 Reason: {reason}")
@@ -850,7 +1003,9 @@ def main():
             if len(combinations) > 5:
                 print(f"     ... and {len(combinations) - 5} more")
 
-        print("\n💡 Note: Failures are normal when model/scenario/variable combinations")
+        print(
+            "\n💡 Note: Failures are normal when model/scenario/variable combinations"
+        )
         print("are not available in the CMIP6 archive. Consider using models and")
         print("scenarios with broader data availability for comprehensive analysis.")
 

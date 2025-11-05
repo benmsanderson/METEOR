@@ -739,7 +739,9 @@ def main():
             scenarios = checkpoint_data["scenarios"]
             models = checkpoint_data["models"]
             variables = checkpoint_data["variables"]
-            completed_combinations = [tuple(combo) for combo in checkpoint_data["completed"]]
+            completed_combinations = [
+                tuple(combo) for combo in checkpoint_data["completed"]
+            ]
             failed_combinations = checkpoint_data["failed_combinations"]
             monthly = checkpoint_data.get("monthly", False)
             cleanup = checkpoint_data.get("cleanup", False)
@@ -773,7 +775,9 @@ def main():
                     scenarios = checkpoint_data["scenarios"]
                     models = checkpoint_data["models"]
                     variables = checkpoint_data["variables"]
-                    completed_combinations = [tuple(combo) for combo in checkpoint_data["completed"]]
+                    completed_combinations = [
+                        tuple(combo) for combo in checkpoint_data["completed"]
+                    ]
                     failed_combinations = checkpoint_data.get("failed_combinations", [])
                     monthly = checkpoint_data.get("monthly", False)
                     cleanup = checkpoint_data.get("cleanup", False)

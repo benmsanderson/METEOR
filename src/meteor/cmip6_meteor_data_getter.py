@@ -410,30 +410,36 @@ class Cmip6MeteorDataGetter:
 
         cache_key = self._generate_cache_key(method_name, *args, **kwargs)
         cache_file = os.path.join(self.cache_dir, f"{cache_key}.nc")
-        
+
         # Check if file exists
         if not os.path.exists(cache_file):
             return False
-            
+
         # Validate the cached data
         try:
             dataset = xr.open_dataset(cache_file)
-            
+
             # For methods that expect specific variables, extract variable name from args
             expected_variable = None
-            if method_name in ['get_single_var_mod_data', 'get_single_var_mod_data_yearmean', 'get_single_var_mod_data_monthly']:
+            if method_name in [
+                "get_single_var_mod_data",
+                "get_single_var_mod_data_yearmean",
+                "get_single_var_mod_data_monthly",
+            ]:
                 if len(args) >= 2:
-                    expected_variable = args[1]  # fld parameter is usually second argument
-            elif method_name == 'make_meteor_training_data':
+                    expected_variable = args[
+                        1
+                    ]  # fld parameter is usually second argument
+            elif method_name == "make_meteor_training_data":
                 # For training data, we expect variables from self.flds
                 # Since we can't easily determine which specific variable to check,
                 # we'll validate that the dataset has at least one data variable
                 # and that each variable in self.flds exists if we're checking a specific scenario
                 pass  # Basic validation below should catch empty datasets
-            
+
             is_valid = self._validate_cached_data(dataset, expected_variable)
             dataset.close()
-            
+
             if not is_valid:
                 # Remove invalid cache file
                 try:
@@ -442,9 +448,9 @@ class Cmip6MeteorDataGetter:
                 except OSError:
                     pass
                 return False
-                
+
             return True
-            
+
         except Exception as e:
             # Cache file is corrupted, remove it
             try:
@@ -496,10 +502,12 @@ class Cmip6MeteorDataGetter:
         if os.path.exists(cache_path):
             try:
                 dataset = xr.open_dataset(cache_path)
-                
+
                 # Validate the cached data
                 if not self._validate_cached_data(dataset, expected_variable):
-                    logging.warning(f"Cached data at {cache_path} failed validation. Removing and re-downloading.")
+                    logging.warning(
+                        f"Cached data at {cache_path} failed validation. Removing and re-downloading."
+                    )
                     try:
                         os.remove(cache_path)
                     except OSError:
@@ -526,7 +534,9 @@ class Cmip6MeteorDataGetter:
                 return dataset
             except (OSError, ValueError, KeyError):
                 # Cache file corrupted, remove it
-                logging.warning(f"Cached data at {cache_path} is corrupted. Removing and re-downloading.")
+                logging.warning(
+                    f"Cached data at {cache_path} is corrupted. Removing and re-downloading."
+                )
                 try:
                     os.remove(cache_path)
                 except OSError:
@@ -536,14 +546,14 @@ class Cmip6MeteorDataGetter:
     def _validate_cached_data(self, dataset, expected_variable=None):
         """
         Validate that cached data is not corrupted and contains expected content.
-        
+
         Parameters
         ----------
         dataset : xr.Dataset
             Dataset to validate
         expected_variable : str, optional
             Expected variable name
-            
+
         Returns
         -------
         bool
@@ -554,32 +564,40 @@ class Cmip6MeteorDataGetter:
             if len(dataset.data_vars) == 0:
                 logging.debug("Validation failed: No data variables in cached dataset")
                 return False
-            
+
             # Check 2: If we expect a specific variable, it should be present
             if expected_variable and expected_variable not in dataset.data_vars:
-                logging.debug(f"Validation failed: Expected variable '{expected_variable}' not found in cached dataset")
+                logging.debug(
+                    f"Validation failed: Expected variable '{expected_variable}' not found in cached dataset"
+                )
                 return False
-            
+
             # Check 3: Data variables should have reasonable dimensions
             for var_name, var_data in dataset.data_vars.items():
                 if len(var_data.dims) == 0:
-                    logging.debug(f"Validation failed: Variable '{var_name}' has no dimensions")
+                    logging.debug(
+                        f"Validation failed: Variable '{var_name}' has no dimensions"
+                    )
                     return False
-                    
+
                 # Check that dimensions have reasonable sizes (not empty)
                 for dim in var_data.dims:
                     if dim in dataset.sizes and dataset.sizes[dim] == 0:
-                        logging.debug(f"Validation failed: Dimension '{dim}' has size 0")
+                        logging.debug(
+                            f"Validation failed: Dimension '{dim}' has size 0"
+                        )
                         return False
-            
+
             # Check 4: Essential coordinate variables should exist
             # Most climate data should have time coordinate
-            if 'time' in dataset.sizes and 'time' not in dataset.coords:
-                logging.debug("Validation failed: 'time' dimension exists but no time coordinate")
+            if "time" in dataset.sizes and "time" not in dataset.coords:
+                logging.debug(
+                    "Validation failed: 'time' dimension exists but no time coordinate"
+                )
                 return False
-                
+
             return True
-            
+
         except Exception as e:
             logging.debug(f"Validation failed with exception: {e}")
             return False
@@ -624,10 +642,12 @@ class Cmip6MeteorDataGetter:
             variables_to_drop = []
             if "time_bnds" in data_to_save.variables:
                 variables_to_drop.append("time_bnds")
-            
+
             if variables_to_drop:
                 data_to_save = data_to_save.drop_vars(variables_to_drop)
-                logging.debug(f"Dropped variables {variables_to_drop} before caching to avoid encoding conflicts")
+                logging.debug(
+                    f"Dropped variables {variables_to_drop} before caching to avoid encoding conflicts"
+                )
 
             data_to_save.to_netcdf(cache_path)
         except (OSError, ValueError) as e:
@@ -827,7 +847,9 @@ class Cmip6MeteorDataGetter:
             cache_key = self._generate_cache_key(
                 "get_single_var_mod_data_yearmean", exp, fld, model
             )
-            cached_data = self._load_from_cache(cache_key, expected_type="DataArray", expected_variable=fld)
+            cached_data = self._load_from_cache(
+                cache_key, expected_type="DataArray", expected_variable=fld
+            )
             if cached_data is not None:
                 return cached_data
 
@@ -838,15 +860,15 @@ class Cmip6MeteorDataGetter:
 
         # Extract the variable and standardize dimension names
         var_data = ds[fld]
-        
+
         # Standardize dimension names for compatibility
         # Some models use 'latitude'/'longitude', others use 'lat'/'lon'
         dim_mapping = {}
-        if 'latitude' in var_data.dims:
-            dim_mapping['latitude'] = 'lat'
-        if 'longitude' in var_data.dims:
-            dim_mapping['longitude'] = 'lon'
-            
+        if "latitude" in var_data.dims:
+            dim_mapping["latitude"] = "lat"
+        if "longitude" in var_data.dims:
+            dim_mapping["longitude"] = "lon"
+
         if dim_mapping:
             var_data = var_data.rename(dim_mapping)
 
@@ -887,7 +909,9 @@ class Cmip6MeteorDataGetter:
             cache_key = self._generate_cache_key(
                 "get_single_var_mod_data_monthly", exp, fld, model
             )
-            cached_data = self._load_from_cache(cache_key, expected_type="DataArray", expected_variable=fld)
+            cached_data = self._load_from_cache(
+                cache_key, expected_type="DataArray", expected_variable=fld
+            )
             if cached_data is not None:
                 return cached_data
 
@@ -898,18 +922,18 @@ class Cmip6MeteorDataGetter:
 
         # Extract the variable and standardize dimension names
         var_monthly = ds[fld]
-        
+
         # Standardize dimension names for compatibility
         # Some models use 'latitude'/'longitude', others use 'lat'/'lon'
         dim_mapping = {}
-        if 'latitude' in var_monthly.dims:
-            dim_mapping['latitude'] = 'lat'
-        if 'longitude' in var_monthly.dims:
-            dim_mapping['longitude'] = 'lon'
-            
+        if "latitude" in var_monthly.dims:
+            dim_mapping["latitude"] = "lat"
+        if "longitude" in var_monthly.dims:
+            dim_mapping["longitude"] = "lon"
+
         if dim_mapping:
             var_monthly = var_monthly.rename(dim_mapping)
-            
+
         var_monthly = var_monthly.assign_coords(
             {"time": np.arange(len(ds.time.values))}
         ).rename({"time": "month"})

@@ -221,7 +221,7 @@ def initialise_dataframe_and_models(
     return df_all, mdls
 
 
-class Cmip6MeteorDataGetter:
+class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
     """
     Cmip6MeteorDataGetter class
 
@@ -243,14 +243,14 @@ class Cmip6MeteorDataGetter:
 
     """
 
-    # pylint: disable=too-many-arguments,too-many-positional-arguments
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     def __init__(
         self,
         flds=None,
         exps=None,
         dbe=None,
         cache_dir=None,
-        enable_cache=True,
+        enable_cache=False,
         enable_compression=True,
         compression_level=6,
     ):
@@ -274,7 +274,8 @@ class Cmip6MeteorDataGetter:
         cache_dir : str, optional
             Directory to store cached data. If None, defaults to ~/.meteor/cmip6_cache
         enable_cache : bool, optional
-            Whether to enable automatic caching. Default is True.
+            Whether to enable automatic caching. Default is False.
+            Set to True to cache downloaded data locally for faster subsequent access.
         enable_compression : bool, optional
             Whether to enable netCDF4/zlib compression for cached files. Default is True.
             This can significantly reduce file sizes (typically 70-90% compression).
@@ -459,18 +460,18 @@ class Cmip6MeteorDataGetter:
                 # Remove invalid cache file
                 try:
                     os.remove(cache_file)
-                    logging.debug(f"Removed invalid cache file: {cache_file}")
+                    logging.debug("Removed invalid cache file: %s", cache_file)
                 except OSError:
                     pass
                 return False
 
             return True
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             # Cache file is corrupted, remove it
             try:
                 os.remove(cache_file)
-                logging.debug(f"Removed corrupted cache file: {cache_file} ({e})")
+                logging.debug("Removed corrupted cache file: %s (%s)", cache_file, e)
             except OSError:
                 pass
             return False
@@ -521,7 +522,8 @@ class Cmip6MeteorDataGetter:
                 # Validate the cached data
                 if not self._validate_cached_data(dataset, expected_variable):
                     logging.warning(
-                        f"Cached data at {cache_path} failed validation. Removing and re-downloading."
+                        "Cached data at %s failed validation. Removing and re-downloading.",
+                        cache_path,
                     )
                     try:
                         os.remove(cache_path)
@@ -550,7 +552,8 @@ class Cmip6MeteorDataGetter:
             except (OSError, ValueError, KeyError):
                 # Cache file corrupted, remove it
                 logging.warning(
-                    f"Cached data at {cache_path} is corrupted. Removing and re-downloading."
+                    "Cached data at %s is corrupted. Removing and re-downloading.",
+                    cache_path,
                 )
                 try:
                     os.remove(cache_path)
@@ -558,7 +561,9 @@ class Cmip6MeteorDataGetter:
                     pass
         return None
 
-    def _validate_cached_data(self, dataset, expected_variable=None):
+    def _validate_cached_data(  # pylint: disable=too-many-return-statements
+        self, dataset, expected_variable=None
+    ):
         """
         Validate that cached data is not corrupted and contains expected content.
 
@@ -583,7 +588,8 @@ class Cmip6MeteorDataGetter:
             # Check 2: If we expect a specific variable, it should be present
             if expected_variable and expected_variable not in dataset.data_vars:
                 logging.debug(
-                    f"Validation failed: Expected variable '{expected_variable}' not found in cached dataset"
+                    "Validation failed: Expected variable '%s' not found in cached dataset",
+                    expected_variable,
                 )
                 return False
 
@@ -591,7 +597,7 @@ class Cmip6MeteorDataGetter:
             for var_name, var_data in dataset.data_vars.items():
                 if len(var_data.dims) == 0:
                     logging.debug(
-                        f"Validation failed: Variable '{var_name}' has no dimensions"
+                        "Validation failed: Variable '%s' has no dimensions", var_name
                     )
                     return False
 
@@ -599,7 +605,7 @@ class Cmip6MeteorDataGetter:
                 for dim in var_data.dims:
                     if dim in dataset.sizes and dataset.sizes[dim] == 0:
                         logging.debug(
-                            f"Validation failed: Dimension '{dim}' has size 0"
+                            "Validation failed: Dimension '%s' has size 0", dim
                         )
                         return False
 
@@ -613,8 +619,8 @@ class Cmip6MeteorDataGetter:
 
             return True
 
-        except Exception as e:
-            logging.debug(f"Validation failed with exception: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logging.debug("Validation failed with exception: %s", e)
             return False
 
     def _save_to_cache(self, cache_key, data):
@@ -661,7 +667,8 @@ class Cmip6MeteorDataGetter:
             if variables_to_drop:
                 data_to_save = data_to_save.drop_vars(variables_to_drop)
                 logging.debug(
-                    f"Dropped variables {variables_to_drop} before caching to avoid encoding conflicts"
+                    "Dropped variables %s before caching to avoid encoding conflicts",
+                    variables_to_drop,
                 )
 
             # Set up compression options
@@ -687,11 +694,13 @@ class Cmip6MeteorDataGetter:
 
                 data_to_save.to_netcdf(cache_path, encoding=encoding)
                 logging.debug(
-                    f"Saved compressed cache file (level {self.compression_level}) to {cache_path}"
+                    "Saved compressed cache file (level %s) to %s",
+                    self.compression_level,
+                    cache_path,
                 )
             else:
                 data_to_save.to_netcdf(cache_path)
-                logging.debug(f"Saved uncompressed cache file to {cache_path}")
+                logging.debug("Saved uncompressed cache file to %s", cache_path)
         except (OSError, ValueError) as e:
             # Failed to cache, but don't raise error
             logging.warning(
@@ -856,7 +865,7 @@ class Cmip6MeteorDataGetter:
         # so limiting to first 50 years has no impact on scientific results
         if exp == "piControl" and len(fld_data.time) > 600:  # 50 years * 12 months
             print(
-                f"   Limiting piControl data to first 50 years (was {len(fld_data.time)//12} years)"
+                f"   Limiting piControl data to first 50 years (was {len(fld_data.time) // 12} years)"
             )
             fld_data = fld_data.isel(time=slice(0, 600))  # First 50 years (600 months)
 

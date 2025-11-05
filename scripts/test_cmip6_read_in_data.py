@@ -1,15 +1,9 @@
 import os
-import sys
-import numpy as np
+
 import matplotlib.pyplot as plt
-import xarray as xr
+import numpy as np
 
-from functools import partial
-from ciceroscm import input_handler
-
-from meteor import prpatt
-from meteor import Cmip6MeteorDataGetter
-from meteor.cmip6_meteor_data_getter import multiply_along_axis
+from meteor import Cmip6MeteorDataGetter, prpatt
 
 # plt.show()
 #
@@ -20,8 +14,11 @@ fld = "tas"
 exps_to_show = ["abrupt-4xCO2", "historical", "ssp245"]
 exps = ["abrupt-4xCO2", "historical", "ssp245", "piControl"]
 data_getter = Cmip6MeteorDataGetter(
-    flds=[fld], exps=exps, dbe=["CMIP", "CMIP", "ScenarioMIP", "CMIP"]
-)  #'CMIP',
+    flds=[fld],
+    exps=exps,
+    dbe=["CMIP", "CMIP", "ScenarioMIP", "CMIP"],
+    enable_cache=True,  # Enable caching for faster repeated access
+)  # 'CMIP',
 models_total = data_getter.get_models_avail()
 print(models_total)
 to_remove = [

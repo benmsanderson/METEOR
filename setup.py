@@ -1,7 +1,6 @@
 import os
 
 from setuptools import find_packages, setup
-from setuptools.command.test import test as TestCommand
 
 import versioneer
 
@@ -12,7 +11,7 @@ AUTHORS = [
 URL = "https://github.com/benmsanderson/METEOR"
 
 DESCRIPTION = "METEOR precepitation pattern scaling emulator"
-README = "README.rst"
+README = "README.md"
 
 SOURCE_DIR = "src"
 
@@ -83,49 +82,50 @@ PACKAGE_DIR = {"": SOURCE_DIR}
 PACKAGE_DATA = {"meteor": [os.path.join("default_scm_data", "*.txt")]}
 
 # Get the long description from the README file
-with open(README, "r") as f:
-    README_LINES = ["meteor", "==============", ""]
-    add_line = False
-    for line in f:
-        if line.strip() == ".. sec-begin-long-description":
-            add_line = True
-        elif line.strip() == ".. sec-end-long-description":
-            break
-        elif add_line:
-            README_LINES.append(line.strip())
+with open(README, "r", encoding="utf-8") as f:
+    README_CONTENT = f.read()
 
+# Extract content between Quick Start and Installation for description
+README_LINES = []
+lines = README_CONTENT.split("\n")
+in_description = False
+for line in lines:
+    if line.startswith("METEOR is a spatial climate emulator"):
+        in_description = True
+    elif line.startswith("## Quick Start"):
+        break
+    if in_description:
+        README_LINES.append(line)
+
+# If no specific description found, use the first few meaningful lines
 if len(README_LINES) < 3:
-    raise RuntimeError("Insufficient description given")
+    README_LINES = []
+    for line in lines[:20]:  # Take first 20 lines
+        if line.strip() and not line.startswith("#") and not line.startswith("[!["):
+            README_LINES.append(line)
+        if len(README_LINES) >= 5:  # Stop after we have a good description
+            break
 
-
-class meteor(TestCommand):
-    def finalize_options(self):
-        TestCommand.finalize_options(self)
-        self.test_args = []
-        self.test_suite = True
-
-    def run_tests(self):
-        import pytest
-
-        pytest.main(self.test_args)
+if len(README_LINES) < 1:
+    README_LINES = [
+        "METEOR: Multivariate Emulation of Time-Evolving and Overlapping Responses"
+    ]
 
 
 cmdclass = versioneer.get_cmdclass()
-cmdclass.update({"test": meteor})
 
 setup(
     name=PACKAGE_NAME,
     version=versioneer.get_version(),
     description=DESCRIPTION,
     long_description="\n".join(README_LINES),
-    long_description_content_type="text/x-rst",
+    long_description_content_type="text/markdown",
     author=", ".join([author[0] for author in AUTHORS]),
     author_email=", ".join([author[1] for author in AUTHORS]),
     url=URL,
-    license="Apache 2.0",
+    license="Apache-2.0",
     classifiers=[  # full list at https://pypi.org/pypi?%3Aaction=list_classifiers
         "Development Status :: 4 - Beta",
-        "License :: OSI Approved :: Apache Software License",
         "Intended Audience :: Developers",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3.8",

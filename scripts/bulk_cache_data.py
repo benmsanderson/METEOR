@@ -16,8 +16,8 @@ METEOR analysis workflows.
 import argparse
 import json
 import sys
-import time
 import threading
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -151,6 +151,7 @@ def get_default_cache_location() -> str:
         temp_getter = Cmip6MeteorDataGetter(
             exps=["piControl"],
             flds=["tas"],
+            enable_cache=True,  # Enable cache to get cache_dir
             enable_compression=False,  # No compression needed for validation
         )
         return temp_getter.cache_dir
@@ -286,6 +287,7 @@ def cleanup_intermediate_files(
             temp_getter = Cmip6MeteorDataGetter(
                 exps=[scenario],
                 flds=[variable],
+                enable_cache=True,  # Enable cache to get cache_dir
                 enable_compression=False,  # No compression needed for validation
             )
             cache_dir = Path(temp_getter.cache_dir)
@@ -343,11 +345,11 @@ def confirm_caching_plan(
     )
 
     if cleanup:
-        print(f"Cleanup: Enabled (will remove intermediate files to save ~60% storage)")
+        print("Cleanup: Enabled (will remove intermediate files to save ~60% storage)")
 
     if data_type == "Annual & Monthly":
         print(
-            f"\nThis will download and cache both annual and monthly data for all combinations."
+            "\nThis will download and cache both annual and monthly data for all combinations."
         )
     else:
         print(
@@ -370,6 +372,8 @@ def cache_data_combination(
     failed_combinations: List,
     monthly: bool = False,
     cleanup: bool = False,
+    enable_compression: bool = True,
+    compression_level: int = 6,
 ) -> bool:
     """
     Cache data for a specific scenario/model/variable combination.
@@ -409,24 +413,23 @@ def cache_data_combination(
         for is_monthly in cache_types:
             # Initialize a fresh data getter for this specific scenario/variable combo
             # This avoids the issue where models are filtered out if they don't have ALL scenarios
-            enable_compression = (
-                not args.no_compression
-            )  # Compression enabled by default
-            compression_level = args.compression_level if enable_compression else 6
+            compression_level_to_use = compression_level if enable_compression else 6
             if cache_dir:
                 data_getter = Cmip6MeteorDataGetter(
                     cache_dir=str(cache_dir),
                     exps=[scenario],
                     flds=[variable],
+                    enable_cache=True,  # Explicitly enable caching for bulk download
                     enable_compression=enable_compression,
-                    compression_level=compression_level,
+                    compression_level=compression_level_to_use,
                 )
             else:
                 data_getter = Cmip6MeteorDataGetter(
                     exps=[scenario],
                     flds=[variable],
+                    enable_cache=True,  # Explicitly enable caching for bulk download
                     enable_compression=enable_compression,
-                    compression_level=compression_level,
+                    compression_level=compression_level_to_use,
                 )
 
             # Check if this specific data type is already cached (fast check)
@@ -506,7 +509,7 @@ def cache_data_combination(
 
             except KeyboardInterrupt:
                 # Allow user to interrupt gracefully
-                print(f"\n\nInterrupted by user. Progress saved.")
+                print("\n\nInterrupted by user. Progress saved.")
                 raise
             except Exception as download_error:
                 # Handle download-specific errors
@@ -653,6 +656,7 @@ def check_model_experiments(model_name: str, variables: List[str] = None) -> dic
                 temp_getter = Cmip6MeteorDataGetter(
                     exps=[exp],
                     flds=[var],
+                    enable_cache=False,  # No cache needed for validation
                     enable_compression=False,  # No compression needed for validation
                 )
 
@@ -699,6 +703,7 @@ def check_experiment_models(experiment: str, variables: List[str] = None) -> dic
         temp_getter = Cmip6MeteorDataGetter(
             exps=[experiment],
             flds=variables,
+            enable_cache=False,  # No cache needed for model listing
             enable_compression=False,  # No compression needed for validation
         )
         available_models = temp_getter.models
@@ -852,7 +857,7 @@ def main():
                     failed_combinations = checkpoint_data.get("failed_combinations", [])
                     monthly = checkpoint_data.get("monthly", False)
                     cleanup = checkpoint_data.get("cleanup", False)
-                    print(f"✅ Resuming from checkpoint...")
+                    print("✅ Resuming from checkpoint...")
                 else:
                     print("🗑️ Starting fresh (checkpoint file will be overwritten)")
                     checkpoint_data = None  # Clear checkpoint data to use normal flow
@@ -945,7 +950,7 @@ def main():
             )
             if cleanup:
                 print(
-                    f"  Cleanup: Enabled (will remove intermediate files to save ~60% storage)"
+                    "  Cleanup: Enabled (will remove intermediate files to save ~60% storage)"
                 )
 
             # Show default cache location
@@ -963,7 +968,7 @@ def main():
         pending_combinations = get_pending_combinations(
             scenarios, models, variables, completed_combinations
         )
-        print(f"\n📋 Resuming progress:")
+        print("\n📋 Resuming progress:")
         print(f"   Total combinations: {len(scenarios) * len(models) * len(variables)}")
         print(f"   Already completed: {len(completed_combinations)}")
         print(f"   Remaining to process: {len(pending_combinations)}")
@@ -976,12 +981,12 @@ def main():
     total_combinations = len(scenarios) * len(models) * len(variables)
     remaining_combinations = len(pending_combinations)
 
-    print(f"\nStarting bulk caching process...")
+    print("\nStarting bulk caching process...")
     # Begin caching process
     total_combinations = len(scenarios) * len(models) * len(variables)
     remaining_combinations = len(pending_combinations)
 
-    print(f"\nStarting bulk caching process...")
+    print("\nStarting bulk caching process...")
     print(f"Will process {remaining_combinations} combinations total")
     print("Progress: [████████████████████████████████] 100%")
     print("Legend: ✓ = Success, ✗ = Failed/No data")
@@ -1004,6 +1009,8 @@ def main():
             failed_combinations,
             monthly,
             cleanup,
+            not args.no_compression,  # enable_compression
+            args.compression_level,   # compression_level
         )
         if success:
             successful += 1
@@ -1041,7 +1048,7 @@ def main():
     # Clean up checkpoint file on successful completion
     if checkpoint_file.exists() and failed == 0:
         checkpoint_file.unlink()
-        print(f"\n✅ All combinations completed successfully. Checkpoint file removed.")
+        print("\n✅ All combinations completed successfully. Checkpoint file removed.")
 
     # Final newline after progress bar
     print()

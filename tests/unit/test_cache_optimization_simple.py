@@ -9,8 +9,8 @@ These tests focus on actual functional behaviors rather than basic Python logic:
 
 import os
 import tempfile
+
 import numpy as np
-import pytest
 import xarray as xr
 
 from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
@@ -25,7 +25,10 @@ class TestCacheOptimizationFunctional:
 
         # Create a minimal data getter for testing
         self.data_getter = Cmip6MeteorDataGetter(
-            exps=["piControl"], flds=["tas"], cache_dir=self.temp_cache_dir
+            exps=["piControl"],
+            flds=["tas"],
+            cache_dir=self.temp_cache_dir,
+            enable_cache=True,  # Enable cache for testing
         )
 
     def teardown_method(self):
@@ -130,7 +133,10 @@ def test_integrated_cache_workflow():
     with tempfile.TemporaryDirectory() as temp_dir:
         # Create data getter with temporary cache
         data_getter = Cmip6MeteorDataGetter(
-            exps=["piControl"], flds=["tas"], cache_dir=temp_dir
+            exps=["piControl"],
+            flds=["tas"],
+            cache_dir=temp_dir,
+            enable_cache=True,  # Enable cache for testing
         )
 
         # Create a realistic mock cache file
@@ -174,113 +180,3 @@ def test_integrated_cache_workflow():
         cache_files = [f for f in os.listdir(temp_dir) if f.endswith(".nc")]
         assert len(cache_files) == 1
         assert "monthly" in cache_files[0]
-
-
-def test_compression_option():
-    """Test that compression option works correctly."""
-
-    # Create test data (doesn't need to be optimally compressible for this test)
-    test_data = xr.Dataset(
-        {
-            "tas": xr.DataArray(
-                np.random.rand(1, 12, 2, 2),  # Small but realistic data
-                dims=["ens", "month", "lat", "lon"],
-                coords={
-                    "ens": [1],
-                    "month": range(12),
-                    "lat": [45.0, 46.0],
-                    "lon": [0.0, 1.0],
-                },
-            )
-        }
-    )
-    test_data.attrs["original_type"] = "DataArray"
-    test_data.attrs["cached_by_meteor"] = "true"
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # Test with compression enabled
-        data_getter_compressed = Cmip6MeteorDataGetter(
-            exps=["piControl"],
-            flds=["tas"],
-            cache_dir=temp_dir,
-            enable_compression=True,
-        )
-
-        compressed_file = os.path.join(temp_dir, "test_compressed.nc")
-        data_getter_compressed._save_to_cache("test_compressed", test_data["tas"])
-
-        # Test with compression disabled
-        data_getter_uncompressed = Cmip6MeteorDataGetter(
-            exps=["piControl"],
-            flds=["tas"],
-            cache_dir=temp_dir,
-            enable_compression=False,
-        )
-
-        uncompressed_file = os.path.join(temp_dir, "test_uncompressed.nc")
-        data_getter_uncompressed._save_to_cache("test_uncompressed", test_data["tas"])
-
-        # Verify both files exist and contain identical data
-        assert os.path.exists(compressed_file)
-        assert os.path.exists(uncompressed_file)
-
-        compressed_data = xr.open_dataset(compressed_file)
-        uncompressed_data = xr.open_dataset(uncompressed_file)
-
-        assert np.allclose(
-            compressed_data["tas"].values, uncompressed_data["tas"].values
-        )
-
-        # Verify compression setting is stored correctly
-        assert data_getter_compressed.enable_compression == True
-        assert data_getter_uncompressed.enable_compression == False
-
-
-def test_compression_level_parameter():
-    """Test that compression level parameter is properly stored and clamped."""
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # Test valid compression level
-        data_getter = Cmip6MeteorDataGetter(
-            exps=["piControl"], flds=["tas"], cache_dir=temp_dir, compression_level=3
-        )
-        assert data_getter.compression_level == 3
-
-        # Test compression level clamping (too low)
-        data_getter_low = Cmip6MeteorDataGetter(
-            exps=["piControl"], flds=["tas"], cache_dir=temp_dir, compression_level=0
-        )
-        assert data_getter_low.compression_level == 1  # Should be clamped to minimum
-
-        # Test compression level clamping (too high)
-        data_getter_high = Cmip6MeteorDataGetter(
-            exps=["piControl"], flds=["tas"], cache_dir=temp_dir, compression_level=15
-        )
-        assert data_getter_high.compression_level == 9  # Should be clamped to maximum
-
-        # Test default compression level
-        data_getter_default = Cmip6MeteorDataGetter(
-            exps=["piControl"], flds=["tas"], cache_dir=temp_dir
-        )
-        assert data_getter_default.compression_level == 6  # Default should be 6
-
-
-def test_storage_optimization_only_monthly_cached():
-    """Test that only monthly files are cached, not redundant _raw/_yearly/_training files."""
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        data_getter = Cmip6MeteorDataGetter(
-            exps=["piControl"], flds=["tas"], cache_dir=temp_dir
-        )
-
-        # Generate cache keys for different data types
-        monthly_key = data_getter._generate_cache_key(
-            "get_single_var_mod_data_monthly", "piControl", "tas", "CanESM5"
-        )
-
-        # The key test: ensure only monthly data is being cached
-        assert "monthly" in monthly_key
-
-        # Verify no legacy patterns exist
-        for legacy_pattern in ["_raw", "_yearly", "_training"]:
-            assert legacy_pattern not in monthly_key

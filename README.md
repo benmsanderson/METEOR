@@ -193,29 +193,38 @@ ensemble = xr.concat(realizations, dim='realization')
 
 ### Local Data Caching
 
-METEOR automatically sets up local caching to improve performance when accessing CMIP6 data:
+METEOR accesses CMIP6 climate model data from Google Cloud Storage. By default, data is downloaded on-demand **without local caching**.
+
+#### Optional Caching (Recommended for Repeated Use)
+
+For improved performance when repeatedly accessing the same data, you can enable local caching:
 
 - **Default cache location**: `~/.meteor/cmip6_cache/`
 - **Purpose**: Stores downloaded CMIP6 data locally to avoid repeated downloads
 - **Benefits**: Significantly faster repeated data access, reduced bandwidth usage
-- **Storage**: NetCDF files with automatic metadata tagging
+- **Storage**: Compressed NetCDF files with automatic metadata tagging
 
 #### Cache Configuration
 ```python
-# Default: Caching enabled with automatic location
-data_getter = Cmip6MeteorDataGetter()
+# Enable caching (recommended for repeated use)
+data_getter = Cmip6MeteorDataGetter(enable_cache=True)
 
 # Custom cache directory
-data_getter = Cmip6MeteorDataGetter(cache_dir="/custom/path/to/cache")
+data_getter = Cmip6MeteorDataGetter(enable_cache=True, cache_dir="/custom/path/to/cache")
 
-# Disable caching
-data_getter = Cmip6MeteorDataGetter(enable_cache=False)
+# Default: No caching (data downloaded each time)
+data_getter = Cmip6MeteorDataGetter()  # or enable_cache=False
 
-# Clear cache when needed
+# Clear cache when needed (if caching was enabled)
 data_getter.clear_cache()
 ```
 
-**Note**: The first time you run METEOR, you'll see a log message about cache setup. If directory creation fails due to permissions, caching will be automatically disabled but METEOR will continue to function normally.
+**Storage Considerations:**
+- Each model/scenario/variable: ~10-50 MB (compressed)
+- Full multi-model ensemble: Can reach several GB
+- Enable caching only if you have sufficient disk space and plan to reuse data
+
+**Note**: If you enable caching and directory creation fails due to permissions, caching will be automatically disabled but METEOR will continue to function normally.
 
 #### Multi-variable Processing
 ```python

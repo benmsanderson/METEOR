@@ -73,8 +73,6 @@ def save_checkpoint(
     variables: List[str],
     completed: List[tuple],
     failed_combinations: List,
-    monthly: bool = False,
-    cleanup: bool = False,
 ):
     """Save progress checkpoint to file."""
     checkpoint_data = {
@@ -83,8 +81,6 @@ def save_checkpoint(
         "variables": variables,
         "completed": completed,
         "failed_combinations": failed_combinations,
-        "monthly": monthly,
-        "cleanup": cleanup,
         "timestamp": time.time(),
     }
 
@@ -250,111 +246,25 @@ def get_cache_directory() -> Optional[Path]:
         return cache_path
 
 
-def cleanup_intermediate_files(
-    scenario: str,
-    model: str,
-    variable: str,
-    cache_dir: Optional[Path],
-    monthly: bool = False,
-) -> int:
-    """
-    Clean up intermediate cache files after successful training data creation.
-
-    Removes *_raw.nc, *_yearly.nc, and *_monthly.nc files while keeping
-    *_training_yearly.nc and *_training_monthly.nc files.
-
-    Parameters
-    ----------
-    scenario : str
-        Scenario name
-    model : str
-        Model name
-    variable : str
-        Variable name
-    cache_dir : Optional[Path]
-        Cache directory path
-    monthly : bool
-        Whether monthly data was cached
-
-    Returns
-    -------
-    int
-        Number of bytes freed
-    """
-    if cache_dir is None:
-        # Use the same logic as the data getter to find the cache directory
-        try:
-            temp_getter = Cmip6MeteorDataGetter(
-                exps=[scenario],
-                flds=[variable],
-                enable_cache=True,  # Enable cache to get cache_dir
-                enable_compression=False,  # No compression needed for validation
-            )
-            cache_dir = Path(temp_getter.cache_dir)
-        except Exception:
-            # Fallback to repository cache
-            cache_dir = Path(".cache/cmip6")
-    else:
-        cache_dir = Path(cache_dir)
-
-    bytes_freed = 0
-    files_to_remove = []
-
-    # Intermediate files to clean up
-    intermediate_patterns = [
-        f"{model}_{scenario}_{variable}_raw.nc",
-        f"{model}_{scenario}_{variable}_yearly.nc",
-    ]
-
-    if monthly:
-        intermediate_patterns.append(f"{model}_{scenario}_{variable}_monthly.nc")
-
-    for pattern in intermediate_patterns:
-        file_path = cache_dir / pattern
-        if file_path.exists():
-            try:
-                file_size = file_path.stat().st_size
-                file_path.unlink()
-                files_to_remove.append(pattern)
-                bytes_freed += file_size
-            except OSError as e:
-                print(f"Warning: Could not remove {pattern}: {e}")
-
-    return bytes_freed
-
-
 def confirm_caching_plan(
     scenarios: List[str],
     models: List[str],
     variables: List[str],
-    monthly: bool = False,
-    cleanup: bool = False,
 ) -> bool:
     """Display caching plan and get user confirmation."""
-    data_type = "Annual & Monthly" if monthly else "Annual"
     print("\n" + "=" * 60)
     print("CACHING PLAN SUMMARY")
     print("=" * 60)
     print(f"Scenarios ({len(scenarios)}): {', '.join(scenarios)}")
     print(f"Models ({len(models)}): {', '.join(models)}")
     print(f"Variables ({len(variables)}): {', '.join(variables)}")
-    print(f"Data type: {data_type}")
     total_combinations = len(scenarios) * len(models) * len(variables)
     print(
         f"Total combinations: {len(scenarios)} × {len(models)} × {len(variables)} = {total_combinations}"
     )
 
-    if cleanup:
-        print("Cleanup: Enabled (will remove intermediate files to save ~60% storage)")
-
-    if data_type == "Annual & Monthly":
-        print(
-            "\nThis will download and cache both annual and monthly data for all combinations."
-        )
-    else:
-        print(
-            f"\nThis will download and cache {data_type.lower()} data for all combinations."
-        )
+    print("\nThis will download and cache monthly data for all combinations.")
+    print("(Annual data is computed on-demand from monthly cache)")
     print("Depending on your internet connection, this may take considerable time.")
     print("=" * 60)
 
@@ -370,8 +280,6 @@ def cache_data_combination(
     current: int,
     total: int,
     failed_combinations: List,
-    monthly: bool = False,
-    cleanup: bool = False,
     enable_compression: bool = True,
     compression_level: int = 6,
 ) -> bool:
@@ -398,210 +306,140 @@ def cache_data_combination(
         # Add a timestamp for debugging
         start_time = time.time()
 
-        # Initialize data getters for the cache types we need
-        # If monthly flag is set, cache both annual and monthly data
-        cache_types = []
-        if monthly:
-            cache_types = [False, True]  # Annual first, then monthly
+        # Initialize data getter for this specific scenario/variable combo
+        # This avoids the issue where models are filtered out if they don't have ALL scenarios
+        compression_level_to_use = compression_level if enable_compression else 6
+        if cache_dir:
+            data_getter = Cmip6MeteorDataGetter(
+                cache_dir=str(cache_dir),
+                exps=[scenario],
+                flds=[variable],
+                enable_cache=True,  # Explicitly enable caching for bulk download
+                enable_compression=enable_compression,
+                compression_level=compression_level_to_use,
+            )
         else:
-            cache_types = [False]  # Just annual
-
-        all_cached = True
-        cached_types = []
-        downloaded_types = []
-
-        for is_monthly in cache_types:
-            # Initialize a fresh data getter for this specific scenario/variable combo
-            # This avoids the issue where models are filtered out if they don't have ALL scenarios
-            compression_level_to_use = compression_level if enable_compression else 6
-            if cache_dir:
-                data_getter = Cmip6MeteorDataGetter(
-                    cache_dir=str(cache_dir),
-                    exps=[scenario],
-                    flds=[variable],
-                    enable_cache=True,  # Explicitly enable caching for bulk download
-                    enable_compression=enable_compression,
-                    compression_level=compression_level_to_use,
-                )
-            else:
-                data_getter = Cmip6MeteorDataGetter(
-                    exps=[scenario],
-                    flds=[variable],
-                    enable_cache=True,  # Explicitly enable caching for bulk download
-                    enable_compression=enable_compression,
-                    compression_level=compression_level_to_use,
-                )
+            data_getter = Cmip6MeteorDataGetter(
+                exps=[scenario],
+                flds=[variable],
+                enable_cache=True,  # Explicitly enable caching for bulk download
+                enable_compression=enable_compression,
+                compression_level=compression_level_to_use,
+            )
 
             # Check if this specific data type is already cached (fast check)
             # NEW OPTIMIZATION: Check for variable-specific monthly cache instead of training data
             # This allows flexible variable combinations and avoids redundant storage
-            if is_monthly:
-                # For monthly data, check if monthly variable cache exists
-                cache_exists = data_getter.is_cached(
-                    "get_single_var_mod_data_monthly", scenario, variable, model
-                )
-            else:
-                # For annual data, also check monthly cache since we compute annual on-the-fly
-                cache_exists = data_getter.is_cached(
-                    "get_single_var_mod_data_monthly", scenario, variable, model
-                )
+        # Check if monthly data is already cached
+        cache_exists = data_getter.is_cached(
+            "get_single_var_mod_data_monthly", scenario, variable, model
+        )
 
-            if cache_exists:
-                cache_type = "monthly" if is_monthly else "annual"
-                cached_types.append(cache_type)
-                continue
-
-            # This data type is not cached
-            all_cached = False
-            cache_type = "monthly" if is_monthly else "annual"
-
+        if cache_exists:
+            elapsed = time.time() - start_time
             print(
                 f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-                f"Caching {scenario} - {model} - {variable} ({cache_type})... ",
-                end="",
-                flush=True,
+                f"Checking {scenario} - {model} - {variable}... ✓ Cached (monthly) ({elapsed:.1f}s)"
             )
-            # Add periodic heartbeat for long downloads
-            heartbeat_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-            heartbeat_active = True
-            heartbeat_counter = [0]
+            return True
 
-            def heartbeat():
-                while heartbeat_active:
-                    if time.time() - start_time > 2:  # Show after 2 seconds
-                        char = heartbeat_chars[
-                            heartbeat_counter[0] % len(heartbeat_chars)
-                        ]
-                        print(
-                            f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-                            f"Caching {scenario} - {model} - {variable} ({cache_type})... {char}",
-                            end="",
-                            flush=True,
-                        )
-                        heartbeat_counter[0] += 1
-                    time.sleep(0.3)
+        # Data not cached - need to download
+        print(
+            f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
+            f"Caching {scenario} - {model} - {variable} (monthly)... ",
+            end="",
+            flush=True,
+        )
 
-            # Start heartbeat in background for long operations
-            heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
-            heartbeat_thread.start()
+        # Add periodic heartbeat for long downloads
+        heartbeat_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        heartbeat_active = True
+        heartbeat_counter = [0]
 
-            try:
-                # NEW OPTIMIZATION: Cache only monthly variable-specific data
-                # This avoids redundant storage and enables flexible variable combinations
-
-                # Always cache monthly data (raw source)
-                monthly_data = data_getter.get_single_var_mod_data_monthly(
-                    scenario, variable, model
-                )
-
-                # For validation, also ensure the data can be used for training
-                # but don't cache the training data itself (computed on-the-fly)
-                if is_monthly:
-                    # For monthly requests, just validate we can create training data
-                    _ = data_getter.make_meteor_training_data(
-                        scenario, model, variable, monthly=True
+        def heartbeat():
+            while heartbeat_active:
+                if time.time() - start_time > 2:  # Show after 2 seconds
+                    char = heartbeat_chars[heartbeat_counter[0] % len(heartbeat_chars)]
+                    print(
+                        f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
+                        f"Caching {scenario} - {model} - {variable} (monthly)... {char}",
+                        end="",
+                        flush=True,
                     )
-                else:
-                    # For annual requests, validate we can create yearly training data
-                    _ = data_getter.make_meteor_training_data(
-                        scenario, model, variable, monthly=False
-                    )
+                    heartbeat_counter[0] += 1
+                time.sleep(0.3)
 
-            except KeyboardInterrupt:
-                # Allow user to interrupt gracefully
-                print("\n\nInterrupted by user. Progress saved.")
-                raise
-            except Exception as download_error:
-                # Handle download-specific errors
-                elapsed = time.time() - start_time
-                error_msg = str(download_error)
+        # Start heartbeat in background for long operations
+        heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
+        heartbeat_thread.start()
 
-                # Store detailed error for summary
-                failed_combinations.append(
-                    {
-                        "scenario": scenario,
-                        "model": model,
-                        "variable": variable,
-                        "reason": f"{cache_type}: {error_msg}",
-                    }
-                )
+        try:
+            # Cache monthly data (raw source)
+            # Annual data is computed on-demand (40-80x faster than caching)
+            monthly_data = data_getter.get_single_var_mod_data_monthly(
+                scenario, variable, model
+            )
 
-                # Truncate very long error messages for display
-                if len(error_msg) > 100:
-                    error_msg = error_msg[:97] + "..."
-                print(
-                    f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-                    f"Caching {scenario} - {model} - {variable} ({cache_type})... ✗ Error: {error_msg}"
-                )
-                heartbeat_active = False
-                return False
-            finally:
-                heartbeat_active = False
+            # For validation, also ensure the data can be used for training
+            # (but don't cache the training data itself - computed on-the-fly)
+            _ = data_getter.make_meteor_training_data(
+                scenario, model, variable, monthly=True
+            )
 
-            if monthly_data is not None:
-                downloaded_types.append(cache_type)
-            else:
-                error_reason = f"{cache_type}: No data available"
-                failed_combinations.append(
-                    {
-                        "scenario": scenario,
-                        "model": model,
-                        "variable": variable,
-                        "reason": error_reason,
-                    }
-                )
-                print(
-                    f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-                    f"Caching {scenario} - {model} - {variable} ({cache_type})... ✗ No data"
-                )
-                return False
+        except KeyboardInterrupt:
+            # Allow user to interrupt gracefully
+            print("\n\nInterrupted by user. Progress saved.")
+            heartbeat_active = False
+            raise
+        except Exception as download_error:
+            # Handle download-specific errors
+            heartbeat_active = False
+            elapsed = time.time() - start_time
+            error_msg = str(download_error)
 
-        # Report final status for this combination
+            # Store detailed error for summary
+            failed_combinations.append(
+                {
+                    "scenario": scenario,
+                    "model": model,
+                    "variable": variable,
+                    "reason": error_msg,
+                }
+            )
+
+            # Truncate very long error messages for display
+            if len(error_msg) > 100:
+                error_msg = error_msg[:97] + "..."
+            print(
+                f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
+                f"Caching {scenario} - {model} - {variable} (monthly)... ✗ Error: {error_msg}"
+            )
+            return False
+        finally:
+            heartbeat_active = False
+
+        # Check if data was successfully retrieved
+        if monthly_data is None:
+            failed_combinations.append(
+                {
+                    "scenario": scenario,
+                    "model": model,
+                    "variable": variable,
+                    "reason": "No data available",
+                }
+            )
+            print(
+                f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
+                f"Caching {scenario} - {model} - {variable} (monthly)... ✗ No data"
+            )
+            return False
+
+        # Report success
         elapsed = time.time() - start_time
-
-        if all_cached and not downloaded_types:
-            # Everything was already cached
-            cache_desc = (
-                " & ".join(cached_types) if len(cached_types) > 1 else cached_types[0]
-            )
-            print(
-                f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-                f"Checking {scenario} - {model} - {variable}... ✓ Cached ({cache_desc}) ({elapsed:.1f}s)"
-            )
-        elif downloaded_types:
-            # Some data was downloaded
-            if cached_types:
-                # Mix of cached and downloaded
-                all_types = cached_types + downloaded_types
-                type_desc = " & ".join(all_types)
-                print(
-                    f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-                    f"Caching {scenario} - {model} - {variable}... ✓ Mixed ({type_desc}) ({elapsed:.1f}s)"
-                )
-            else:
-                # All downloaded
-                type_desc = " & ".join(downloaded_types)
-                print(
-                    f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
-                    f"Caching {scenario} - {model} - {variable}... ✓ Downloaded ({type_desc}) ({elapsed:.1f}s)"
-                )
-
-        # Perform cleanup if requested and we have a successful result
-        if cleanup:
-            bytes_freed = cleanup_intermediate_files(
-                scenario, model, variable, cache_dir, monthly
-            )
-            if bytes_freed > 0:
-                # Convert bytes to human readable format
-                if bytes_freed > 1024**3:  # GB
-                    size_str = f"{bytes_freed / (1024**3):.1f}GB"
-                elif bytes_freed > 1024**2:  # MB
-                    size_str = f"{bytes_freed / (1024**2):.0f}MB"
-                else:  # KB
-                    size_str = f"{bytes_freed / 1024:.0f}KB"
-
-                print(f"🧹 Cleaned up intermediate files ({size_str} freed)")
-
+        print(
+            f"\r[{bar}] {progress:5.1f}% ({current}/{total}) "
+            f"Caching {scenario} - {model} - {variable}... ✓ Downloaded (monthly) ({elapsed:.1f}s)"
+        )
         return True
     except Exception as e:
         heartbeat_active = False
@@ -767,17 +605,6 @@ def main():
         help="Checkpoint file name (default: bulk_cache_checkpoint.json)",
     )
     parser.add_argument(
-        "--monthly",
-        action="store_true",
-        help="Cache both annual and monthly data (default: annual only)",
-    )
-
-    parser.add_argument(
-        "--cleanup",
-        action="store_true",
-        help="Remove intermediate cache files after successful training data creation (saves ~60%% storage)",
-    )
-    parser.add_argument(
         "--no-compression",
         action="store_true",
         help="Disable netCDF4/zlib compression for cached files (compression is enabled by default)",
@@ -819,8 +646,6 @@ def main():
                 tuple(combo) for combo in checkpoint_data["completed"]
             ]
             failed_combinations = checkpoint_data["failed_combinations"]
-            monthly = checkpoint_data.get("monthly", False)
-            cleanup = checkpoint_data.get("cleanup", False)
             print(f"   Already completed: {len(completed_combinations)} combinations")
             print(f"   Previous failures: {len(failed_combinations)} combinations")
         else:
@@ -855,8 +680,6 @@ def main():
                         tuple(combo) for combo in checkpoint_data["completed"]
                     ]
                     failed_combinations = checkpoint_data.get("failed_combinations", [])
-                    monthly = checkpoint_data.get("monthly", False)
-                    cleanup = checkpoint_data.get("cleanup", False)
                     print("✅ Resuming from checkpoint...")
                 else:
                     print("🗑️ Starting fresh (checkpoint file will be overwritten)")
@@ -896,34 +719,10 @@ def main():
                 )
             )
 
-            # Get monthly option if not specified in command line
-            if args.monthly:
-                monthly = True
-                print(
-                    "Monthly mode enabled via command line (will cache both annual & monthly data)"
-                )
-            else:
-                monthly = get_user_boolean_input(
-                    "\nCache both annual and monthly data? (monthly data is larger but needed for some workflows)",
-                    default=False,
-                )
-
-            # Get cleanup option if not specified in command line
-            if args.cleanup:
-                cleanup = True
-                print(
-                    "Cleanup mode enabled via command line (will remove intermediate files)"
-                )
-            else:
-                cleanup = get_user_boolean_input(
-                    "\nRemove intermediate cache files after successful caching? (saves ~60% storage)",
-                    default=False,
-                )
-
             cache_dir = get_cache_directory()
 
             # Confirm the plan
-            if not confirm_caching_plan(scenarios, models, variables, monthly, cleanup):
+            if not confirm_caching_plan(scenarios, models, variables):
                 print("Caching cancelled by user.")
                 return
         else:
@@ -931,10 +730,6 @@ def main():
             scenarios = parse_flexible_list(args.scenarios) or DEFAULT_SCENARIOS
             models = parse_flexible_list(args.models) or DEFAULT_MODELS
             variables = parse_flexible_list(args.variables) or DEFAULT_VARIABLES
-
-            # Use command line args for monthly and cleanup
-            monthly = args.monthly
-            cleanup = args.cleanup
 
             cache_dir = None
 
@@ -944,14 +739,10 @@ def main():
                 f"  Models ({len(models)}): {', '.join(models[:3])}{'...' if len(models) > 3 else ''}"
             )
             print(f"  Variables ({len(variables)}): {', '.join(variables)}")
-            print(f"  Data type: {'Annual & Monthly' if monthly else 'Annual'}")
+            print("  Data type: Monthly only (annual computed on-demand)")
             print(
                 f"  Total combinations: {len(scenarios) * len(models) * len(variables)}"
             )
-            if cleanup:
-                print(
-                    "  Cleanup: Enabled (will remove intermediate files to save ~60% storage)"
-                )
 
             # Show default cache location
             default_cache = get_default_cache_location()
@@ -1007,10 +798,8 @@ def main():
             current,
             total_combinations,
             failed_combinations,
-            monthly,
-            cleanup,
             not args.no_compression,  # enable_compression
-            args.compression_level,   # compression_level
+            args.compression_level,  # compression_level
         )
         if success:
             successful += 1
@@ -1027,8 +816,6 @@ def main():
                 variables,
                 completed_combinations,
                 failed_combinations,
-                monthly,
-                cleanup,
             )
 
         # Show estimated time remaining every 10 items

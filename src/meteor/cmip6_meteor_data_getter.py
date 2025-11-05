@@ -288,11 +288,21 @@ class Cmip6MeteorDataGetter:
         # Set up caching
         self.enable_cache = enable_cache
         if cache_dir is None:
-            cache_dir = os.path.expanduser("~/.meteor/cmip6_cache")
+            # Default to .cache folder in the repository root
+            # Find the repository root by looking for setup.py or other marker files
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            repo_root = current_dir
+            while repo_root != os.path.dirname(repo_root):  # Stop at filesystem root
+                if any(os.path.exists(os.path.join(repo_root, marker)) 
+                       for marker in ['setup.py', '.git', 'README.md']):
+                    break
+                repo_root = os.path.dirname(repo_root)
+            cache_dir = os.path.join(repo_root, ".cache", "cmip6")
         self.cache_dir = cache_dir
 
         if self.enable_cache:
             try:
+
                 os.makedirs(self.cache_dir, exist_ok=True)
                 logging.info(
                     "Setting up local cache for CMIP6 data at: %s. "
@@ -374,6 +384,31 @@ class Cmip6MeteorDataGetter:
         return hashlib.md5(
             key_str.encode()
         ).hexdigest()  # nosec - Used for cache key generation, not security
+
+    def is_cached(self, method_name, *args, **kwargs):
+        """
+        Check if data is already cached for a given method call.
+
+        Parameters
+        ----------
+        method_name : str
+            Name of the method being checked
+        *args : tuple
+            Positional arguments to the method
+        **kwargs : dict
+            Keyword arguments to the method
+
+        Returns
+        -------
+        bool
+            True if cached data exists, False otherwise
+        """
+        if not self.enable_cache:
+            return False
+
+        cache_key = self._generate_cache_key(method_name, *args, **kwargs)
+        cache_file = os.path.join(self.cache_dir, f"{cache_key}.nc")
+        return os.path.exists(cache_file)
 
     def _get_cache_path(self, cache_key):
         """
@@ -517,21 +552,33 @@ class Cmip6MeteorDataGetter:
         dbe : list
             Of CMIP6 project names for each of the experiments. This should be the same length
             as exps, and have values corresponding to ecah experiment in the same order.
-            If None is sent, it will be set to a list of all entries equal to
-            'CMIP' with the same lenght as exps
+            If None is sent, it will be set based on the experiment type:
+            - CMIP experiments: 'CMIP' 
+            - SSP scenarios: 'ScenarioMIP'
+            - 1pctCO2: 'CMIP'
 
         Returns
         -------
         list
-            dbe, If None was sent, a list of all entries equal to
-            'CMIP' with the same lenght as exps will be returned
+            dbe, If None was sent, a list with correct activity_ids for each experiment
         """
         if not flds:
             flds = ["tas", "pr"]
         if not exps:
             exps = ["piControl", "abrupt-4xCO2"]
         if not dbe:
-            dbe = ["CMIP" for i in range(len(exps))]
+            # Map experiments to correct activity_ids
+            dbe = []
+            for exp in exps:
+                if exp.startswith('ssp'):
+                    # SSP scenarios are in ScenarioMIP
+                    dbe.append('ScenarioMIP')
+                elif exp in ['1pctCO2']:
+                    # 1pctCO2 is in CMIP
+                    dbe.append('CMIP')
+                else:
+                    # Default experiments (piControl, abrupt-4xCO2, historical) are in CMIP
+                    dbe.append('CMIP')
         self.flds = flds
         self.exps = exps
         return dbe
@@ -623,6 +670,13 @@ class Cmip6MeteorDataGetter:
 
         mapper = self.gcs.get_mapper(zstore_ref)
         fld_data = xr.open_zarr(mapper, decode_times=False).sortby("time")
+
+        # Apply 50-year limit for piControl experiments to save storage space
+        # piControl data is only used for baseline calculation (mean value)
+        # so limiting to first 50 years has no impact on scientific results
+        if exp == "piControl" and len(fld_data.time) > 600:  # 50 years * 12 months
+            print(f"   Limiting piControl data to first 50 years (was {len(fld_data.time)//12} years)")
+            fld_data = fld_data.isel(time=slice(0, 600))  # First 50 years (600 months)
 
         # Save to cache if caching is enabled
         if self.enable_cache:

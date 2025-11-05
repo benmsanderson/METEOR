@@ -860,14 +860,17 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         mapper = self.gcs.get_mapper(zstore_ref)
         fld_data = xr.open_zarr(mapper, decode_times=False).sortby("time")
 
-        # Apply 50-year limit for piControl experiments to save storage space
-        # piControl data is only used for baseline calculation (mean value)
-        # so limiting to first 50 years has no impact on scientific results
-        if exp == "piControl" and len(fld_data.time) > 600:  # 50 years * 12 months
+        # Apply limit for piControl experiments to save storage space while maintaining
+        # sufficient data for pattern fitting. Pattern fitting requires enough data points
+        # to accurately estimate temporal response parameters.
+        # Use 150 years which balances storage efficiency with statistical robustness
+        if exp == "piControl" and len(fld_data.time) > 1800:  # 150 years * 12 months
             print(
-                f"   Limiting piControl data to first 50 years (was {len(fld_data.time) // 12} years)"
+                f"   Limiting piControl data to first 150 years (was {len(fld_data.time) // 12} years)"
             )
-            fld_data = fld_data.isel(time=slice(0, 600))  # First 50 years (600 months)
+            fld_data = fld_data.isel(
+                time=slice(0, 1800)
+            )  # First 150 years (1800 months)
 
         # No longer cache raw data - we only cache processed monthly data
         # to avoid redundancy and save storage space
@@ -905,27 +908,24 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             if cached_data is not None:
                 return cached_data
 
-        # Get monthly data from cache and compute yearly mean
-        monthly_data = self.get_single_var_mod_data_monthly(exp, fld, model)
-        if monthly_data is None:
+        # Get raw data and compute yearly mean
+        # Note: We use get_single_var_mod_data directly here, not get_single_var_mod_data_monthly,
+        # because the monthly version has already transformed dimensions in a way that's
+        # incompatible with direct yearly averaging
+        ds = self.get_single_var_mod_data(exp, fld, model)
+        if ds is None:
             return None
 
-        # Convert monthly data back to time-based indexing for yearly averaging
-        # The monthly data has dimensions like ('ens', 'month', 'lat', 'lon')
-        # We need to reshape it to ('time', 'lat', 'lon') for yearly averaging
-
-        # Remove the ens dimension and rename month back to time
-        var_data = monthly_data.squeeze("ens").rename({"month": "time"})
-
-        var_yearly = year_mean_monthly_xarray(var_data)
+        var_yearly = year_mean_monthly_xarray(ds[fld])
         var_yearly = var_yearly.assign_coords(
-            {"time": np.arange(len(var_data.time.values) // 12)}
+            {"time": np.arange(len(ds.time.values) // 12)}
         ).rename({"time": "year"})
         var_yearly = var_yearly.expand_dims(
             dim={"ens": np.array([1])}
         )  # .assign_coords({'ens':1})
 
-        # No longer cache yearly data - compute on-the-fly from monthly cache to save storage
+        # No longer cache yearly data - compute on-the-fly to save storage
+        # Users can enable caching if they need it by setting enable_cache=True
         # if self.enable_cache:
         #     self._save_to_cache(cache_key, var_yearly)
 

@@ -251,6 +251,8 @@ class Cmip6MeteorDataGetter:
         dbe=None,
         cache_dir=None,
         enable_cache=True,
+        enable_compression=True,
+        compression_level=6,
     ):
         """
         Initialise data getter object
@@ -273,6 +275,15 @@ class Cmip6MeteorDataGetter:
             Directory to store cached data. If None, defaults to ~/.meteor/cmip6_cache
         enable_cache : bool, optional
             Whether to enable automatic caching. Default is True.
+        enable_compression : bool, optional
+            Whether to enable netCDF4/zlib compression for cached files. Default is True.
+            This can significantly reduce file sizes (typically 70-90% compression).
+        compression_level : int, optional
+            Compression level for netCDF4/zlib compression (1-9). Default is 6.
+            Higher values provide better compression but slower performance:
+            - 1: Fastest compression, larger files
+            - 6: Good balance of speed vs compression (recommended)
+            - 9: Best compression, slowest performance
         df_all : list
             Two dimensional list along experiments and fields, every entry
             is a pandas.DataSet with lines with data placement for one
@@ -287,6 +298,10 @@ class Cmip6MeteorDataGetter:
 
         # Set up caching
         self.enable_cache = enable_cache
+        self.enable_compression = enable_compression
+        self.compression_level = max(
+            1, min(9, compression_level)
+        )  # Clamp to valid range 1-9
         if cache_dir is None:
             # Default to .cache folder in the repository root
             # Find the repository root by looking for setup.py or other marker files
@@ -649,7 +664,34 @@ class Cmip6MeteorDataGetter:
                     f"Dropped variables {variables_to_drop} before caching to avoid encoding conflicts"
                 )
 
-            data_to_save.to_netcdf(cache_path)
+            # Set up compression options
+            if self.enable_compression:
+                # Use zlib compression with user-specified level and shuffling for better compression ratios
+                encoding = {}
+                for var_name in data_to_save.data_vars:
+                    encoding[var_name] = {
+                        "zlib": True,
+                        "complevel": self.compression_level,
+                        "shuffle": True,
+                        "fletcher32": False,  # Skip checksum for speed
+                    }
+                # Also compress coordinate variables if they exist
+                for coord_name in data_to_save.coords:
+                    if coord_name not in encoding:
+                        encoding[coord_name] = {
+                            "zlib": True,
+                            "complevel": self.compression_level,
+                            "shuffle": True,
+                            "fletcher32": False,
+                        }
+
+                data_to_save.to_netcdf(cache_path, encoding=encoding)
+                logging.debug(
+                    f"Saved compressed cache file (level {self.compression_level}) to {cache_path}"
+                )
+            else:
+                data_to_save.to_netcdf(cache_path)
+                logging.debug(f"Saved uncompressed cache file to {cache_path}")
         except (OSError, ValueError) as e:
             # Failed to cache, but don't raise error
             logging.warning(
@@ -818,9 +860,10 @@ class Cmip6MeteorDataGetter:
             )
             fld_data = fld_data.isel(time=slice(0, 600))  # First 50 years (600 months)
 
-        # Save to cache if caching is enabled
-        if self.enable_cache:
-            self._save_to_cache(cache_key, fld_data)
+        # No longer cache raw data - we only cache processed monthly data
+        # to avoid redundancy and save storage space
+        # if self.enable_cache:
+        #     self._save_to_cache(cache_key, fld_data)
 
         return fld_data
 
@@ -853,36 +896,29 @@ class Cmip6MeteorDataGetter:
             if cached_data is not None:
                 return cached_data
 
-        # Original logic
-        ds = self.get_single_var_mod_data(exp, fld, model)
-        if ds is None:
+        # Get monthly data from cache and compute yearly mean
+        monthly_data = self.get_single_var_mod_data_monthly(exp, fld, model)
+        if monthly_data is None:
             return None
 
-        # Extract the variable and standardize dimension names
-        var_data = ds[fld]
+        # Convert monthly data back to time-based indexing for yearly averaging
+        # The monthly data has dimensions like ('ens', 'month', 'lat', 'lon')
+        # We need to reshape it to ('time', 'lat', 'lon') for yearly averaging
 
-        # Standardize dimension names for compatibility
-        # Some models use 'latitude'/'longitude', others use 'lat'/'lon'
-        dim_mapping = {}
-        if "latitude" in var_data.dims:
-            dim_mapping["latitude"] = "lat"
-        if "longitude" in var_data.dims:
-            dim_mapping["longitude"] = "lon"
-
-        if dim_mapping:
-            var_data = var_data.rename(dim_mapping)
+        # Remove the ens dimension and rename month back to time
+        var_data = monthly_data.squeeze("ens").rename({"month": "time"})
 
         var_yearly = year_mean_monthly_xarray(var_data)
         var_yearly = var_yearly.assign_coords(
-            {"time": np.arange(len(ds.time.values) // 12)}
+            {"time": np.arange(len(var_data.time.values) // 12)}
         ).rename({"time": "year"})
         var_yearly = var_yearly.expand_dims(
             dim={"ens": np.array([1])}
         )  # .assign_coords({'ens':1})
 
-        # Save to cache if caching is enabled
-        if self.enable_cache:
-            self._save_to_cache(cache_key, var_yearly)
+        # No longer cache yearly data - compute on-the-fly from monthly cache to save storage
+        # if self.enable_cache:
+        #     self._save_to_cache(cache_key, var_yearly)
 
         return var_yearly
 
@@ -1002,9 +1038,10 @@ class Cmip6MeteorDataGetter:
                 )
         training_data = make_xarray_with_correct_dims(self.flds, fld_values)
 
-        # Save to cache if caching is enabled
-        if self.enable_cache:
-            self._save_to_cache(cache_key, training_data)
+        # No longer cache training data - generate on-the-fly from variable-specific caches
+        # to avoid redundancy and enable flexible variable combinations
+        # if self.enable_cache:
+        #     self._save_to_cache(cache_key, training_data)
 
         return training_data
 
@@ -1123,8 +1160,9 @@ class Cmip6MeteorDataGetter:
 
         result = make_xarray_with_correct_dims(self.flds, fld_values)
 
-        # Save to cache if caching is enabled
-        if self.enable_cache:
-            self._save_to_cache(cache_key, result)
+        # No longer cache composite training data - generate on-the-fly
+        # to avoid redundancy and save storage space
+        # if self.enable_cache:
+        #     self._save_to_cache(cache_key, result)
 
         return result

@@ -145,9 +145,14 @@ def parse_flexible_list(input_list: List[str]) -> List[str]:
 
 def get_default_cache_location() -> str:
     """Get the default METEOR cache location."""
+    # Create a temporary data getter to get the default cache location
+    print("✅ Checking available models for validation...")
     try:
-        # Create a temporary data getter to get the default cache location
-        temp_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
+        temp_getter = Cmip6MeteorDataGetter(
+            exps=["piControl"],
+            flds=["tas"],
+            enable_compression=False,  # No compression needed for validation
+        )
         return temp_getter.cache_dir
     except Exception:
         # Fallback if we can't determine the default
@@ -278,7 +283,11 @@ def cleanup_intermediate_files(
     if cache_dir is None:
         # Use the same logic as the data getter to find the cache directory
         try:
-            temp_getter = Cmip6MeteorDataGetter(exps=[scenario], flds=[variable])
+            temp_getter = Cmip6MeteorDataGetter(
+                exps=[scenario],
+                flds=[variable],
+                enable_compression=False,  # No compression needed for validation
+            )
             cache_dir = Path(temp_getter.cache_dir)
         except Exception:
             # Fallback to repository cache
@@ -400,17 +409,41 @@ def cache_data_combination(
         for is_monthly in cache_types:
             # Initialize a fresh data getter for this specific scenario/variable combo
             # This avoids the issue where models are filtered out if they don't have ALL scenarios
+            enable_compression = (
+                not args.no_compression
+            )  # Compression enabled by default
+            compression_level = args.compression_level if enable_compression else 6
             if cache_dir:
                 data_getter = Cmip6MeteorDataGetter(
-                    cache_dir=str(cache_dir), exps=[scenario], flds=[variable]
+                    cache_dir=str(cache_dir),
+                    exps=[scenario],
+                    flds=[variable],
+                    enable_compression=enable_compression,
+                    compression_level=compression_level,
                 )
             else:
-                data_getter = Cmip6MeteorDataGetter(exps=[scenario], flds=[variable])
+                data_getter = Cmip6MeteorDataGetter(
+                    exps=[scenario],
+                    flds=[variable],
+                    enable_compression=enable_compression,
+                    compression_level=compression_level,
+                )
 
             # Check if this specific data type is already cached (fast check)
-            if data_getter.is_cached(
-                "make_meteor_training_data", scenario, model, monthly=is_monthly
-            ):
+            # NEW OPTIMIZATION: Check for variable-specific monthly cache instead of training data
+            # This allows flexible variable combinations and avoids redundant storage
+            if is_monthly:
+                # For monthly data, check if monthly variable cache exists
+                cache_exists = data_getter.is_cached(
+                    "get_single_var_mod_data_monthly", scenario, variable, model
+                )
+            else:
+                # For annual data, also check monthly cache since we compute annual on-the-fly
+                cache_exists = data_getter.is_cached(
+                    "get_single_var_mod_data_monthly", scenario, variable, model
+                )
+
+            if cache_exists:
                 cache_type = "monthly" if is_monthly else "annual"
                 cached_types.append(cache_type)
                 continue
@@ -450,10 +483,27 @@ def cache_data_combination(
             heartbeat_thread.start()
 
             try:
-                # Attempt to get the data, which will cache it
-                data = data_getter.make_meteor_training_data(
-                    scenario, model, variable, monthly=is_monthly
+                # NEW OPTIMIZATION: Cache only monthly variable-specific data
+                # This avoids redundant storage and enables flexible variable combinations
+
+                # Always cache monthly data (raw source)
+                monthly_data = data_getter.get_single_var_mod_data_monthly(
+                    scenario, variable, model
                 )
+
+                # For validation, also ensure the data can be used for training
+                # but don't cache the training data itself (computed on-the-fly)
+                if is_monthly:
+                    # For monthly requests, just validate we can create training data
+                    _ = data_getter.make_meteor_training_data(
+                        scenario, model, variable, monthly=True
+                    )
+                else:
+                    # For annual requests, validate we can create yearly training data
+                    _ = data_getter.make_meteor_training_data(
+                        scenario, model, variable, monthly=False
+                    )
+
             except KeyboardInterrupt:
                 # Allow user to interrupt gracefully
                 print(f"\n\nInterrupted by user. Progress saved.")
@@ -485,7 +535,7 @@ def cache_data_combination(
             finally:
                 heartbeat_active = False
 
-            if data is not None:
+            if monthly_data is not None:
                 downloaded_types.append(cache_type)
             else:
                 error_reason = f"{cache_type}: No data available"
@@ -600,7 +650,11 @@ def check_model_experiments(model_name: str, variables: List[str] = None) -> dic
         for var in variables:
             try:
                 # Test with minimal initialization
-                temp_getter = Cmip6MeteorDataGetter(exps=[exp], flds=[var])
+                temp_getter = Cmip6MeteorDataGetter(
+                    exps=[exp],
+                    flds=[var],
+                    enable_compression=False,  # No compression needed for validation
+                )
 
                 # Check if model is in the available models list
                 if model_name in temp_getter.models:
@@ -642,7 +696,11 @@ def check_experiment_models(experiment: str, variables: List[str] = None) -> dic
     print(f"\n🔍 Checking model availability for {experiment}...")
 
     try:
-        temp_getter = Cmip6MeteorDataGetter(exps=[experiment], flds=variables)
+        temp_getter = Cmip6MeteorDataGetter(
+            exps=[experiment],
+            flds=variables,
+            enable_compression=False,  # No compression needed for validation
+        )
         available_models = temp_getter.models
 
         print(f"  Found {len(available_models)} models with {experiment} data:")
@@ -713,6 +771,19 @@ def main():
         "--cleanup",
         action="store_true",
         help="Remove intermediate cache files after successful training data creation (saves ~60%% storage)",
+    )
+    parser.add_argument(
+        "--no-compression",
+        action="store_true",
+        help="Disable netCDF4/zlib compression for cached files (compression is enabled by default)",
+    )
+    parser.add_argument(
+        "--compression-level",
+        type=int,
+        default=6,
+        choices=range(1, 10),
+        help="Compression level for netCDF4/zlib compression (1-9, default: 6). "
+        "Higher values = better compression but slower performance",
     )
 
     args = parser.parse_args()  # Handle diagnostic commands

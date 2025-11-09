@@ -73,6 +73,9 @@ class MeteorNoiseGenerator:
         self.coords = None
         self.fitted = False
 
+        # In-memory cache for regional EOF projections (model-invariant)
+        self._regional_eof_projections = {}
+
     def _create_harmonic_features(self, time, t_glob):
         """
         Create harmonic features for seasonal cycle modeling.
@@ -239,12 +242,76 @@ class MeteorNoiseGenerator:
         print(f"   - VARX lag order: {self.lag_order}")
 
     # pylint: disable=missing-type-doc,too-many-locals
+    def generate_stochastic_pcs(
+        self,
+        global_temp_trajectory,
+        n_realizations=1,
+        random_seed=None,
+    ):
+        """
+        Generate stochastic principal component time series.
+
+        This method generates only the stochastic PC loadings, which can be
+        used to reconstruct either gridded fields or regional/global means.
+        This enables self-consistent ensemble generation across different
+        spatial aggregations.
+
+        Parameters
+        ----------
+        global_temp_trajectory : array-like
+            Global temperature trajectory (used for exogenous variables in VARX model)
+        n_realizations : int, default 1
+            Number of realizations to generate
+        random_seed : int, optional
+            Random seed for reproducibility
+
+        Returns
+        -------
+        np.ndarray
+            Stochastic PC time series with shape:
+            - (n_time, n_modes) if n_realizations == 1
+            - (n_realizations, n_time, n_modes) if n_realizations > 1
+
+        Examples
+        --------
+        >>> # Generate PCs once, use for multiple outputs
+        >>> pcs = model.generate_stochastic_pcs(monthly_warming, n_realizations=100)
+        >>> global_means = model.generate_regional_mean_realizations(
+        ...     monthly_warming, region='global', stochastic_pcs=pcs)
+        >>> neu_means = model.generate_regional_mean_realizations(
+        ...     monthly_warming, region='NEU', stochastic_pcs=pcs)
+        """
+        if not self.fitted:
+            raise ValueError("Model must be fitted before generating realizations")
+
+        if random_seed is not None:
+            np.random.seed(random_seed)
+
+        n_time = len(global_temp_trajectory)
+        time = np.arange(n_time)
+
+        # Create exogenous variables for VARX
+        X = self._create_harmonic_features(time, global_temp_trajectory)
+        X_exog = X[:, :3]  # First 3 columns: t_glob, annual_cos, annual_sin
+
+        # Generate stochastic PCs for each realization
+        if n_realizations == 1:
+            return self._generate_stochastic_pcs(X_exog, n_time)
+        else:
+            all_pcs = []
+            for _ in range(n_realizations):
+                pcs = self._generate_stochastic_pcs(X_exog, n_time)
+                all_pcs.append(pcs)
+            return np.array(all_pcs)  # Shape: (n_realizations, n_time, n_modes)
+
+    # pylint: disable=missing-type-doc,too-many-locals
     def generate_realization(
         self,
         global_temp_trajectory,
         n_realizations=1,
         random_seed=None,
         noise_only=False,
+        add_base=None,
     ):
         """
         Generate stochastic climate realizations.
@@ -262,6 +329,10 @@ class MeteorNoiseGenerator:
             If True, generate only the stochastic noise component without direct temperature
             effects or constant terms, but preserve temperature-modulated seasonal harmonics.
             This is useful for adding to METEOR annual predictions.
+        add_base : xr.DataArray, optional
+            Base climatology to add to each realization. If provided, the addition is done
+            efficiently in NumPy before XArray conversion, avoiding expensive XArray operations.
+            Must have compatible shape with the output.
 
         Returns
         -------
@@ -308,6 +379,22 @@ class MeteorNoiseGenerator:
         n_lon = len(self.coords["lon"])
         seasonal_cycle_reshaped = seasonal_cycle_np.reshape(n_time, n_lat, n_lon)
 
+        # Convert base climatology to NumPy if provided (once for all realizations)
+        base_clim_np = None
+        if add_base is not None:
+            # Handle potential ensemble dimension and squeeze it
+            base_values = add_base.values
+            if base_values.ndim == 4:
+                # Shape is (ens, time, lat, lon) - squeeze out ensemble dimension
+                base_values = base_values.squeeze()
+
+            # Now reshape to (n_time, n_lat, n_lon)
+            # If the time dimension doesn't match, select the first n_time steps
+            if base_values.shape[0] != n_time:
+                base_values = base_values[:n_time, :, :]
+
+            base_clim_np = base_values.reshape(n_time, n_lat, n_lon)
+
         # Generate realizations (only stochastic component varies)
         realizations = []
         for _ in range(n_realizations):
@@ -322,6 +409,10 @@ class MeteorNoiseGenerator:
 
             # Combine seasonal cycle and anomalies in NumPy (FAST!)
             realization_np = seasonal_cycle_reshaped + reconstructed_anomalies_reshaped
+
+            # Add base climatology in NumPy if provided (FAST!)
+            if base_clim_np is not None:
+                realization_np = realization_np + base_clim_np
 
             # Convert to xarray only once at the end
             realization_xr = xr.DataArray(
@@ -378,6 +469,324 @@ class MeteorNoiseGenerator:
             synthetic_pcs[t] = mean_forecast.flatten() + random_shock
 
         return synthetic_pcs
+
+    def _compute_spatial_weights(self):
+        """Compute area-weighted spatial averaging weights (cosine of latitude)."""
+        lats = self.coords["lat"]
+        if hasattr(lats, "values"):
+            lats = lats.values
+        return np.cos(np.deg2rad(lats))
+
+    def _get_regional_eof_projection(self, region, region_mask=None):
+        """
+        Get or compute the spatial mean projection of each EOF for a region.
+
+        Cached in memory since EOFs are model-invariant.
+
+        Parameters
+        ----------
+        region : str
+            Region identifier ('global' or AR6 region code like 'NEU')
+        region_mask : np.ndarray, optional
+            Custom 2D boolean mask (n_lat, n_lon) for the region
+
+        Returns
+        -------
+        np.ndarray
+            Mean projection of each EOF mode for the region, shape (n_modes,)
+        """
+        # Check cache first
+        region_id = region if region_mask is None else f"custom_{id(region_mask)}"
+        if region_id in self._regional_eof_projections:
+            return self._regional_eof_projections[region_id]
+
+        # Compute EOF projections
+        n_lat = len(self.coords["lat"])
+        n_lon = len(self.coords["lon"])
+
+        # Get EOFs reshaped to spatial grid (n_modes, n_lat, n_lon)
+        eof_components = self.pca.components_.reshape(self.n_modes, n_lat, n_lon)
+
+        # Compute area weights
+        weights = self._compute_spatial_weights()
+        weight_grid = weights[:, np.newaxis]  # (n_lat, 1) for broadcasting
+
+        # Apply regional mask if needed
+        if region == "global" and region_mask is None:
+            # Global mean: average over all gridpoints
+            # Total weight is sum(lat_weights) * n_lon since weights broadcast across longitude
+            total_weight = np.sum(weights) * n_lon
+            eof_projections = np.array(
+                [
+                    np.sum(eof_components[i] * weight_grid) / total_weight
+                    for i in range(self.n_modes)
+                ]
+            )
+        else:
+            # Regional mean: use mask
+            if region_mask is None:
+                # Use AR6 regions (requires regionmask)
+                try:
+                    import regionmask
+
+                    ar6_regions = regionmask.defined_regions.ar6.all
+
+                    # Find region number
+                    region_number = None
+                    for r in ar6_regions:
+                        if r.abbrev == region:
+                            region_number = r.number
+                            break
+
+                    if region_number is None:
+                        raise ValueError(f"AR6 region '{region}' not found")
+
+                    # Create mask on this grid
+                    lons = (
+                        self.coords["lon"].values
+                        if hasattr(self.coords["lon"], "values")
+                        else self.coords["lon"]
+                    )
+                    lats = (
+                        self.coords["lat"].values
+                        if hasattr(self.coords["lat"], "values")
+                        else self.coords["lat"]
+                    )
+                    lon_2d, lat_2d = np.meshgrid(lons, lats)
+                    mask_3d = ar6_regions.mask(lon_2d, lat_2d)
+                    region_mask = mask_3d == region_number
+
+                except ImportError as exc:
+                    raise ImportError(
+                        "regionmask is required for AR6 regions. "
+                        "Install with: pip install regionmask"
+                    ) from exc
+
+            # Compute weighted mean over region
+            eof_projections = np.zeros(self.n_modes)
+            for i in range(self.n_modes):
+                masked_eof = np.where(region_mask, eof_components[i], np.nan)
+                masked_weights = np.where(region_mask, weight_grid, 0)
+                eof_projections[i] = np.nansum(masked_eof * masked_weights) / np.sum(
+                    masked_weights
+                )
+
+        # Cache and return
+        self._regional_eof_projections[region_id] = eof_projections
+        return eof_projections
+
+    def generate_regional_mean_realizations(
+        self,
+        global_temp_trajectory,
+        region="global",
+        region_mask=None,
+        n_realizations=1,
+        random_seed=None,
+        noise_only=False,
+        add_base=None,
+        stochastic_pcs=None,
+        return_numpy=False,
+    ):
+        """
+        Generate regional or global mean realizations efficiently.
+
+        This method avoids creating full 3D gridded fields by computing the
+        regional mean directly from the PC projections. This is orders of
+        magnitude faster when only scalar time series are needed.
+
+        Parameters
+        ----------
+        global_temp_trajectory : array-like
+            Global temperature trajectory to drive the seasonal cycle
+        region : str, default 'global'
+            Region identifier: 'global' or AR6 region code (e.g., 'NEU', 'WNA')
+        region_mask : np.ndarray, optional
+            Custom 2D boolean mask (n_lat, n_lon) for region. If provided, overrides `region`.
+        n_realizations : int, default 1
+            Number of realizations to generate
+        random_seed : int, optional
+            Random seed for reproducibility
+        noise_only : bool, default False
+            If True, generate only stochastic component (for adding to predictions)
+        add_base : xr.DataArray or np.ndarray, optional
+            Base climatology to add. Can be:
+            - Scalar time series (n_time,) - will be added directly
+            - Gridded field (n_time, n_lat, n_lon) - will be spatially averaged
+        stochastic_pcs : np.ndarray, optional
+            Pre-generated stochastic PCs from generate_stochastic_pcs().
+            If provided, these PCs are used (enabling self-consistent multi-region generation).
+            Shape: (n_time, n_modes) or (n_realizations, n_time, n_modes)
+        return_numpy : bool, default False
+            If True, return numpy arrays. If False, return xarray DataArrays.
+
+        Returns
+        -------
+        list of xr.DataArray or np.ndarray, or single array if n_realizations==1
+            Regional/global mean time series for each realization
+
+        Examples
+        --------
+        >>> # Fast generation of 100 global mean realizations
+        >>> global_means = model.generate_regional_mean_realizations(
+        ...     monthly_warming, region='global', n_realizations=100)
+        >>>
+        >>> # Self-consistent multi-region generation
+        >>> pcs = model.generate_stochastic_pcs(monthly_warming, n_realizations=50)
+        >>> global_m = model.generate_regional_mean_realizations(
+        ...     monthly_warming, region='global', stochastic_pcs=pcs)
+        >>> neu_m = model.generate_regional_mean_realizations(
+        ...     monthly_warming, region='NEU', stochastic_pcs=pcs)
+        """
+        if not self.fitted:
+            raise ValueError("Model must be fitted before generating realizations")
+
+        if random_seed is not None and stochastic_pcs is None:
+            np.random.seed(random_seed)
+
+        n_time = len(global_temp_trajectory)
+        time = np.arange(n_time)
+
+        # Get EOF projections for this region (cached)
+        eof_projections = self._get_regional_eof_projection(region, region_mask)
+
+        # Compute seasonal cycle regional mean
+        X = self._create_harmonic_features(time, global_temp_trajectory)
+
+        if noise_only:
+            # For noise-only: seasonal harmonics without direct temperature effect
+            seasonal_cycle = self.seasonal_model.predict(X)
+            intercept_effect = self.seasonal_model.intercept_
+            temp_effect = (
+                self.seasonal_model.coef_[:, 0] * global_temp_trajectory[:, np.newaxis]
+            )
+            seasonal_cycle_full = (
+                seasonal_cycle - intercept_effect[np.newaxis, :] - temp_effect
+            )
+        else:
+            seasonal_cycle_full = self.seasonal_model.predict(X)
+
+        # Compute regional mean of seasonal cycle
+        n_lat = len(self.coords["lat"])
+        n_lon = len(self.coords["lon"])
+        seasonal_cycle_grid = seasonal_cycle_full.reshape(n_time, n_lat, n_lon)
+
+        weights = self._compute_spatial_weights()
+        weight_grid = weights[:, np.newaxis]
+
+        if region == "global" and region_mask is None:
+            # Total weight is sum(lat_weights) * n_lon since weights broadcast across longitude
+            total_weight = np.sum(weights) * n_lon
+            seasonal_mean = np.array(
+                [
+                    np.sum(seasonal_cycle_grid[t] * weight_grid) / total_weight
+                    for t in range(n_time)
+                ]
+            )
+        else:
+            if region_mask is None:
+                # Get mask from AR6 regions
+                import regionmask
+
+                ar6_regions = regionmask.defined_regions.ar6.all
+                region_number = None
+                for r in ar6_regions:
+                    if r.abbrev == region:
+                        region_number = r.number
+                        break
+                lons = (
+                    self.coords["lon"].values
+                    if hasattr(self.coords["lon"], "values")
+                    else self.coords["lon"]
+                )
+                lats = (
+                    self.coords["lat"].values
+                    if hasattr(self.coords["lat"], "values")
+                    else self.coords["lat"]
+                )
+                lon_2d, lat_2d = np.meshgrid(lons, lats)
+                mask_3d = ar6_regions.mask(lon_2d, lat_2d)
+                region_mask = mask_3d == region_number
+
+            seasonal_mean = np.zeros(n_time)
+            for t in range(n_time):
+                masked_data = np.where(region_mask, seasonal_cycle_grid[t], np.nan)
+                masked_weights = np.where(region_mask, weight_grid, 0)
+                seasonal_mean[t] = np.nansum(masked_data * masked_weights) / np.sum(
+                    masked_weights
+                )
+
+        # Compute base climatology regional mean (if provided)
+        base_mean = None
+        if add_base is not None:
+            if isinstance(add_base, xr.DataArray):
+                add_base = add_base.values
+
+            if add_base.ndim == 1:
+                # Already a time series
+                base_mean = add_base
+            elif add_base.ndim == 3:
+                # Gridded field - compute regional mean
+                if region == "global" and region_mask is None:
+                    # Total weight is sum(lat_weights) * n_lon since weights broadcast across longitude
+                    total_weight = np.sum(weights) * n_lon
+                    base_mean = np.array(
+                        [
+                            np.sum(add_base[t] * weight_grid) / total_weight
+                            for t in range(n_time)
+                        ]
+                    )
+                else:
+                    base_mean = np.zeros(n_time)
+                    for t in range(n_time):
+                        masked_data = np.where(region_mask, add_base[t], np.nan)
+                        masked_weights = np.where(region_mask, weight_grid, 0)
+                        base_mean[t] = np.nansum(masked_data * masked_weights) / np.sum(
+                            masked_weights
+                        )
+
+        # Generate or use provided stochastic PCs
+        if stochastic_pcs is None:
+            X_exog = X[:, :3]
+            if n_realizations == 1:
+                pcs_to_use = [self._generate_stochastic_pcs(X_exog, n_time)]
+            else:
+                pcs_to_use = [
+                    self._generate_stochastic_pcs(X_exog, n_time)
+                    for _ in range(n_realizations)
+                ]
+        else:
+            # Use provided PCs
+            if stochastic_pcs.ndim == 2:
+                # Single realization
+                pcs_to_use = [stochastic_pcs]
+            else:
+                # Multiple realizations
+                pcs_to_use = list(stochastic_pcs)
+
+        # Reconstruct regional means from PCs
+        realizations = []
+        for pcs in pcs_to_use:
+            # Anomaly contribution: PCs @ EOF_projections
+            anomaly_mean = pcs @ eof_projections  # (n_time,)
+
+            # Combine components
+            realization = seasonal_mean + anomaly_mean
+            if base_mean is not None:
+                realization = realization + base_mean
+
+            if return_numpy:
+                realizations.append(realization)
+            else:
+                # Return as xarray DataArray
+                realization_xr = xr.DataArray(
+                    realization,
+                    coords={"month": time},
+                    dims=("month",),
+                    attrs={"region": region},
+                )
+                realizations.append(realization_xr)
+
+        return realizations if len(realizations) > 1 else realizations[0]
 
     def save_model(self, filepath):
         """

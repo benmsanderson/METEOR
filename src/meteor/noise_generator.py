@@ -275,86 +275,57 @@ class MeteorNoiseGenerator:
         if random_seed is not None:
             np.random.seed(random_seed)
 
+        # Create time coordinate (shared across all realizations)
+        n_time = len(global_temp_trajectory)
+        time = np.arange(n_time)
+
+        # Precompute harmonic features (shared across all realizations)
+        X = self._create_harmonic_features(time, global_temp_trajectory)
+        X_exog = X[:, :3]  # Exogenous variables for VARX
+
+        # Precompute seasonal cycle as NumPy array (shared across all realizations)
+        if noise_only:
+            # For noise-only: keep seasonal harmonics AND temperature-modulated harmonics
+            # but remove the direct temperature effect (intercept + t_glob term)
+            seasonal_cycle = self.seasonal_model.predict(X)
+
+            # Calculate what to subtract (intercept + direct temperature effect)
+            intercept_effect = self.seasonal_model.intercept_
+            temp_effect = (
+                self.seasonal_model.coef_[:, 0] * global_temp_trajectory[:, np.newaxis]
+            )
+
+            # Remove intercept and direct temperature effect from seasonal cycle
+            seasonal_cycle_np = (
+                seasonal_cycle - intercept_effect[np.newaxis, :] - temp_effect
+            )
+        else:
+            # Standard operation: full seasonal cycle with temperature dependence
+            seasonal_cycle_np = self.seasonal_model.predict(X)
+
+        # Reshape seasonal cycle once
+        n_lat = len(self.coords["lat"])
+        n_lon = len(self.coords["lon"])
+        seasonal_cycle_reshaped = seasonal_cycle_np.reshape(n_time, n_lat, n_lon)
+
+        # Generate realizations (only stochastic component varies)
         realizations = []
-
         for _ in range(n_realizations):
-            # Create time coordinate
-            n_time = len(global_temp_trajectory)
-            time = np.arange(n_time)
+            # Generate stochastic component (this is the only unique part per realization)
+            synthetic_pcs = self._generate_stochastic_pcs(X_exog, n_time)
 
-            if noise_only:
-                # For noise-only: keep seasonal harmonics AND temperature-modulated harmonics
-                # but remove the direct temperature effect (intercept + t_glob term)
-                X = self._create_harmonic_features(time, global_temp_trajectory)
-
-                # Generate full seasonal cycle prediction
-                seasonal_cycle = self.seasonal_model.predict(X)
-
-                # Now remove only the direct temperature effects (intercept + t_glob)
-                # Keep: harmonics (indices 1-4) + temperature-modulated harmonics (indices 5-8)
-                # Remove: intercept + t_glob (index 0)
-
-                # Create a modified prediction by zeroing out unwanted terms
-                # The seasonal model coefficients are organized as:
-                # coef_[:, 0] = t_glob coefficient (direct temperature effect)
-                # coef_[:, 1-4] = pure harmonic coefficients
-                # coef_[:, 5-8] = temperature-modulated harmonic coefficients
-
-                # Calculate what to subtract (intercept + direct temperature effect)
-                intercept_effect = self.seasonal_model.intercept_
-                temp_effect = (
-                    self.seasonal_model.coef_[:, 0]
-                    * global_temp_trajectory[:, np.newaxis]
-                )
-
-                # Remove intercept and direct temperature effect from seasonal cycle
-                seasonal_cycle_adjusted = (
-                    seasonal_cycle - intercept_effect[np.newaxis, :] - temp_effect
-                )
-
-                seasonal_cycle_xr = xr.DataArray(
-                    seasonal_cycle_adjusted.reshape(
-                        n_time, len(self.coords["lat"]), len(self.coords["lon"])
-                    ),
-                    coords={
-                        "month": time,
-                        "lat": self.coords["lat"],
-                        "lon": self.coords["lon"],
-                    },
-                    dims=("month", "lat", "lon"),
-                )
-            else:
-                # Standard operation: full seasonal cycle with temperature dependence
-                X = self._create_harmonic_features(time, global_temp_trajectory)
-
-                # Generate seasonal cycle
-                seasonal_cycle = self.seasonal_model.predict(X)
-                seasonal_cycle_xr = xr.DataArray(
-                    seasonal_cycle.reshape(
-                        n_time, len(self.coords["lat"]), len(self.coords["lon"])
-                    ),
-                    coords={
-                        "month": time,
-                        "lat": self.coords["lat"],
-                        "lon": self.coords["lon"],
-                    },
-                    dims=("month", "lat", "lon"),
-                )
-
-            # Generate stochastic component
-            if noise_only:
-                # For noise-only, keep temperature in exogenous variables but use actual temperature
-                # This preserves the temperature-dependent variability patterns
-                synthetic_pcs = self._generate_stochastic_pcs(X[:, :3], n_time)
-            else:
-                synthetic_pcs = self._generate_stochastic_pcs(X[:, :3], n_time)
-
-            # Reconstruct anomalies
+            # Reconstruct anomalies (NumPy)
             reconstructed_anomalies = synthetic_pcs @ self.pca.components_
-            reconstructed_anomalies_xr = xr.DataArray(
-                reconstructed_anomalies.reshape(
-                    n_time, len(self.coords["lat"]), len(self.coords["lon"])
-                ),
+            reconstructed_anomalies_reshaped = reconstructed_anomalies.reshape(
+                n_time, n_lat, n_lon
+            )
+
+            # Combine seasonal cycle and anomalies in NumPy (FAST!)
+            realization_np = seasonal_cycle_reshaped + reconstructed_anomalies_reshaped
+
+            # Convert to xarray only once at the end
+            realization_xr = xr.DataArray(
+                realization_np,
                 coords={
                     "month": time,
                     "lat": self.coords["lat"],
@@ -362,10 +333,7 @@ class MeteorNoiseGenerator:
                 },
                 dims=("month", "lat", "lon"),
             )
-
-            # Combine seasonal cycle and anomalies
-            realization = seasonal_cycle_xr + reconstructed_anomalies_xr
-            realizations.append(realization)
+            realizations.append(realization_xr)
 
         return realizations if n_realizations > 1 else realizations[0]
 

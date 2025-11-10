@@ -621,14 +621,23 @@ class MeteorNoiseGenerator:
 
         Returns
         -------
-        list of xr.DataArray or np.ndarray, or single array if n_realizations==1
-            Regional/global mean time series for each realization
+        xr.DataArray or np.ndarray
+            Regional/global mean time series.
+            
+            - If n_realizations == 1:
+              Shape (n_time,) with dims ('month',)
+            - If n_realizations > 1:
+              Shape (n_realizations, n_time) with dims ('realization', 'month')
+            
+            When return_numpy=False (default), returns xarray DataArray with proper
+            coordinates and dims. When return_numpy=True, returns numpy array.
 
         Examples
         --------
         >>> # Fast generation of 100 global mean realizations
         >>> global_means = model.generate_regional_mean_realizations(
         ...     monthly_warming, region='global', n_realizations=100)
+        >>> # Returns shape (100, n_time) with dims ('realization', 'month')
         >>>
         >>> # Self-consistent multi-region generation
         >>> pcs = model.generate_stochastic_pcs(monthly_warming, n_realizations=50)
@@ -636,6 +645,7 @@ class MeteorNoiseGenerator:
         ...     monthly_warming, region='global', stochastic_pcs=pcs)
         >>> neu_m = model.generate_regional_mean_realizations(
         ...     monthly_warming, region='NEU', stochastic_pcs=pcs)
+        >>> # Both share the same stochastic variability from pcs
         """
         if not self.fitted:
             raise ValueError("Model must be fitted before generating realizations")
@@ -774,19 +784,36 @@ class MeteorNoiseGenerator:
             if base_mean is not None:
                 realization = realization + base_mean
 
-            if return_numpy:
-                realizations.append(realization)
+            realizations.append(realization)
+
+        # Return format
+        if return_numpy:
+            # Return as numpy array with shape (n_realizations, n_time) or (n_time,) if single
+            if len(realizations) == 1:
+                return realizations[0]
             else:
-                # Return as xarray DataArray
-                realization_xr = xr.DataArray(
-                    realization,
+                return np.array(realizations)
+        else:
+            # Return as xarray DataArray
+            if len(realizations) == 1:
+                # Single realization - return 1D DataArray
+                return xr.DataArray(
+                    realizations[0],
                     coords={"month": time},
                     dims=("month",),
                     attrs={"region": region},
                 )
-                realizations.append(realization_xr)
-
-        return realizations if len(realizations) > 1 else realizations[0]
+            else:
+                # Multiple realizations - concatenate with 'realization' dimension
+                return xr.DataArray(
+                    np.array(realizations),
+                    coords={
+                        "realization": np.arange(len(realizations)),
+                        "month": time,
+                    },
+                    dims=("realization", "month"),
+                    attrs={"region": region},
+                )
 
     def save_model(self, filepath):
         """

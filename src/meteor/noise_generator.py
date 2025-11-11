@@ -454,49 +454,51 @@ class MeteorNoiseGenerator:
         # Extract coefficient matrices from fitted VARX model
         params = self.varx_results.params
         n_exog = X_exog.shape[1]
-        
+
         # Intercept (n_modes,)
         intercept = params[0, :]
-        
+
         # Lag coefficient matrices A₁, A₂, ... (each n_modes × n_modes)
         A_matrices = []
         for lag_i in range(self.lag_order):
             start_idx = 1 + lag_i * self.n_modes
             end_idx = start_idx + self.n_modes
             A_matrices.append(params[start_idx:end_idx, :].T)
-        
+
         # Exogenous coefficient matrix B (n_modes × n_exog)
         B_matrix = params[-n_exog:, :].T
-        
+
         # Residual covariance matrix Σ (n_modes × n_modes)
         residual_cov = self.varx_results.sigma_u
-        
+
         # 🚀 KEY OPTIMIZATION: Pre-generate ALL random shocks at once
         # This eliminates 97% of the bottleneck (4,212 separate MVN calls → 1 batched call)
         mean_shock = np.zeros(self.n_modes)
-        all_shocks = np.random.multivariate_normal(mean_shock, residual_cov, size=n_time)
-        
+        all_shocks = np.random.multivariate_normal(
+            mean_shock, residual_cov, size=n_time
+        )
+
         # Initialize synthetic PCs with zero initial conditions
         synthetic_pcs = np.zeros((n_time, self.n_modes))
-        synthetic_pcs[:self.lag_order] = 0
-        
+        synthetic_pcs[: self.lag_order] = 0
+
         # Time loop (still needed for autoregressive structure)
         # VAR equation: y_t = intercept + A₁y_{t-1} + A₂y_{t-2} + ... + B·x_t + ε_t
         for t in range(self.lag_order, n_time):
             # Start with intercept
             forecast = intercept.copy()
-            
+
             # Add lag contributions: A₁y_{t-1} + A₂y_{t-2} + ...
             for lag_i in range(self.lag_order):
                 y_lag = synthetic_pcs[t - lag_i - 1]
                 forecast += A_matrices[lag_i] @ y_lag
-            
+
             # Add exogenous contribution: B·x_t
             forecast += B_matrix @ X_exog[t]
-            
+
             # Add pre-generated random shock (no MVN call here!)
             synthetic_pcs[t] = forecast + all_shocks[t]
-        
+
         return synthetic_pcs
 
     def _compute_spatial_weights(self):

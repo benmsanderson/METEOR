@@ -3,6 +3,8 @@ METEOR
 """
 
 import logging
+import os
+import pickle  # nosec - Used for trusted model serialization only
 
 import numpy as np
 import pandas as pd
@@ -217,12 +219,13 @@ class MeteorPatternScaling:
     def __init__(
         self,
         name,
-        patternflds,
-        get_training_file_from_exp,
-        exp_list,
+        patternflds=None,
+        get_training_file_from_exp=None,
+        exp_list=None,
         from_file=True,
         ssp_input=None,
         anom_timescales=None,
+        cache_dir=None,
     ):  # pylint: disable=too-many-arguments, too-many-positional-arguments
         """
         Initialise Pattern Scaling object
@@ -233,21 +236,76 @@ class MeteorPatternScaling:
         ----------
         name : str
                name of the model/dataset for that this patter belongs to
-        patternflds : dict
+        patternflds : dict, optional
                     keys are names of the varibles to be considered
-                    Values are number of timescales to fit
-        get_training_file_from_exp : function
+                    Values are number of timescales to fit.
+                    Required when training from scratch (cache miss or no cache_dir).
+                    Not needed when loading from cache.
+        get_training_file_from_exp : function, optional
                     Function that defines how to get find the location
-                    of the training data input file for a given experiment
-        exp_list : dict
-                   List with experiment names
+                    of the training data input file for a given experiment.
+                    Required when training from scratch (cache miss or no cache_dir).
+                    Not needed when loading from cache.
+        exp_list : dict, optional
+                   List with experiment names.
+                   Required when training from scratch (cache miss or no cache_dir).
+                   Not needed when loading from cache.
         anom_timescales : dict
             Optional parameter
             Like patternfields should have fields as values, and number
             of timescales to fit from the anomaly experiments for that field
             as values. If this parameter is not sent, the 1 timescale per field
             will be assumed if anomaly experiments are included.
+        cache_dir : str, optional
+            Directory to cache the trained pattern scaling model. If provided,
+            the model will be saved after training and loaded from cache if
+            it already exists. When loading from cache, training parameters
+            (patternflds, get_training_file_from_exp, exp_list) are not required.
+
+        Examples
+        --------
+        >>> # First time: train and cache
+        >>> model = MeteorPatternScaling(
+        ...     "cesm2-model",
+        ...     patternflds={"tas": 3},
+        ...     get_training_file_from_exp=lambda key: training_data[key],
+        ...     exp_list=["base", "co2x4"],
+        ...     cache_dir="./cache"
+        ... )
+        >>>
+        >>> # Subsequent times: load from cache (no training data needed!)
+        >>> model = MeteorPatternScaling(
+        ...     "cesm2-model",
+        ...     cache_dir="./cache"
+        ... )
         """
+        self.name = name
+
+        # Try to load from cache if cache_dir is provided
+        if cache_dir is not None:
+            cache_path = os.path.join(cache_dir, f"{name}_pattern_scaling.pkl")
+            if os.path.exists(cache_path):
+                print(f"📦 Loading cached pattern scaling model from {cache_path}")
+                self.load_model(cache_path)
+                return
+
+        # If not loaded from cache, validate required parameters and train the model
+        if patternflds is None:
+            raise ValueError(
+                "patternflds is required when training a new model "
+                "(not loading from cache)"
+            )
+        if get_training_file_from_exp is None:
+            raise ValueError(
+                "get_training_file_from_exp is required when training a new model "
+                "(not loading from cache)"
+            )
+        if exp_list is None:
+            raise ValueError(
+                "exp_list is required when training a new model "
+                "(not loading from cache)"
+            )
+
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(None)
         scaling = sefps.run_to_get_scaling(exp_list)
         self.exp_forc_dict = {exp: scaling[i] for i, exp in enumerate(exp_list)}
@@ -279,7 +337,13 @@ class MeteorPatternScaling:
             else:
                 self.anom_timescales = anom_timescales
                 self._add_patterns_for_residual_exp(ssp_input)
-        self.name = name
+
+        # Save to cache if cache_dir is provided
+        if cache_dir is not None:
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_path = os.path.join(cache_dir, f"{name}_pattern_scaling.pkl")
+            self.save_model(cache_path)
+            print(f"💾 Cached pattern scaling model to {cache_path}")
 
     def _make_pattern_dict(self):
         """
@@ -626,3 +690,55 @@ class MeteorPatternScaling:
             )
 
         return monthly_prediction
+
+    def save_model(self, filepath):
+        """
+        Save the fitted pattern scaling model to disk.
+
+        Parameters
+        ----------
+        filepath : str
+            Path to save the model
+        """
+        model_data = {
+            "name": self.name,
+            "exp_forc_dict": self.exp_forc_dict,
+            "exp_list": self.exp_list,
+            "patternflds": self.patternflds,
+            "pattern_dict": self.pattern_dict,
+            "dacanom": self.dacanom,
+        }
+
+        # Include anom_timescales if it exists
+        if hasattr(self, "anom_timescales"):
+            model_data["anom_timescales"] = self.anom_timescales
+
+        with open(filepath, "wb") as f:
+            pickle.dump(model_data, f)
+
+        print(f"✅ Pattern scaling model saved to {filepath}")
+
+    def load_model(self, filepath):
+        """
+        Load a fitted pattern scaling model from disk.
+
+        Parameters
+        ----------
+        filepath : str
+            Path to the saved model
+        """
+        with open(filepath, "rb") as f:
+            model_data = pickle.load(f)  # nosec - Loading trusted model files only
+
+        self.name = model_data["name"]
+        self.exp_forc_dict = model_data["exp_forc_dict"]
+        self.exp_list = model_data["exp_list"]
+        self.patternflds = model_data["patternflds"]
+        self.pattern_dict = model_data["pattern_dict"]
+        self.dacanom = model_data["dacanom"]
+
+        # Load anom_timescales if it exists
+        if "anom_timescales" in model_data:
+            self.anom_timescales = model_data["anom_timescales"]
+
+        print(f"✅ Pattern scaling model loaded from {filepath}")

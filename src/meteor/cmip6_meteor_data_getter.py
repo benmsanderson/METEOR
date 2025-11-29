@@ -10,6 +10,7 @@ import gcsfs
 import numpy as np
 import pandas as pd
 import xarray as xr
+from ciceroscm import input_handler
 
 cmip6_to_meteor_exp_remapper = {
     "base": "piControl",
@@ -336,10 +337,47 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                 )
                 self.enable_cache = False
 
-        df = pd.read_csv(
-            "https://storage.googleapis.com/cmip6/cmip6-zarr-consolidated-stores.csv",
-            low_memory=False,
+        # Load CMIP6 catalog (with caching to avoid network calls when possible)
+        catalog_cache_file = os.path.join(
+            self.cache_dir, "cmip6-zarr-consolidated-stores.csv"
         )
+        
+        if self.enable_cache and os.path.exists(catalog_cache_file):
+            # Use cached catalog
+            logging.info(
+                "Loading CMIP6 catalog from cache: %s", catalog_cache_file
+            )
+            df = pd.read_csv(catalog_cache_file, low_memory=False)
+        else:
+            # Download catalog from Google Cloud Storage
+            try:
+                logging.info("Downloading CMIP6 catalog from Google Cloud Storage...")
+                df = pd.read_csv(
+                    "https://storage.googleapis.com/cmip6/cmip6-zarr-consolidated-stores.csv",
+                    low_memory=False,
+                )
+                # Cache the catalog if caching is enabled
+                if self.enable_cache:
+                    try:
+                        df.to_csv(catalog_cache_file, index=False)
+                        logging.info("Cached CMIP6 catalog to: %s", catalog_cache_file)
+                    except OSError as e:
+                        logging.warning(
+                            "Failed to cache CMIP6 catalog: %s", e
+                        )
+            except Exception as e:
+                # If download fails and we have cache enabled, check if there's an old catalog
+                if self.enable_cache and os.path.exists(catalog_cache_file):
+                    logging.warning(
+                        "Failed to download CMIP6 catalog (%s), using cached version.", e
+                    )
+                    df = pd.read_csv(catalog_cache_file, low_memory=False)
+                else:
+                    # No cache available and download failed
+                    raise RuntimeError(
+                        f"Failed to load CMIP6 catalog from Google Cloud Storage "
+                        f"and no cached version available: {e}"
+                    ) from e
         df_all1 = []
         for i, exp in enumerate(self.exps):
             df_ta1 = []
@@ -517,6 +555,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         cache_path = self._get_cache_path(cache_key)
         if os.path.exists(cache_path):
             try:
+                logging.info("Loading data from cache: %s", os.path.basename(cache_path))
                 dataset = xr.open_dataset(cache_path)
 
                 # Validate the cached data
@@ -906,28 +945,30 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                 cache_key, expected_type="DataArray", expected_variable=fld
             )
             if cached_data is not None:
+                logging.info("✓ Using cached yearly data for %s/%s/%s", model, exp, fld)
                 return cached_data
 
-        # Get raw data and compute yearly mean
-        # Note: We use get_single_var_mod_data directly here, not get_single_var_mod_data_monthly,
-        # because the monthly version has already transformed dimensions in a way that's
-        # incompatible with direct yearly averaging
-        ds = self.get_single_var_mod_data(exp, fld, model)
-        if ds is None:
+        # Get monthly data (which may be cached) and compute yearly mean
+        logging.info("Computing yearly mean from monthly data for %s/%s/%s...", model, exp, fld)
+        var_monthly = self.get_single_var_mod_data_monthly(exp, fld, model)
+        if var_monthly is None:
             return None
 
-        var_yearly = year_mean_monthly_xarray(ds[fld])
+        # Convert monthly to yearly mean
+        # var_monthly has dimensions (ens, month, lat, lon)
+        # We need to reshape to compute yearly means
+        n_years = var_monthly.sizes['month'] // 12
+        var_monthly_subset = var_monthly.isel(month=slice(0, n_years * 12))
+        
+        # Reshape and compute yearly mean
+        var_yearly = var_monthly_subset.coarsen(month=12, boundary='trim').mean()
         var_yearly = var_yearly.assign_coords(
-            {"time": np.arange(len(ds.time.values) // 12)}
-        ).rename({"time": "year"})
-        var_yearly = var_yearly.expand_dims(
-            dim={"ens": np.array([1])}
-        )  # .assign_coords({'ens':1})
+            {"month": np.arange(n_years)}
+        ).rename({"month": "year"})
 
-        # No longer cache yearly data - compute on-the-fly to save storage
-        # Users can enable caching if they need it by setting enable_cache=True
-        # if self.enable_cache:
-        #     self._save_to_cache(cache_key, var_yearly)
+        # Cache the yearly data to avoid recomputing
+        if self.enable_cache:
+            self._save_to_cache(cache_key, var_yearly)
 
         return var_yearly
 
@@ -958,9 +999,11 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                 cache_key, expected_type="DataArray", expected_variable=fld
             )
             if cached_data is not None:
+                logging.info("✓ Using cached monthly data for %s/%s/%s", model, exp, fld)
                 return cached_data
 
         # Original logic
+        logging.info("Downloading data from Google Cloud for %s/%s/%s...", model, exp, fld)
         ds = self.get_single_var_mod_data(exp, fld, model)
         if ds is None:
             return None
@@ -1175,3 +1218,438 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         #     self._save_to_cache(cache_key, result)
 
         return result
+
+    def prepare_pattern_scaling_training_data(
+        self, model_name, scenario_train="ssp245"
+    ):
+        """
+        Prepare complete training data dictionary for pattern scaling.
+
+        Creates a standardized training data dictionary with the required experiments
+        for METEOR pattern scaling: base (piControl), co2x4 (abrupt-4xCO2),
+        scenario (historical+SSP), and sulxanom (aerosol anomaly).
+
+        Parameters
+        ----------
+        model_name : str
+            Name of the CMIP6 model to prepare data for
+        scenario_train : str, optional
+            SSP scenario to use for training. Default is "ssp245".
+            Common options: "ssp126", "ssp245", "ssp370", "ssp585"
+
+        Returns
+        -------
+        dict
+            Dictionary with keys: 'base', 'co2x4', scenario_train, 'sulxanom'
+            Each value is an xr.Dataset with training data for that experiment
+
+        Examples
+        --------
+        >>> data_getter = Cmip6MeteorDataGetter(
+        ...     exps=["piControl", "ssp245", "historical", "abrupt-4xCO2"],
+        ...     flds=["tas"]
+        ... )
+        >>> training_data = data_getter.prepare_pattern_scaling_training_data("CESM2")
+        >>> print(training_data.keys())
+        dict_keys(['base', 'co2x4', 'ssp245', 'sulxanom'])
+        """
+        print(f"🔧 Preparing pattern scaling training data for {model_name}...")
+
+        # Prepare training data dictionary
+        training_data = {
+            "base": self.make_meteor_training_data("base", model_name),
+            "co2x4": self.make_meteor_training_data("co2x4", model_name),
+            scenario_train: self.make_meteor_training_data_composite(
+                ["historical", scenario_train], model_name
+            ),
+        }
+
+        # Use the scenario as the aerosol anomaly experiment (sulxanom)
+        training_data["sulxanom"] = training_data[scenario_train]
+
+        print(
+            f"   ✅ Training data prepared for experiments: {list(training_data.keys())}"
+        )
+        return training_data
+
+    def load_ssp_config(self, scenario="ssp245", nystart=1750, nyend=2100):
+        """
+        Load CICERO-SCM forcing data and create configuration for pattern scaling.
+
+        Loads concentration and emission data for a specified SSP scenario
+        from the default METEOR data directory and creates a configuration
+        dictionary for use with METEOR pattern scaling models.
+
+        Parameters
+        ----------
+        scenario : str, optional
+            SSP scenario name. Default is "ssp245".
+            Common options: "ssp126", "ssp245", "ssp370", "ssp585"
+        nystart : int, optional
+            Start year for the simulation. Default is 1750.
+        nyend : int, optional
+            End year for the simulation. Default is 2100.
+
+        Returns
+        -------
+        dict
+            Configuration dictionary with keys:
+            - emstart: Emission start year (1850)
+            - nystart: Simulation start year
+            - nyend: Simulation end year
+            - conc_run: Whether to run with concentrations (False)
+            - concentrations_data: Loaded concentration data
+            - emissions_data: Loaded emission data
+
+        Examples
+        --------
+        >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
+        >>> config = data_getter.load_ssp_config("ssp245")
+        >>> print(config.keys())
+        dict_keys(['emstart', 'nystart', 'nyend', 'conc_run', 'concentrations_data', 'emissions_data'])
+        """
+        print(f"📥 Loading CICERO-SCM forcing data for {scenario}...")
+
+        # Find the repository root to locate default_scm_data
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        scm_data_dir = os.path.join(current_dir, "default_scm_data")
+
+        # Load concentration data
+        conc_file = os.path.join(scm_data_dir, f"{scenario}_conc_RCMIP.txt")
+        if not os.path.exists(conc_file):
+            raise FileNotFoundError(
+                f"Concentration file not found: {conc_file}\n"
+                f"Available scenarios should be in: {scm_data_dir}"
+            )
+        scen_conc = input_handler.read_inputfile(conc_file)
+
+        # Load emission data
+        em_file = os.path.join(scm_data_dir, f"{scenario}_em_RCMIP.txt")
+        if not os.path.exists(em_file):
+            raise FileNotFoundError(
+                f"Emission file not found: {em_file}\n"
+                f"Available scenarios should be in: {scm_data_dir}"
+            )
+        ih_temp = input_handler.InputHandler({})
+        scen_em = ih_temp.read_emissions(em_file)
+
+        ssp_config = {
+            "emstart": 1850,
+            "nystart": nystart,
+            "nyend": nyend,
+            "conc_run": False,
+            "concentrations_data": scen_conc,
+            "emissions_data": scen_em,
+        }
+
+        print(f"   ✅ Loaded {len(scen_conc)} concentration records")
+        print(f"   ✅ Loaded {len(scen_em)} emission records")
+        print(f"   ✅ Config: {nystart}-{nyend}, emissions start: 1850")
+
+        return ssp_config
+
+    def get_pattern_scaling_cache_path(
+        self, model_name, cache_dir=None, scenario="aer"
+    ):
+        """
+        Get the standardized cache file path for a pattern scaling model.
+
+        Parameters
+        ----------
+        model_name : str
+            Name of the CMIP6 model
+        cache_dir : str, optional
+            Directory for cache files. If None, uses default cache location.
+        scenario : str, optional
+            Scenario suffix for the model name. Default is "aer" (aerosol-inclusive).
+
+        Returns
+        -------
+        str
+            Full path to the cache file
+
+        Examples
+        --------
+        >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
+        >>> cache_path = data_getter.get_pattern_scaling_cache_path("CESM2")
+        >>> print(cache_path)
+        /path/to/.cache/trained_pattern_scaling_models/cmip6-CESM2-aer_pattern_scaling.pkl
+        """
+        if cache_dir is None:
+            # Use default cache location in repository root
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            repo_root = current_dir
+            while repo_root != os.path.dirname(repo_root):
+                if any(
+                    os.path.exists(os.path.join(repo_root, marker))
+                    for marker in ["setup.py", ".git", "README.md"]
+                ):
+                    break
+                repo_root = os.path.dirname(repo_root)
+            cache_dir = os.path.join(
+                repo_root, ".cache", "trained_pattern_scaling_models"
+            )
+
+        os.makedirs(cache_dir, exist_ok=True)
+        return os.path.join(
+            cache_dir, f"cmip6-{model_name}-{scenario}_pattern_scaling.pkl"
+        )
+
+    def validate_pattern_scaling_cache(self, cache_file, model_name, scenario="aer"):
+        """
+        Validate a cached pattern scaling model file.
+
+        Checks if the cached pickle file exists, can be loaded, and contains
+        the expected model name and variable fields.
+
+        Parameters
+        ----------
+        cache_file : str
+            Path to the cached model file
+        model_name : str
+            Expected model name
+        scenario : str, optional
+            Scenario suffix for expected model name. Default is "aer".
+
+        Returns
+        -------
+        tuple
+            (is_valid, cached_model, info_dict) where:
+            - is_valid: bool indicating if cache is valid
+            - cached_model: loaded model object if valid, None otherwise
+            - info_dict: dict with 'message', 'expected_name', 'found_name',
+              'expected_fields', 'found_fields'
+
+        Examples
+        --------
+        >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
+        >>> cache_file = data_getter.get_pattern_scaling_cache_path("CESM2")
+        >>> is_valid, model, info = data_getter.validate_pattern_scaling_cache(
+        ...     cache_file, "CESM2"
+        ... )
+        >>> if is_valid:
+        ...     print(f"✅ {info['message']}")
+        """
+        import pickle
+
+        expected_name = f"cmip6-{model_name}-{scenario}"
+        expected_vars = set(self.flds)
+
+        info = {
+            "expected_name": expected_name,
+            "expected_fields": expected_vars,
+            "found_name": None,
+            "found_fields": set(),
+            "message": "",
+        }
+
+        # Check if file exists
+        if not os.path.exists(cache_file):
+            info["message"] = f"Cache file not found: {cache_file}"
+            return False, None, info
+
+        # Try to load and validate
+        try:
+            with open(cache_file, "rb") as f:
+                cached_data = pickle.load(f)
+
+            # The MeteorPatternScaling.save_model() saves a dict, not the object itself
+            # Check if we loaded a dict (new format) or object (old format)
+            if isinstance(cached_data, dict):
+                # New format: dictionary with model data
+                info["found_name"] = cached_data.get("name", "unknown")
+                if "patternflds" in cached_data:
+                    info["found_fields"] = set(cached_data["patternflds"].keys())
+            else:
+                # Old format: try to get attributes from object
+                info["found_name"] = getattr(cached_data, "name", "unknown")
+                if hasattr(cached_data, "flds"):
+                    info["found_fields"] = set(cached_data.flds.keys())
+                elif hasattr(cached_data, "patternflds"):
+                    info["found_fields"] = set(cached_data.patternflds.keys())
+
+            # Validate model name
+            if info["found_name"] != expected_name:
+                info["message"] = (
+                    f"Model name mismatch: expected '{expected_name}', "
+                    f"found '{info['found_name']}'"
+                )
+                return False, None, info
+
+            # Validate fields exist
+            if not info["found_fields"]:
+                info["message"] = "Cached model missing field information"
+                return False, None, info
+
+            # Validate all expected fields are present
+            if not expected_vars.issubset(info["found_fields"]):
+                missing = expected_vars - info["found_fields"]
+                info["message"] = (
+                    f"Missing required fields: {missing}. "
+                    f"Expected {expected_vars}, found {info['found_fields']}"
+                )
+                return False, None, info
+
+            # Cache is valid
+            info["message"] = (
+                f"Cache valid: model={info['found_name']}, "
+                f"fields={list(info['found_fields'])}"
+            )
+            return True, cached_data, info
+
+        except Exception as e:
+            info["message"] = f"Error reading cache: {e}"
+            return False, None, info
+
+    def get_noise_model_cache_path(self, model_name, variable_name, cache_dir=None):
+        """
+        Get the standardized cache file path for a noise model.
+
+        Parameters
+        ----------
+        model_name : str
+            Name of the CMIP6 model
+        variable_name : str
+            Variable name (e.g., 'tas', 'pr')
+        cache_dir : str, optional
+            Directory for cache files. If None, uses default noise cache location.
+
+        Returns
+        -------
+        str
+            Full path to the cache file
+
+        Examples
+        --------
+        >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
+        >>> cache_path = data_getter.get_noise_model_cache_path("CESM2", "tas")
+        >>> print(cache_path)
+        /path/to/noise_cache/CESM2_tas_noise_model.pkl
+        """
+        if cache_dir is None:
+            # Use noise_cache in current working directory (notebook convention)
+            cache_dir = os.path.join(os.getcwd(), "noise_cache")
+
+        os.makedirs(cache_dir, exist_ok=True)
+        return os.path.join(cache_dir, f"{model_name}_{variable_name}_noise_model.pkl")
+
+    def validate_noise_model_cache(
+        self,
+        cache_file,
+        variable_name,
+        n_modes=40,
+        lag_order=2,
+    ):
+        """
+        Validate a cached noise model file.
+
+        Checks if the cached pickle file exists, can be loaded, and contains
+        the expected configuration (n_modes, lag_order, variable_name) and
+        required attributes (pca, varx_results).
+
+        Parameters
+        ----------
+        cache_file : str
+            Path to the cached noise model file
+        variable_name : str
+            Expected variable name (e.g., 'tas', 'pr')
+        n_modes : int, optional
+            Expected number of PCA modes. Default is 40.
+        lag_order : int, optional
+            Expected temporal lag order. Default is 2.
+
+        Returns
+        -------
+        tuple
+            (is_valid, cached_model, info_dict) where:
+            - is_valid: bool indicating if cache is valid
+            - cached_model: loaded MeteorNoiseGenerator if valid, None otherwise
+            - info_dict: dict with 'message', 'expected', 'found' information
+
+        Examples
+        --------
+        >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
+        >>> cache_file = data_getter.get_noise_model_cache_path("CESM2", "tas")
+        >>> is_valid, model, info = data_getter.validate_noise_model_cache(
+        ...     cache_file, "tas", n_modes=40, lag_order=2
+        ... )
+        >>> if is_valid:
+        ...     print(f"✅ {info['message']}")
+        """
+        # Import here to avoid circular dependency
+        from meteor.noise_generator import MeteorNoiseGenerator
+
+        info = {
+            "expected": {
+                "variable_name": variable_name,
+                "n_modes": n_modes,
+                "lag_order": lag_order,
+            },
+            "found": {},
+            "message": "",
+        }
+
+        # Check if file exists
+        if not os.path.exists(cache_file):
+            info["message"] = f"Cache file not found: {cache_file}"
+            return False, None, info
+
+        # Try to load and validate
+        try:
+            noise_model = MeteorNoiseGenerator(n_modes=n_modes, lag_order=lag_order)
+            noise_model.load_model(cache_file)
+
+            # Extract found information
+            info["found"]["n_modes"] = getattr(noise_model, "n_modes", None)
+            info["found"]["lag_order"] = getattr(noise_model, "lag_order", None)
+            info["found"]["variable_name"] = getattr(noise_model, "variable_name", None)
+
+            # Validate n_modes
+            if not hasattr(noise_model, "n_modes") or noise_model.n_modes != n_modes:
+                info["message"] = (
+                    f"n_modes mismatch: expected {n_modes}, "
+                    f"found {info['found']['n_modes']}"
+                )
+                return False, None, info
+
+            # Validate lag_order
+            if (
+                not hasattr(noise_model, "lag_order")
+                or noise_model.lag_order != lag_order
+            ):
+                info["message"] = (
+                    f"lag_order mismatch: expected {lag_order}, "
+                    f"found {info['found']['lag_order']}"
+                )
+                return False, None, info
+
+            # Validate variable_name
+            if (
+                not hasattr(noise_model, "variable_name")
+                or noise_model.variable_name != variable_name
+            ):
+                info["message"] = (
+                    f"variable_name mismatch: expected '{variable_name}', "
+                    f"found '{info['found']['variable_name']}'"
+                )
+                return False, None, info
+
+            # Validate required attributes
+            required_attrs = ["pca", "varx_results"]
+            missing_attrs = [
+                attr for attr in required_attrs if not hasattr(noise_model, attr)
+            ]
+            if missing_attrs:
+                info["message"] = f"Missing required attributes: {missing_attrs}"
+                return False, None, info
+
+            # Cache is valid
+            info["message"] = (
+                f"Cache valid: variable={variable_name}, "
+                f"n_modes={n_modes}, lag_order={lag_order}"
+            )
+            return True, noise_model, info
+
+        except Exception as e:
+            info["message"] = f"Error loading cache: {e}"
+            return False, None, info

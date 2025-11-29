@@ -232,6 +232,8 @@ class MeteorNoiseGenerator:
             "month": ds.coords["month"],
         }
 
+        # Store variable name for future reference
+        self.variable_name = variable_name
         self.fitted = True
 
         print("Noise generator fitted successfully.")
@@ -992,6 +994,7 @@ class MeteorNoiseGenerator:
             "varx_results": self.varx_results,
             "coords": self.coords,
             "fitted": self.fitted,
+            "variable_name": self.variable_name,
         }
 
         with open(filepath, "wb") as f:
@@ -1018,6 +1021,9 @@ class MeteorNoiseGenerator:
         self.varx_results = model_data["varx_results"]
         self.coords = model_data["coords"]
         self.fitted = model_data["fitted"]
+
+        # Load variable_name if available (for backward compatibility)
+        self.variable_name = model_data.get("variable_name", None)
 
         print(f"Model loaded from {filepath}")
 

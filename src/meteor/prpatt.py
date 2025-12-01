@@ -242,7 +242,7 @@ def fit_timescales(X, a0):
     """
     awgt = np.cos(X.lat / 180 * np.pi)
     awgt = awgt / np.mean(awgt)
-    ts = (X * awgt).mean("lat").mean("lon").values
+    ts = (X * awgt).mean("lat", skipna=True).mean("lon", skipna=True).values
     fit_params = make_params(a0)
     # print(ts)
     out = lmfit.minimize(
@@ -698,7 +698,7 @@ def get_timescales(anomaly_data, n_modes):
     # initialise an LMFIT parameter object, with tmscl_0 timescales and
     # n_modes modes
     # our first guess for amplitude is just the mean of the 2d field
-    ampguess = anomaly_data.mean("lat").mean("lon").mean("time")
+    ampguess = anomaly_data.mean("lat", skipna=True).mean("lon", skipna=True).mean("time", skipna=True)
     # our time guess is 1,10,100 etc years
     tguess = 5 * 10 ** (np.arange(n_modes))
     # initialise the initial guess vector

@@ -54,7 +54,7 @@ class MeteorNoiseGenerator:
         Whether the model has been fitted
     """
 
-    def __init__(self, n_modes=10, lag_order=2):
+    def __init__(self, n_modes=10, lag_order=2, use_exog='temp_only'):
         """
         Initialize the noise generator.
 
@@ -64,9 +64,15 @@ class MeteorNoiseGenerator:
             Number of PCA modes to retain
         lag_order : int, default 2
             Lag order for VARX model
+        use_exog : str, default 'temp_only'
+            Exogenous variables to use in VARX model:
+            - 'all': Use temperature, annual_cos, annual_sin (original behavior)
+            - 'temp_only': Use only temperature (recommended to avoid spurious seasonality)
+            - 'none': Pure VAR with no exogenous variables
         """
         self.n_modes = n_modes
         self.lag_order = lag_order
+        self.use_exog = use_exog
         self.seasonal_model = None
         self.pca = None
         self.varx_results = None
@@ -75,6 +81,14 @@ class MeteorNoiseGenerator:
 
         # In-memory cache for regional EOF projections (model-invariant)
         self._regional_eof_projections = {}
+        
+        # Diagnostic outputs (optional, set during fit)
+        self.diagnostic_X_features = None
+        self.diagnostic_t_glob = None
+        self.diagnostic_time = None
+        self.diagnostic_seasonal_coef = None
+        self.diagnostic_seasonal_intercept = None
+        self.diagnostic_Y_data = None
 
     def _create_harmonic_features(self, time, t_glob):
         """
@@ -109,11 +123,35 @@ class MeteorNoiseGenerator:
                 t_glob * annual_cos,
                 t_glob * annual_sin,
                 t_glob * semiannual_cos,
-                t_glob * semiannual_sin,
+                t_glob * semiannual_sin
             ]
         ).T
 
         return X
+
+    def _extract_exog_variables(self, X):
+        """
+        Extract exogenous variables from feature matrix based on use_exog setting.
+        
+        Parameters
+        ----------
+        X : np.ndarray
+            Full feature matrix from _create_harmonic_features
+            
+        Returns
+        -------
+        np.ndarray or None
+            Exogenous variables for VARX, or None for pure VAR
+        """
+        if self.use_exog == 'all':
+            return X[:, :3]  # t_glob, annual_cos, annual_sin
+        elif self.use_exog == 'temp_only':
+            return X[:, :1]  # Only t_glob
+        elif self.use_exog == 'none':
+            return None  # Pure VAR
+        else:
+            raise ValueError(f"Invalid use_exog value: {self.use_exog}. "
+                           f"Must be 'all', 'temp_only', or 'none'.")
 
     # pylint: disable=missing-type-doc,too-many-locals
     def fit(
@@ -122,6 +160,7 @@ class MeteorNoiseGenerator:
         variable_name,
         custom_global_temp=None,
         picontrol_baseline=None,
+        save_diagnostics=False,
     ):
         """
         Fit the noise generator to monthly climate data.
@@ -143,6 +182,10 @@ class MeteorNoiseGenerator:
             If provided, global temperature will be computed relative to this
             baseline, ensuring consistency with pattern scaling. If None,
             falls back to using first 42 years of training data as baseline.
+        save_diagnostics : bool, default False
+            If True, saves the X features matrix, global mean, and time arrays
+            to self.diagnostic_X_features, self.diagnostic_t_glob, and
+            self.diagnostic_time for debugging purposes.
         """
         # Extract the variable data
         if variable_name not in monthly_data:
@@ -191,6 +234,16 @@ class MeteorNoiseGenerator:
 
         # Create harmonic features
         X = self._create_harmonic_features(time, t_glob)
+        
+        # Save diagnostic outputs if requested
+        if save_diagnostics:
+            self.diagnostic_X_features = X.copy()
+            self.diagnostic_t_glob = t_glob.copy()
+            self.diagnostic_time = time.copy()
+            print("   📊 Diagnostic outputs saved:")
+            print(f"      X_features shape: {X.shape}")
+            print(f"      t_glob shape: {t_glob.shape}")
+            print(f"      time shape: {time.shape}")
 
         # Prepare data for seasonal cycle fitting
         Y_xr = (  # pylint: disable=invalid-name
@@ -202,6 +255,16 @@ class MeteorNoiseGenerator:
         self.seasonal_model = LinearRegression(fit_intercept=True)
         self.seasonal_model.fit(X, Y)
 
+        # Save additional diagnostic outputs if requested
+        if save_diagnostics:
+            self.diagnostic_seasonal_coef = self.seasonal_model.coef_.copy()
+            self.diagnostic_seasonal_intercept = self.seasonal_model.intercept_.copy()
+            self.diagnostic_Y_data = Y.copy()
+            print("   📊 Seasonal model diagnostics saved:")
+            print(f"      Coefficients shape: {self.seasonal_model.coef_.shape} (gridpoints × features)")
+            print(f"      Intercept shape: {self.seasonal_model.intercept_.shape}")
+            print(f"      Y data shape: {Y.shape} (time × gridpoints)")
+
         # Reconstruct seasonal cycle
         seasonal_cycle_fit = self.seasonal_model.predict(X)
         seasonal_cycle_fit_xr = xr.DataArray(
@@ -209,8 +272,10 @@ class MeteorNoiseGenerator:
         ).unstack("space")
 
         # Calculate anomalies
-        anomalies = ds[variable_name].mean(dim=["ens"]) - seasonal_cycle_fit_xr
-
+        if picontrol_baseline is not None:
+            anomalies = ds[variable_name].mean(dim=["ens"]) - seasonal_cycle_fit_xr - picontrol_baseline
+        else:
+            anomalies = ds[variable_name].mean(dim=["ens"]) - seasonal_cycle_fit_xr
         # Fit PCA to anomalies
         anomalies_flat = anomalies.stack(space=("lat", "lon")).data
 
@@ -218,11 +283,10 @@ class MeteorNoiseGenerator:
         pcs = self.pca.fit_transform(anomalies_flat)
 
         # Fit VARX model to PCs
+        X_exog = self._extract_exog_variables(X)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            model_var = VAR(
-                endog=pcs, exog=X[:, :3]
-            )  # Use first 3 features as exogenous
+            model_var = VAR(endog=pcs, exog=X_exog)
             self.varx_results = model_var.fit(self.lag_order)
 
         # Store coordinate information
@@ -242,6 +306,12 @@ class MeteorNoiseGenerator:
             f"   - Variance explained: {self.pca.explained_variance_ratio_.sum():.2%}"
         )
         print(f"   - VARX lag order: {self.lag_order}")
+        if self.use_exog == 'all':
+            print("   - Exogenous vars: t_glob, annual_cos, annual_sin")
+        elif self.use_exog == 'temp_only':
+            print("   - Exogenous vars: t_glob only")
+        else:
+            print("   - Exogenous vars: none (pure VAR)")
 
     # pylint: disable=missing-type-doc,too-many-locals
     def generate_stochastic_pcs(
@@ -294,7 +364,7 @@ class MeteorNoiseGenerator:
 
         # Create exogenous variables for VARX
         X = self._create_harmonic_features(time, global_temp_trajectory)
-        X_exog = X[:, :3]  # First 3 columns: t_glob, annual_cos, annual_sin
+        X_exog = self._extract_exog_variables(X)
 
         # Generate stochastic PCs for each realization
         if n_realizations == 1:
@@ -354,7 +424,7 @@ class MeteorNoiseGenerator:
 
         # Precompute harmonic features (shared across all realizations)
         X = self._create_harmonic_features(time, global_temp_trajectory)
-        X_exog = X[:, :3]  # Exogenous variables for VARX
+        X_exog = self._extract_exog_variables(X)
 
         # Precompute seasonal cycle as NumPy array (shared across all realizations)
         if noise_only:
@@ -443,8 +513,8 @@ class MeteorNoiseGenerator:
 
         Parameters
         ----------
-        X_exog : np.ndarray
-            Exogenous variables for VARX model (n_time, n_exog)
+        X_exog : np.ndarray or None
+            Exogenous variables for VARX model (n_time, n_exog), or None for pure VAR
         n_time : int
             Number of time steps to generate
 
@@ -455,7 +525,7 @@ class MeteorNoiseGenerator:
         """
         # Extract coefficient matrices from fitted VARX model
         params = self.varx_results.params
-        n_exog = X_exog.shape[1]
+        n_exog = X_exog.shape[1] if X_exog is not None else 0
 
         # Intercept (n_modes,)
         intercept = params[0, :]
@@ -495,8 +565,9 @@ class MeteorNoiseGenerator:
                 y_lag = synthetic_pcs[t - lag_i - 1]
                 forecast += A_matrices[lag_i] @ y_lag
 
-            # Add exogenous contribution: B·x_t
-            forecast += B_matrix @ X_exog[t]
+            # Add exogenous contribution: B·x_t (if using exogenous variables)
+            if X_exog is not None:
+                forecast += B_matrix @ X_exog[t]
 
             # Add pre-generated random shock (no MVN call here!)
             synthetic_pcs[t] = forecast + all_shocks[t]
@@ -909,7 +980,7 @@ class MeteorNoiseGenerator:
 
         # Generate or use provided stochastic PCs
         if stochastic_pcs is None:
-            X_exog = X[:, :3]
+            X_exog = self._extract_exog_variables(X)
             if n_realizations == 1:
                 pcs_to_use = [self._generate_stochastic_pcs(X_exog, n_time)]
             else:
@@ -989,6 +1060,7 @@ class MeteorNoiseGenerator:
         model_data = {
             "n_modes": self.n_modes,
             "lag_order": self.lag_order,
+            "use_exog": self.use_exog,
             "seasonal_model": self.seasonal_model,
             "pca": self.pca,
             "varx_results": self.varx_results,
@@ -1016,6 +1088,7 @@ class MeteorNoiseGenerator:
 
         self.n_modes = model_data["n_modes"]
         self.lag_order = model_data["lag_order"]
+        self.use_exog = model_data.get("use_exog", "all")  # Default to 'all' for backward compatibility
         self.seasonal_model = model_data["seasonal_model"]
         self.pca = model_data["pca"]
         self.varx_results = model_data["varx_results"]
@@ -1039,6 +1112,8 @@ def train_noise_model_from_cmip6(
     cache_dir=None,
     custom_global_temp=None,
     use_picontrol_baseline=True,
+    save_diagnostics=False,
+    use_exog='temp_only',
 ):
     """
     Train a noise generator from CMIP6 data.
@@ -1071,6 +1146,17 @@ def train_noise_model_from_cmip6(
         Whether to use piControl data as baseline for temperature anomalies.
         This ensures consistency with pattern scaling.
         If False, falls back to using first 42 years of training data.
+    save_diagnostics : bool, default False
+        If True, saves diagnostic outputs (X features matrix, global mean, time)
+        to the fitted model for debugging purposes. Access via
+        model.diagnostic_X_features, model.diagnostic_t_glob, model.diagnostic_time,
+        model.diagnostic_seasonal_coef, model.diagnostic_seasonal_intercept,
+        and model.diagnostic_Y_data.
+    use_exog : str, default 'temp_only'
+        Exogenous variables to use in VARX model:
+        - 'all': Use temperature, annual_cos, annual_sin (may cause spurious seasonality)
+        - 'temp_only': Use only temperature (recommended)
+        - 'none': Pure VAR with no exogenous variables
 
     Returns
     -------
@@ -1112,12 +1198,13 @@ def train_noise_model_from_cmip6(
             picontrol_baseline = None
 
     # Create and fit noise generator
-    noise_gen = MeteorNoiseGenerator(n_modes=n_modes, lag_order=lag_order)
+    noise_gen = MeteorNoiseGenerator(n_modes=n_modes, lag_order=lag_order, use_exog=use_exog)
     noise_gen.fit(
         monthly_data,
         variable_name,
         custom_global_temp=custom_global_temp,
         picontrol_baseline=picontrol_baseline,
+        save_diagnostics=save_diagnostics,
     )
 
     # Cache if requested
@@ -1142,6 +1229,7 @@ def train_multiple_noise_models_from_cmip6(
     cache_dir=None,
     custom_global_temp=None,
     use_picontrol_baseline=True,
+    use_exog='temp_only',
 ):
     """
     Train noise generators for multiple model/variable combinations.
@@ -1172,6 +1260,11 @@ def train_multiple_noise_models_from_cmip6(
         Whether to use piControl data as baseline for temperature anomalies.
         This ensures consistency with pattern scaling.
         If False, falls back to using first 42 years of training data.
+    use_exog : str, default 'temp_only'
+        Exogenous variables to use in VARX model:
+        - 'all': Use temperature, annual_cos, annual_sin (may cause spurious seasonality)
+        - 'temp_only': Use only temperature (recommended)
+        - 'none': Pure VAR with no exogenous variables
 
     Returns
     -------
@@ -1218,6 +1311,7 @@ def train_multiple_noise_models_from_cmip6(
                     cache_dir=cache_dir,
                     custom_global_temp=custom_global_temp,
                     use_picontrol_baseline=use_picontrol_baseline,
+                    use_exog=use_exog,
                 )
                 noise_models[model][variable] = noise_gen
             except Exception as e:  # pylint: disable=broad-exception-caught

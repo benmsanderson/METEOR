@@ -24,5 +24,7 @@ from .prpatt import (  # noqa: F401
     extract_point,
     list_ar6_regions,
 )
+from .meteor_interface import MeteorInterface  # noqa: F401
+from .ensemble_output import EnsembleOutput, VariableOutput  # noqa: F401
 
 __version__ = _version.get_versions()["version"]

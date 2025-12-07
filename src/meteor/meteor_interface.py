@@ -218,11 +218,12 @@ class MeteorInterface:
             'n_modes_noise': 40,
             'lag_order': 2,
             'use_picontrol_baseline': True,
+            'training_scenario': 'ssp245',  # ✅ Add default training scenario
         }
         
         # Variable-specific defaults
         if variable == 'tas':
-            config['use_exog'] = 'temp_only'
+            config['use_exog'] = 'all'
             config['transform'] = False
         elif variable == 'pr':
             config['use_exog'] = 'none'
@@ -299,15 +300,54 @@ class MeteorInterface:
             if verbose:
                 print("      ⚠️  Training new noise model...")
             
+            # ✅ Get training scenario from config
+            training_scenario = config.get('training_scenario', 'ssp245')
+            
+            # ✅ Generate pattern scaling prediction for custom_global_temp
+            # This ensures noise model training uses same temperature trajectory as generation
+            from ciceroscm import input_handler
+            from meteor import global_mean
+            
+            cscm_data_dir = os.path.join(
+                os.path.dirname(__file__), "default_scm_data"
+            )
+            conc_file = os.path.join(cscm_data_dir, f"{training_scenario}_conc_RCMIP.txt")
+            em_file = os.path.join(cscm_data_dir, f"{training_scenario}_em_RCMIP.txt")
+            
+            ih = input_handler.InputHandler({})
+            conc_data = input_handler.read_inputfile(conc_file)
+            em_data = ih.read_emissions(em_file)
+            
+            # Generate pattern prediction
+            pattern_model = self.pattern_models[variable]
+            climate_prediction = pattern_model.predict_from_combined_experiment(
+                em_data, conc_data, [variable]
+            )
+            annual_prediction = climate_prediction[variable]
+            
+            # Convert to monthly
+            monthly_prediction = pattern_model.to_monthly(
+                annual_prediction, start_year=0
+            )
+            monthly_warming = global_mean(monthly_prediction).values
+            
+            # Trim first 100 years (spin-up) to match working notebook
+            monthly_warming_trimmed = monthly_warming[1200:]  # 100 years * 12 months
+            
+            if verbose:
+                print(f"      → Using {training_scenario} pattern prediction for training")
+                print(f"      → Temperature trajectory: {len(monthly_warming_trimmed)//12} years")
+            
             # Train noise model using data getter interface
             self.noise_models[variable] = train_noise_model_from_cmip6(
                 self.data_getter,
-                experiments=["historical", "ssp245"],
+                experiments=["historical", training_scenario],  # ✅ Use config scenario
                 model_name=self.model,
                 variable_name=variable,
                 n_modes=config['n_modes_noise'],
                 lag_order=config['lag_order'],
                 use_exog=config['use_exog'],
+                custom_global_temp=monthly_warming_trimmed,  # ✅ Pass pattern prediction
                 cache_dir=cache_dir
             )
     
@@ -500,9 +540,21 @@ class MeteorInterface:
             ["historical", scenario], self.model, monthly=True
         )[variable]
         
+        # ✅ CRITICAL: Generate stochastic PCs ONCE for all aggregations
+        # This ensures all spatial scales share the same underlying variability
+        noise_model = self.noise_models[variable]
+        
+        if verbose:
+            print(f"      → Generating {n_realizations} stochastic PC realizations...")
+        
+        stochastic_pcs = noise_model.generate_stochastic_pcs(
+            monthly_warming,
+            n_realizations=n_realizations,
+            random_seed=None  # Can expose this as parameter if needed
+        )
+        
         # Generate outputs for each aggregation
         results = {}
-        noise_model = self.noise_models[variable]
         transform_info = self.transforms.get(variable, None)
         
         # Handle both dict (fitted) and VariableTransformConfig (not fitted) cases
@@ -518,13 +570,14 @@ class MeteorInterface:
             # Parse aggregation type
             if agg == 'global':
                 # Global mean
-                pattern_agg = global_mean(monthly_prediction).values  # Extract global mean from pattern
+                pattern_agg = global_mean(monthly_prediction).values
                 raw_ensemble = noise_model.generate_regional_mean_realizations(
                     monthly_warming,
                     region='global',
                     n_realizations=n_realizations,
-                    noise_only=True,  # ✅ Add this
-                    add_base=pattern_agg,  # ✅ Add this
+                    stochastic_pcs=stochastic_pcs,  # ✅ Reuse PCs
+                    noise_only=True,
+                    add_base=pattern_agg,
                     return_numpy=False
                 )
                 cmip6_agg = global_mean(ssp_data)
@@ -532,13 +585,14 @@ class MeteorInterface:
             elif agg.startswith('regional:'):
                 # Regional mean
                 region_code = agg.split(':')[1]
-                pattern_agg = regional_mean(monthly_prediction, region_code).values  # Extract regional mean
+                pattern_agg = regional_mean(monthly_prediction, region_code).values
                 raw_ensemble = noise_model.generate_regional_mean_realizations(
                     monthly_warming,
                     region=region_code,
                     n_realizations=n_realizations,
-                    noise_only=True,  # ✅ Add this
-                    add_base=pattern_agg,  # ✅ Add this
+                    stochastic_pcs=stochastic_pcs,  # ✅ Reuse PCs
+                    noise_only=True,
+                    add_base=pattern_agg,
                     return_numpy=False
                 )
                 cmip6_agg = regional_mean(ssp_data, region_code)
@@ -550,14 +604,15 @@ class MeteorInterface:
                 lat = float(lat_str)
                 lon = float(lon_str)
                 
-                pattern_agg = extract_point(monthly_prediction, lat, lon).values  # Extract point
+                pattern_agg = extract_point(monthly_prediction, lat, lon).values
                 raw_ensemble = noise_model.generate_regional_mean_realizations(
                     monthly_warming,
                     lat=lat,
                     lon=lon,
                     n_realizations=n_realizations,
-                    noise_only=True,  # ✅ Add this
-                    add_base=pattern_agg,  # ✅ Add this
+                    stochastic_pcs=stochastic_pcs,  # ✅ Reuse PCs
+                    noise_only=True,
+                    add_base=pattern_agg,
                     return_numpy=False
                 )
                 cmip6_agg = extract_point(ssp_data, lat, lon)

@@ -105,7 +105,38 @@ print(f"2100 HDD: {hdd[:, -1].mean():.0f} degree-days")
 print(f"HDD change: {((hdd[:, -1].mean() - hdd[:, 170].mean()) / hdd[:, 170].mean() * 100):.1f}%")
 ```
 
-#### Example 4: Multi-Scenario Comparison
+#### Example 4: Full Gridded Output
+
+Generate spatial maps for specific years:
+
+```python
+ensemble = emulator.generate(
+    scenario='ssp245',
+    start_year=1850,
+    end_year=2100,
+    n_realizations=50,
+    timeseries=['global'],  # Still compute global mean
+    gridded={
+        'annual': [2030, 2050, 2100],  # Yearly averages for these years
+        'monthly': [2100]              # Full monthly fields for 2100
+    }
+)
+
+# Access gridded output
+tas_2030_annual = ensemble['tas'].gridded['annual'][2030]  # Shape: (50, lat, lon)
+tas_2100_monthly = ensemble['tas'].gridded['monthly'][2100]  # Shape: (50, 12, lat, lon)
+pr_2050_annual = ensemble['pr'].gridded['annual'][2050]
+
+# Example: Plot ensemble mean warming pattern for 2100
+import matplotlib.pyplot as plt
+warming_pattern = tas_2030_annual.mean(axis=0)  # Average over realizations
+plt.contourf(warming_pattern)
+plt.colorbar(label='Temperature Anomaly (K)')
+plt.title('2030 Warming Pattern (50-member mean)')
+plt.show()
+```
+
+#### Example 5: Multi-Scenario Comparison
 
 Compare different emission scenarios:
 

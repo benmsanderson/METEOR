@@ -2,10 +2,7 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17523936.svg)](https://doi.org/10.5281/zenodo.17523936)
 
-METEOR is a spatial climate emulator that rapidly generates ensemble climate projections by combining:
-- **Pattern Scaling**: Fast long-term climate response modeling
-- **Monthly Variability**: Realistic short-term climate noise and seasonality  
-- **Impact Assessment**: Climate impact calculations and ensemble analysis
+METEOR is a fast spatial climate emulator that generates large ensembles of monthly climate projections with realistic variability. Perfect for impact assessment, uncertainty quantification, and exploring climate scenarios.
 
 ## Quick Start
 
@@ -19,9 +16,258 @@ make virtual-environment
 source venv/bin/activate
 ```
 
-### Basic Usage
+### Getting Started with MeteorInterface
 
-#### 1. Simple Annual Climate Projection
+The `MeteorInterface` provides the simplest way to generate climate projections. It handles all the complexity of pattern scaling, noise modeling, and data management automatically.
+
+#### Example 1: Your First Climate Ensemble
+
+Generate 100 realizations of global temperature and precipitation for SSP2-4.5:
+
+```python
+from meteor import MeteorInterface
+
+# Create and train emulator (uses cached models if available)
+emulator = MeteorInterface.from_cmip6(
+    model='NorESM2-MM',
+    variables=['tas', 'pr'],
+    cache_dir='./cache'
+)
+emulator.train(auto=True, verbose=True)
+
+# Generate ensemble
+ensemble = emulator.generate(
+    scenario='ssp245',
+    start_year=1850,
+    end_year=2100,
+    n_realizations=100,
+    timeseries=['global']  # Global mean
+)
+
+# Access results
+global_temp = ensemble['tas'].timeseries['global']  # Shape: (100, 3012 months)
+print(f"Ensemble shape: {global_temp.shape}")
+print(f"2100 warming: {global_temp[:, -1].mean():.2f} ± {global_temp[:, -1].std():.2f} K")
+```
+
+#### Example 2: Regional and City-Scale Projections
+
+Add spatial detail with regional means and specific locations:
+
+```python
+# Generate multiple spatial scales
+ensemble = emulator.generate(
+    scenario='ssp245',
+    start_year=1850,
+    end_year=2100,
+    n_realizations=100,
+    timeseries=[
+        'global',
+        'regional:NEU',  # Northern Europe (AR6 region)
+        'regional:EAS',  # East Asia
+        'point:59.9,10.8',  # Oslo coordinates (lat, lon)
+        'point:28.6,77.2'   # Delhi
+    ]
+)
+
+# Access different scales
+neu_temp = ensemble['tas'].timeseries['regional:NEU']
+oslo_temp = ensemble['tas'].timeseries['point:59.9,10.8']
+```
+
+#### Example 3: Climate Impact Metrics
+
+Calculate heating and cooling degree days automatically:
+
+```python
+ensemble = emulator.generate(
+    scenario='ssp245',
+    start_year=1850,
+    end_year=2100,
+    n_realizations=100,
+    timeseries=['point:59.9,10.8'],  # Oslo
+    impacts={
+        'tas': {
+            'degree_days': {
+                'hdd_base': 18.0,  # Heating degree days
+                'cdd_base': 18.0   # Cooling degree days
+            }
+        }
+    }
+)
+
+# Access impact metrics (annual values)
+hdd = ensemble['tas'].impacts['hdd']['point:59.9,10.8']  # Shape: (100, 251 years)
+cdd = ensemble['tas'].impacts['cdd']['point:59.9,10.8']
+
+print(f"2020 HDD: {hdd[:, 170].mean():.0f} degree-days")
+print(f"2100 HDD: {hdd[:, -1].mean():.0f} degree-days")
+print(f"HDD change: {((hdd[:, -1].mean() - hdd[:, 170].mean()) / hdd[:, 170].mean() * 100):.1f}%")
+```
+
+#### Example 4: Multi-Scenario Comparison
+
+Compare different emission scenarios:
+
+```python
+scenarios = ['ssp126', 'ssp245', 'ssp585']
+ensembles = {}
+
+for scenario in scenarios:
+    ensembles[scenario] = emulator.generate(
+        scenario=scenario,
+        start_year=2015,
+        end_year=2100,
+        n_realizations=50,
+        timeseries=['global']
+    )
+
+# Compare 2100 warming
+for scenario in scenarios:
+    temp_2100 = ensembles[scenario]['tas'].timeseries['global'][:, -1]
+    print(f"{scenario}: {temp_2100.mean():.2f} ± {temp_2100.std():.2f} K")
+```
+
+### What MeteorInterface Does For You
+
+- ✅ **Automatic Training**: Loads CMIP6 data and trains both pattern scaling and noise models
+- ✅ **Smart Caching**: Reuses trained models to save time on subsequent runs
+- ✅ **Variable Transforms**: Handles precipitation's gamma distribution automatically
+- ✅ **Monthly Resolution**: Generates realistic monthly variability with proper seasonality
+- ✅ **Spatial Aggregation**: Computes global, regional, and point timeseries on-the-fly
+- ✅ **Impact Metrics**: Calculates degree days and other climate impacts
+- ✅ **Ensemble Management**: Organizes multiple realizations with clean data structures
+
+See the **`notebooks/METEOR_Interface_Demo.ipynb`** for a complete tutorial with visualization examples.
+
+## Customizing MeteorInterface
+
+For advanced users who want control over model parameters while keeping the convenience of the high-level interface.
+
+### Custom Model Configuration
+
+Override default parameters using the `train()` method with `variable_configs`:
+
+```python
+from meteor import MeteorInterface
+
+# Create emulator
+emulator = MeteorInterface.from_cmip6(
+    model='NorESM2-MM',
+    variables=['tas', 'pr'],
+    cache_dir='./cache'
+)
+
+# Train with custom configuration per variable
+emulator.train(
+    auto=True,                    # Use smart defaults as baseline
+    training_scenario='ssp245',   # Default training scenario
+    variable_configs={
+        'tas': {
+            'n_modes_pattern': 3,        # Number of pattern scaling modes (default: 3)
+            'n_modes_noise': 40,         # Number of noise PCA modes (default: 40)
+            'lag_order': 2,              # Temporal memory in noise model (default: 2)
+            'use_exog': 'all',           # Use exogenous variables ('all', 'temp_only', 'none')
+            'training_scenario': 'ssp245'  # Override scenario for this variable
+        },
+        'pr': {
+            'n_modes_noise': 50,         # More modes for precipitation
+            'training_scenario': 'ssp370',  # Different scenario for pr
+            'transform': True            # Apply gamma transform (default: True for pr)
+        }
+    },
+    verbose=True
+)
+```
+
+### Training Options
+
+Control the training process:
+
+```python
+# Automatic training with smart defaults (recommended)
+emulator.train(auto=True, verbose=True)
+
+# Manual training with specific settings
+emulator.train(
+    auto=False,
+    training_scenario='ssp370',
+    variable_configs={
+        'tas': {'n_modes_noise': 30, 'lag_order': 1}
+    },
+    verbose=True
+)
+```
+
+### Custom Data Sources
+
+Customize the CMIP6 data source during initialization:
+
+```python
+from meteor import MeteorInterface
+
+# Custom experiments and data sources
+emulator = MeteorInterface.from_cmip6(
+    model='NorESM2-MM',
+    variables=['tas', 'pr'],
+    cache_dir='./cache',
+    exps=['piControl', 'abrupt-4xCO2', 'historical', 'ssp245', 'ssp370'],
+    dbe=['CMIP', 'CMIP', 'CMIP', 'ScenarioMIP', 'ScenarioMIP']
+)
+```
+from meteor import MeteorInterface, Cmip6MeteorDataGetter
+
+# Custom data getter with specific experiments
+data_getter = Cmip6MeteorDataGetter(
+    exps=['piControl', 'abrupt-4xCO2', 'historical', 'ssp245'],
+    flds=['tas', 'pr'],
+    enable_cache=True,
+    cache_dir='/custom/cache/path'
+)
+
+# Create emulator with custom data source
+emulator = MeteorInterface(
+    model='NorESM2-MM',
+    variables=['tas', 'pr'],
+    data_getter=data_getter
+)
+```
+
+### Advanced Generation Options
+
+Customize ensemble generation behavior:
+
+```python
+ensemble = emulator.generate(
+    scenario='ssp245',
+    start_year=1850,
+    end_year=2100,
+    n_realizations=100,
+    timeseries=['global', 'regional:NEU', 'point:59.9,10.8'],
+    
+    # Impact calculations
+    impacts={
+        'tas': {
+            'degree_days': {
+                'hdd_base': 15.0,      # Custom base temperature for heating
+                'cdd_base': 22.0       # Custom base temperature for cooling
+            }
+        }
+    },
+    
+    verbose=True
+)
+```
+
+
+## Advanced Usage: Lower-Level API
+
+For users who need fine-grained control over the emulation process, METEOR provides direct access to the underlying components.
+
+### Pattern Scaling Engine
+
+Build custom pattern scaling models with explicit control:
+
 ```python
 from meteor import Cmip6MeteorDataGetter, MeteorPatternScaling
 from ciceroscm import input_handler
@@ -30,10 +276,10 @@ from ciceroscm import input_handler
 data_getter = Cmip6MeteorDataGetter()
 model = "CanESM5"
 
-# Create pattern model
+# Create pattern model with custom configuration
 pattern_model = MeteorPatternScaling(
     "demo",
-    {"tas": 2, "pr": 2},  # 2 patterns per variable
+    {"tas": 2, "pr": 2},  # 2 patterns per climate variable
     lambda key: data_getter.make_meteor_training_data(key, model),
     exp_list=["base", "co2x4"]
 )
@@ -46,16 +292,20 @@ prediction = pattern_model.predict_from_combined_experiment(
 )
 ```
 
-#### 2. Monthly Climate with Variability
+### Monthly Noise Generation
+
+Explicit control over variability modeling:
+
 ```python
 import numpy as np
 
-# Train monthly noise model
+# Train monthly noise model with custom parameters
 noise_model = data_getter.train_noise_model(
     experiments=["historical", "ssp245"],
     model=model,
     variable_name="tas",
-    n_modes=8
+    n_modes=8,  # Number of PCA modes
+    lag_order=1  # Temporal dependencies
 )
 
 # Generate monthly climate with noise
@@ -68,7 +318,10 @@ noise = noise_model.generate_realization(monthly_temp, noise_only=True)
 monthly_climate = monthly_base + noise
 ```
 
-#### 3. Climate Impact Assessment
+### Custom Impact Calculations
+
+Build your own impact assessment pipeline:
+
 ```python
 from meteor.impacts import DegreeDaysCalculator, create_impact_ensemble
 
@@ -92,6 +345,7 @@ See `QUICK_START.md` for detailed workflows and `MONTHLY_NOISE_README.md` for ad
 
 | Component | Purpose | Key Classes |
 |-----------|---------|-------------|
+| **High-Level Interface** | Simple ensemble generation | `MeteorInterface` |
 | **Pattern Scaling** | Annual climate projections from forcings | `MeteorPatternScaling` |
 | **Monthly Generation** | Convert annual to monthly + seasonality | `MeteorNoiseGenerator` |
 | **Data Access** | CMIP6 cloud data integration | `Cmip6MeteorDataGetter` |
@@ -101,6 +355,10 @@ See `QUICK_START.md` for detailed workflows and `MONTHLY_NOISE_README.md` for ad
 ### Workflow Patterns
 
 ```
+High-Level (MeteorInterface):
+Scenario → .generate() → Ensemble (with timeseries, impacts, etc.)
+
+Low-Level (Component-by-Component):
 Emissions/Concentrations → Pattern Scaling → Annual Climate
                                               ↓
 Monthly Base Climate ← to_monthly()          Annual Climate
@@ -113,9 +371,10 @@ Climate Impacts ← calculate() ← Impact Calculator
 ## Documentation & Examples
 
 ### Notebooks (`notebooks/`)
+- **`METEOR_Interface_Demo.ipynb`**: Complete MeteorInterface tutorial ⭐ **START HERE**
 - **`METEOR_single_model_pattern_example.ipynb`**: Single model pattern creation
 - **`CMIP6_demo_with_residual.ipynb`**: Aerosol forcing from residuals  
-- **`CMIP6_noise_model_examples.ipynb`**: Multi-model workflow with monthly noise ⭐
+- **`CMIP6_noise_model_examples.ipynb`**: Multi-model workflow with monthly noise
 - **`Climate_Bench_METEOR.ipynb`**: ClimateBench metrics calculation
 - **Paper Figures**: `METEOR_paper_figures*.ipynb` (research reproducibility)
 
@@ -125,13 +384,60 @@ Climate Impacts ← calculate() ← Impact Calculator
 - **`make_pattern_4xco2_plots.py`**: 4×CO₂ pattern generation example
 
 ### Additional Documentation
-- **`QUICK_START.md`**: Detailed workflow examples
+- **`QUICK_START.md`**: Detailed workflow examples (lower-level API)
 - **`MONTHLY_NOISE_README.md`**: Complete monthly modeling guide
 - **`streamlit/README.md`**: Web app deployment guide
 
+
 ## API Reference
 
-### Primary Classes
+### MeteorInterface (Recommended)
+
+The high-level interface for easy ensemble generation:
+
+```python
+from meteor import MeteorInterface
+
+# Create emulator from CMIP6 model
+emulator = MeteorInterface.from_cmip6(
+    model='NorESM2-MM',           # CMIP6 model name
+    variables=['tas', 'pr'],      # Climate variables
+    cache_dir='./cache'           # Cache location
+)
+
+# Train models (auto mode recommended)
+emulator.train(auto=True, verbose=True)
+
+# Generate ensemble
+ensemble = emulator.generate(
+    scenario='ssp245',            # Emission scenario
+    start_year=1850,              # Start year
+    end_year=2100,                # End year
+    n_realizations=100,           # Number of ensemble members
+    timeseries=[                  # Spatial aggregations
+        'global',
+        'regional:NEU',           # AR6 region code
+        'point:59.9,10.8'         # lat,lon
+    ],
+    impacts={                     # Optional impact metrics
+        'tas': {
+            'degree_days': {
+                'hdd_base': 18.0,
+                'cdd_base': 18.0
+            }
+        }
+    }
+)
+
+# Access results
+ensemble['tas'].timeseries['global']        # Temperature timeseries
+ensemble['pr'].timeseries['regional:NEU']   # Precipitation regional mean
+ensemble['tas'].impacts['hdd']['point:59.9,10.8']  # Heating degree days
+ensemble.list_variables()                   # List available variables
+ensemble['tas'].list_impacts()              # List available impact metrics
+```
+
+### Lower-Level API
 
 #### `MeteorPatternScaling`
 ```python

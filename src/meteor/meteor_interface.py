@@ -6,6 +6,8 @@ pattern scaling and noise generation capabilities.
 """
 
 import os
+import numpy as np
+import xarray as xr
 
 from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 from meteor import MeteorPatternScaling
@@ -138,7 +140,7 @@ class MeteorInterface:
         
         return cls(model, vars_to_use, cache_dir, data_getter_kwargs=kwargs)
     
-    def train(self, auto=True, variable_configs=None, verbose=True):
+    def train(self, auto=True, training_scenario='ssp245', variable_configs=None, verbose=True):
         """
         Train pattern scaling and noise models for all variables.
         
@@ -146,9 +148,19 @@ class MeteorInterface:
         ----------
         auto : bool, optional
             Use automatic smart defaults (default True)
+        training_scenario : str, optional
+            Default scenario for training noise models (default 'ssp245').
+            Can be overridden per-variable in variable_configs.
         variable_configs : dict, optional
             Custom configuration per variable. Keys are variable names,
-            values are dicts with configuration options.
+            values are dicts with configuration options including:
+            - n_modes_pattern : int
+            - n_modes_noise : int
+            - lag_order : int
+            - use_exog : str ('all', 'temp_only', 'none')
+            - training_scenario : str (overrides method parameter)
+            - transform : bool
+            - transform_type : str
         verbose : bool, optional
             Print progress messages (default True)
         
@@ -157,11 +169,15 @@ class MeteorInterface:
         >>> # Automatic training with smart defaults
         >>> emulator.train(auto=True)
         >>> 
-        >>> # Custom configuration
+        >>> # Custom training scenario for all variables
+        >>> emulator.train(training_scenario='ssp370')
+        >>> 
+        >>> # Custom configuration with per-variable scenarios
         >>> emulator.train(
+        ...     training_scenario='ssp245',  # default for most variables
         ...     variable_configs={
-        ...         'tas': {'n_modes_noise': 40, 'use_exog': 'temp_only'},
-        ...         'pr': {'n_modes_noise': 40, 'use_exog': 'none', 'transform': 'gamma'}
+        ...         'tas': {'n_modes_noise': 40, 'use_exog': 'all'},
+        ...         'pr': {'n_modes_noise': 40, 'training_scenario': 'ssp370'}  # override for pr
         ...     }
         ... )
         """
@@ -175,11 +191,20 @@ class MeteorInterface:
             if verbose:
                 print(f"\n🔧 Training {variable.upper()}...")
             
-            # Get configuration
+            # Get configuration with hybrid precedence
             if auto:
                 config = self._get_default_config(variable)
+                # Override with method parameter if different from default
+                if training_scenario != 'ssp245':
+                    config['training_scenario'] = training_scenario
+                # Override with variable-specific config if provided
+                if variable_configs and variable in variable_configs:
+                    config.update(variable_configs[variable])
             else:
                 config = variable_configs.get(variable, {}) if variable_configs else {}
+                # Apply method parameter as default if not in config
+                if 'training_scenario' not in config:
+                    config['training_scenario'] = training_scenario
             
             self._training_config[variable] = config
             
@@ -669,32 +694,108 @@ class MeteorInterface:
         # Check if degree days are requested
         if 'degree_days' in impact_configs:
             try:
-                from meteor.impacts import DegreeDays
+                from meteor.impacts import DegreeDaysCalculator
+                from meteor import global_mean
+                
                 dd_config = impact_configs['degree_days']
-                dd_model = DegreeDays()
+                
+                # Get piControl baseline for absolute temperature calculation
+                # The timeseries data contains anomalies, we need to add baseline
+                picontrol_data = self.data_getter.make_meteor_training_data(
+                    "piControl", self.model, monthly=True
+                )[variable]
                 
                 # Apply to all timeseries outputs
                 if 'hdd_base' in dd_config:
+                    dd_model = DegreeDaysCalculator(base_temperature=dd_config['hdd_base'])
                     impacts['hdd'] = {}
                     for key, ts_data in var_output.timeseries.items():
-                        impacts['hdd'][key] = dd_model.calculate_hdd(
-                            ts_data, base_temp=dd_config['hdd_base']
+                        # Calculate appropriate baseline for this aggregation
+                        if key == 'global':
+                            from meteor import global_mean
+                            baseline_k = float(global_mean(picontrol_data).mean())
+                        elif key.startswith('regional:'):
+                            from meteor import regional_mean
+                            region = key.split(':')[1]
+                            baseline_k = float(regional_mean(picontrol_data, region).mean())
+                        elif key.startswith('point:'):
+                            from meteor import extract_point
+                            coords = key.split(':')[1]
+                            lat, lon = map(float, coords.split(','))
+                            baseline_k = float(extract_point(picontrol_data, lat, lon).mean())
+                        else:
+                            baseline_k = 287.15  # Fallback
+                        
+                        # Convert from anomaly (K) to absolute temperature (°C)
+                        # ts_data is anomaly in K, baseline_k is absolute temperature in K
+                        n_realizations, n_months = ts_data.shape
+                        
+                        # Create xarray with month dimension (required by calculator)
+                        # Absolute temperature in Celsius = (anomaly_K + baseline_K) - 273.15
+                        temp_celsius = xr.DataArray(
+                            ts_data + baseline_k - 273.15,
+                            dims=['realization', 'month'],
+                            coords={'month': np.arange(n_months)}
                         )
+                        
+                        # Calculate degree days for each realization
+                        hdd_results = []
+                        for i in range(n_realizations):
+                            result = dd_model.calculate(temp_celsius[i])
+                            hdd_results.append(result.data['annual_hdd'].values)
+                        
+                        # Stack back into array (n_realizations, n_years)
+                        impacts['hdd'][key] = np.array(hdd_results)
+                        
                         if verbose:
                             print(f"         • HDD for {key}")
                 
                 if 'cdd_base' in dd_config:
+                    dd_model = DegreeDaysCalculator(base_temperature=dd_config['cdd_base'])
                     impacts['cdd'] = {}
                     for key, ts_data in var_output.timeseries.items():
-                        impacts['cdd'][key] = dd_model.calculate_cdd(
-                            ts_data, base_temp=dd_config['cdd_base']
+                        # Calculate appropriate baseline for this aggregation
+                        if key == 'global':
+                            from meteor import global_mean
+                            baseline_k = float(global_mean(picontrol_data).mean())
+                        elif key.startswith('regional:'):
+                            from meteor import regional_mean
+                            region = key.split(':')[1]
+                            baseline_k = float(regional_mean(picontrol_data, region).mean())
+                        elif key.startswith('point:'):
+                            from meteor import extract_point
+                            coords = key.split(':')[1]
+                            lat, lon = map(float, coords.split(','))
+                            baseline_k = float(extract_point(picontrol_data, lat, lon).mean())
+                        else:
+                            baseline_k = 287.15  # Fallback
+                        
+                        # Convert from anomaly (K) to absolute temperature (°C)
+                        n_realizations, n_months = ts_data.shape
+                        
+                        temp_celsius = xr.DataArray(
+                            ts_data + baseline_k - 273.15,
+                            dims=['realization', 'month'],
+                            coords={'month': np.arange(n_months)}
                         )
+                        
+                        # Calculate degree days for each realization
+                        cdd_results = []
+                        for i in range(n_realizations):
+                            result = dd_model.calculate(temp_celsius[i])
+                            cdd_results.append(result.data['annual_cdd'].values)
+                        
+                        impacts['cdd'][key] = np.array(cdd_results)
+                        
                         if verbose:
                             print(f"         • CDD for {key}")
                             
-            except ImportError:
+            except ImportError as e:
                 if verbose:
-                    print("      ⚠️  meteor.impacts.DegreeDays not available")
+                    print(f"      ⚠️  meteor.impacts.DegreeDaysCalculator not available: {e}")
+            except Exception as e:
+                if verbose:
+                    print(f"      ⚠️  Error calculating degree days: {e}")
         
         return impacts
     

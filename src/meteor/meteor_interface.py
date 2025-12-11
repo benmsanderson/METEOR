@@ -740,6 +740,7 @@ class MeteorInterface:
             Dictionary with keys 'annual', 'monthly', 'climatology' containing
             xarray DataArrays with gridded fields
         """
+        from meteor import global_mean
         from ciceroscm import input_handler
         import xarray as xr
         
@@ -750,56 +751,46 @@ class MeteorInterface:
         conc_file = os.path.join(cscm_data_dir, f"{scenario}_conc_RCMIP.txt")
         em_file = os.path.join(cscm_data_dir, f"{scenario}_em_RCMIP.txt")
         
+        ih = input_handler.InputHandler({})
         conc_data = input_handler.read_inputfile(conc_file)
-        em_data = input_handler.read_inputfile(em_file)
+        em_data = ih.read_emissions(em_file)
         
-        # Get trained components
-        pattern_model = self.pattern_scaling_models[variable]
+        # Generate pattern scaling prediction (annual)
+        pattern_model = self.pattern_models[variable]
+        climate_prediction = pattern_model.predict_from_combined_experiment(
+            em_data, conc_data, [variable]
+        )
+        annual_prediction = climate_prediction[variable]
+        
+        # Convert to monthly
+        monthly_prediction = pattern_model.to_monthly(
+            annual_prediction, start_year=0
+        )
+        
+        # Slice to requested time range
+        if hasattr(monthly_prediction, 'year'):
+            base_year = int(monthly_prediction.year[0])
+        else:
+            base_year = 1750
+        
+        start_month_idx = (start_year - base_year) * 12
+        end_month_idx = (end_year - base_year + 1) * 12
+        monthly_prediction = monthly_prediction.isel(month=slice(start_month_idx, end_month_idx))
+        
+        # Get global mean temperature trajectory for noise model
+        monthly_warming = global_mean(monthly_prediction).values
+        
+        # Get noise model
         noise_model = self.noise_models[variable]
-        
-        # Run SCM to get forcing
-        scm_results = pattern_model.scm_runner.run_with_cmip_data(
-            conc_data, em_data, start_year, end_year
-        )
-        monthly_warming = pattern_model.scm_runner.get_monthly_temp_anomaly(
-            scm_results, start_year, end_year
-        )
-        
-        # Generate pattern scaling prediction (3D fields)
-        monthly_prediction = pattern_model.predict(monthly_warming)
         
         # Generate stochastic PCs (or skip if climatology only)
         if include_noise:
-            # Generate PCs for consistent variability (though not used directly here)
-            _ = noise_model.generate_stochastic_pcs(
-                monthly_warming, n_realizations=n_realizations, random_seed=None
-            )
             if verbose:
                 print(f"      → Generating {n_realizations} gridded realizations")
         else:
             if verbose:
                 print("      → Generating gridded climatology (no noise)")
-        
-        # Generate full 3D realizations
-        if include_noise:
-            # With noise: use noise model to generate full fields
-            realizations = []
-            for i in range(n_realizations):
-                # Generate single realization with this PC timeseries
-                realization = noise_model.generate_realization(
-                    monthly_warming,
-                    n_realizations=1,
-                    noise_only=True,
-                    add_base=monthly_prediction
-                )
-                realizations.append(realization[0] if isinstance(realization, list) else realization)
-            
-            # Stack into single array: (n_realizations, month, lat, lon)
-            full_fields = xr.concat(realizations, dim='realization')
-        else:
-            # Climatology only: just use pattern scaling
-            # Add realization dimension for consistency
-            full_fields = monthly_prediction.expand_dims(realization=[0])
+            n_realizations = 1  # Force to 1 for climatology
         
         # Extract requested time slices
         results = {}
@@ -818,9 +809,30 @@ class MeteorInterface:
                 start_idx = year_to_month_idx(year)
                 end_idx = start_idx + 12
                 if start_idx >= 0 and end_idx <= n_months:
-                    # Average over 12 months for this year
-                    annual_mean = full_fields.isel(month=slice(start_idx, end_idx)).mean(dim='month')
-                    annual_fields[year] = annual_mean
+                    # Generate realizations for this year
+                    year_realizations = []
+                    for i in range(n_realizations):
+                        if include_noise:
+                            # Generate full field with noise
+                            realization = noise_model.generate_realization(
+                                monthly_warming[start_idx:end_idx],
+                                n_realizations=1,
+                                noise_only=True,
+                                add_base=monthly_prediction.isel(month=slice(start_idx, end_idx))
+                            )
+                        else:
+                            # Just use pattern scaling
+                            realization = monthly_prediction.isel(month=slice(start_idx, end_idx))
+                        
+                        # Average over 12 months
+                        annual_mean = realization.mean(dim='month')
+                        year_realizations.append(annual_mean)
+                    
+                    # Stack realizations
+                    if len(year_realizations) > 1:
+                        annual_fields[year] = xr.concat(year_realizations, dim='realization')
+                    else:
+                        annual_fields[year] = year_realizations[0].expand_dims(realization=[0])
                 else:
                     if verbose:
                         print(f"        ⚠️  Year {year} outside range {start_year}-{end_year}")
@@ -835,10 +847,29 @@ class MeteorInterface:
                 start_idx = year_to_month_idx(year)
                 end_idx = start_idx + 12
                 if start_idx >= 0 and end_idx <= n_months:
-                    # Extract all 12 months for this year
-                    year_months = full_fields.isel(month=slice(start_idx, end_idx))
-                    # Add month-of-year coordinate
-                    year_months = year_months.assign_coords(month_of_year=('month', np.arange(1, 13)))
+                    # Generate realizations for this year
+                    year_realizations = []
+                    for i in range(n_realizations):
+                        if include_noise:
+                            # Generate full field with noise
+                            realization = noise_model.generate_realization(
+                                monthly_warming[start_idx:end_idx],
+                                n_realizations=1,
+                                noise_only=True,
+                                add_base=monthly_prediction.isel(month=slice(start_idx, end_idx))
+                            )
+                        else:
+                            # Just use pattern scaling
+                            realization = monthly_prediction.isel(month=slice(start_idx, end_idx))
+                        
+                        year_realizations.append(realization)
+                    
+                    # Stack realizations (shape: realizations, month, lat, lon)
+                    if len(year_realizations) > 1:
+                        year_months = xr.concat(year_realizations, dim='realization')
+                    else:
+                        year_months = year_realizations[0].expand_dims(realization=[0])
+                    
                     monthly_fields[year] = year_months
                 else:
                     if verbose:
@@ -856,8 +887,30 @@ class MeteorInterface:
                     start_idx = year_to_month_idx(clim_start)
                     end_idx = year_to_month_idx(clim_end + 1)  # +1 to include end year
                     if start_idx >= 0 and end_idx <= n_months:
-                        clim_mean = full_fields.isel(month=slice(start_idx, end_idx)).mean(dim='month')
-                        climatology_fields[f"{clim_start}-{clim_end}"] = clim_mean
+                        # Generate realizations for this period
+                        clim_realizations = []
+                        for i in range(n_realizations):
+                            if include_noise:
+                                # Generate full field with noise
+                                realization = noise_model.generate_realization(
+                                    monthly_warming[start_idx:end_idx],
+                                    n_realizations=1,
+                                    noise_only=True,
+                                    add_base=monthly_prediction.isel(month=slice(start_idx, end_idx))
+                                )
+                            else:
+                                # Just use pattern scaling
+                                realization = monthly_prediction.isel(month=slice(start_idx, end_idx))
+                            
+                            # Average over all months in period
+                            clim_mean = realization.mean(dim='month')
+                            clim_realizations.append(clim_mean)
+                        
+                        # Stack realizations
+                        if len(clim_realizations) > 1:
+                            climatology_fields[f"{clim_start}-{clim_end}"] = xr.concat(clim_realizations, dim='realization')
+                        else:
+                            climatology_fields[f"{clim_start}-{clim_end}"] = clim_realizations[0].expand_dims(realization=[0])
                     else:
                         if verbose:
                             print(f"        ⚠️  Period {clim_start}-{clim_end} outside range")

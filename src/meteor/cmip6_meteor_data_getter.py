@@ -1349,7 +1349,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         return ssp_config
 
     def get_pattern_scaling_cache_path(
-        self, model_name, cache_dir=None, scenario="aer"
+        self, model_name, cache_dir=None, scenario="aer", variable=None
     ):
         """
         Get the standardized cache file path for a pattern scaling model.
@@ -1362,6 +1362,8 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             Directory for cache files. If None, uses default cache location.
         scenario : str, optional
             Scenario suffix for the model name. Default is "aer" (aerosol-inclusive).
+        variable : str, optional
+            Variable name (e.g., 'tas', 'pr'). If provided, included in filename.
 
         Returns
         -------
@@ -1391,11 +1393,16 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             )
 
         os.makedirs(cache_dir, exist_ok=True)
-        return os.path.join(
-            cache_dir, f"cmip6-{model_name}-{scenario}_pattern_scaling.pkl"
-        )
+        if variable:
+            return os.path.join(
+                cache_dir, f"cmip6-{model_name}-{scenario}-{variable}_pattern_scaling.pkl"
+            )
+        else:
+            return os.path.join(
+                cache_dir, f"cmip6-{model_name}-{scenario}_pattern_scaling.pkl"
+            )
 
-    def validate_pattern_scaling_cache(self, cache_file, model_name, scenario="aer"):
+    def validate_pattern_scaling_cache(self, cache_file, model_name, scenario="aer", variable=None):
         """
         Validate a cached pattern scaling model file.
 
@@ -1408,6 +1415,8 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             Path to the cached model file
         model_name : str
             Expected model name
+        variable : str, optional
+            Variable name to validate against
         scenario : str, optional
             Scenario suffix for expected model name. Default is "aer".
 

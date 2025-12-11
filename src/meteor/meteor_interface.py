@@ -267,12 +267,12 @@ class MeteorInterface:
         os.makedirs(cache_dir, exist_ok=True)
         
         cache_file = self.data_getter.get_pattern_scaling_cache_path(
-            self.model, cache_dir
+            self.model, cache_dir, variable=variable
         )
         
         # Check cache
         is_valid, cached_model, info = self.data_getter.validate_pattern_scaling_cache(
-            cache_file, self.model
+            cache_file, self.model, variable=variable
         )
         
         if is_valid and verbose:

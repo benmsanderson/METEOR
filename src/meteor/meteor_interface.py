@@ -99,6 +99,14 @@ class MeteorInterface:
         self.pattern_models = {}
         self.noise_models = {}
         
+        # Pattern scaling cache: Key is (variable, scenario)
+        # Stores full trajectory to avoid recomputing expensive SCM
+        self._pattern_cache = {}
+        
+        # CMIP6 training data cache: Key is (variable, scenario)
+        # Stores CMIP6 data used for transform fitting
+        self._cmip6_data_cache = {}
+        
         # Set up variable-specific transforms
         self.transforms = {}
         for var in self.variables:
@@ -533,57 +541,131 @@ class MeteorInterface:
         
         return ensemble
     
+    def _get_or_compute_pattern_scaling(self, variable, scenario, start_year, end_year, verbose=True):
+        """
+        Get pattern scaling results from cache or compute if not cached.
+        
+        Caches the FULL scenario trajectory (e.g., 1750-2300) to maximize reuse
+        across different time ranges and output types. Returns sliced results
+        for the requested time range.
+        
+        Parameters
+        ----------
+        variable : str
+            Climate variable ('tas', 'pr')
+        scenario : str
+            Scenario name ('ssp245', 'ssp585', etc.)
+        start_year : int
+            Start year for slicing
+        end_year : int
+            End year for slicing (inclusive)
+        verbose : bool
+            Print cache status messages
+            
+        Returns
+        -------
+        tuple
+            (monthly_prediction_sliced, monthly_warming_sliced, em_data, conc_data)
+        """
+        from meteor import global_mean
+        from ciceroscm import input_handler
+        
+        cache_key = (variable, scenario)
+        
+        # Check cache first
+        if cache_key in self._pattern_cache:
+            if verbose:
+                print(f"      ✓ Using cached pattern scaling for {variable}, {scenario}")
+            
+            cached = self._pattern_cache[cache_key]
+            full_monthly_prediction = cached['monthly_prediction']
+            full_monthly_warming = cached['monthly_warming']
+            em_data = cached['em_data']
+            conc_data = cached['conc_data']
+            base_year = cached['base_year']
+            
+        else:
+            # Cache miss - compute full trajectory
+            if verbose:
+                print(f"      → Computing pattern scaling for {variable}, {scenario}...")
+            
+            # Load forcing data
+            cscm_data_dir = os.path.join(
+                os.path.dirname(__file__), "default_scm_data"
+            )
+            conc_file = os.path.join(cscm_data_dir, f"{scenario}_conc_RCMIP.txt")
+            em_file = os.path.join(cscm_data_dir, f"{scenario}_em_RCMIP.txt")
+            
+            ih = input_handler.InputHandler({})
+            conc_data = input_handler.read_inputfile(conc_file)
+            em_data = ih.read_emissions(em_file)
+            
+            # Generate FULL pattern scaling prediction (annual)
+            pattern_model = self.pattern_models[variable]
+            climate_prediction = pattern_model.predict_from_combined_experiment(
+                em_data, conc_data, [variable]
+            )
+            annual_prediction = climate_prediction[variable]
+            
+            # Convert to monthly
+            full_monthly_prediction = pattern_model.to_monthly(
+                annual_prediction, start_year=0
+            )
+            
+            # Determine base year
+            if hasattr(full_monthly_prediction, 'year'):
+                base_year = int(full_monthly_prediction.year[0])
+            else:
+                base_year = 1750  # Default assumption
+            
+            # Compute global mean for noise model
+            full_monthly_warming = global_mean(full_monthly_prediction).values
+            
+            # Store in cache
+            self._pattern_cache[cache_key] = {
+                'monthly_prediction': full_monthly_prediction,
+                'monthly_warming': full_monthly_warming,
+                'em_data': em_data,
+                'conc_data': conc_data,
+                'base_year': base_year
+            }
+            
+            if verbose:
+                print(f"      ✓ Cached full trajectory for {variable}, {scenario}")
+        
+        # Slice to requested time range
+        start_month_idx = (start_year - base_year) * 12
+        end_month_idx = (end_year - base_year + 1) * 12  # +1 to include end_year
+        
+        monthly_prediction_sliced = full_monthly_prediction.isel(
+            month=slice(start_month_idx, end_month_idx)
+        )
+        monthly_warming_sliced = full_monthly_warming[start_month_idx:end_month_idx]
+        
+        return monthly_prediction_sliced, monthly_warming_sliced, em_data, conc_data
+    
     def _generate_timeseries(self, variable, scenario, start_year, end_year,
                             n_realizations, aggregations, include_noise=True, verbose=True):
         """Generate time series outputs with aggregations."""
         from meteor import global_mean, regional_mean, extract_point
-        from ciceroscm import input_handler
         
-        # Load forcing data for the scenario
-        cscm_data_dir = os.path.join(
-            os.path.dirname(__file__), "default_scm_data"
-        )
-        conc_file = os.path.join(cscm_data_dir, f"{scenario}_conc_RCMIP.txt")
-        em_file = os.path.join(cscm_data_dir, f"{scenario}_em_RCMIP.txt")
+        # Get pattern scaling results (from cache or compute)
+        monthly_prediction, monthly_warming, em_data, conc_data = \
+            self._get_or_compute_pattern_scaling(variable, scenario, start_year, end_year, verbose)
         
-        ih = input_handler.InputHandler({})
-        conc_data = input_handler.read_inputfile(conc_file)
-        em_data = ih.read_emissions(em_file)
-        
-        # Generate pattern scaling prediction (annual)
-        pattern_model = self.pattern_models[variable]
-        climate_prediction = pattern_model.predict_from_combined_experiment(
-            em_data, conc_data, [variable]
-        )
-        annual_prediction = climate_prediction[variable]
-        
-        # Convert to monthly
-        monthly_prediction = pattern_model.to_monthly(
-            annual_prediction, start_year=0
-        )
-        
-        # ✅ SLICE TO REQUESTED TIME RANGE
-        # Pattern model starts at year 1750 (or model-specific base year)
-        # Get the base year from the pattern model
-        if hasattr(monthly_prediction, 'year'):
-            base_year = int(monthly_prediction.year[0])
+        # Get CMIP6 data for transform fitting (cached)
+        cache_key = (variable, scenario)
+        if cache_key in self._cmip6_data_cache:
+            if verbose:
+                print("      ✓ Using cached CMIP6 training data")
+            ssp_data = self._cmip6_data_cache[cache_key]
         else:
-            base_year = 1750  # Default assumption
-        
-        # Calculate month indices for slicing
-        start_month_idx = (start_year - base_year) * 12
-        end_month_idx = (end_year - base_year + 1) * 12  # +1 to include end_year
-        
-        # Slice the monthly prediction to requested range
-        monthly_prediction = monthly_prediction.isel(month=slice(start_month_idx, end_month_idx))
-        
-        # Get global mean temperature trajectory for noise model
-        monthly_warming = global_mean(monthly_prediction).values
-        
-        # Get CMIP6 data for transform fitting
-        ssp_data = self.data_getter.make_meteor_training_data_composite(
-            ["historical", scenario], self.model, monthly=True
-        )[variable]
+            if verbose:
+                print(f"      → Loading CMIP6 training data for {scenario}...")
+            ssp_data = self.data_getter.make_meteor_training_data_composite(
+                ["historical", scenario], self.model, monthly=True
+            )[variable]
+            self._cmip6_data_cache[cache_key] = ssp_data
         
         # ✅ Generate stochastic PCs (or skip if climatology only)
         noise_model = self.noise_models[variable]
@@ -740,45 +822,11 @@ class MeteorInterface:
             Dictionary with keys 'annual', 'monthly', 'climatology' containing
             xarray DataArrays with gridded fields
         """
-        from meteor import global_mean
-        from ciceroscm import input_handler
         import xarray as xr
         
-        # Load forcing data for the scenario
-        cscm_data_dir = os.path.join(
-            os.path.dirname(__file__), "default_scm_data"
-        )
-        conc_file = os.path.join(cscm_data_dir, f"{scenario}_conc_RCMIP.txt")
-        em_file = os.path.join(cscm_data_dir, f"{scenario}_em_RCMIP.txt")
-        
-        ih = input_handler.InputHandler({})
-        conc_data = input_handler.read_inputfile(conc_file)
-        em_data = ih.read_emissions(em_file)
-        
-        # Generate pattern scaling prediction (annual)
-        pattern_model = self.pattern_models[variable]
-        climate_prediction = pattern_model.predict_from_combined_experiment(
-            em_data, conc_data, [variable]
-        )
-        annual_prediction = climate_prediction[variable]
-        
-        # Convert to monthly
-        monthly_prediction = pattern_model.to_monthly(
-            annual_prediction, start_year=0
-        )
-        
-        # Slice to requested time range
-        if hasattr(monthly_prediction, 'year'):
-            base_year = int(monthly_prediction.year[0])
-        else:
-            base_year = 1750
-        
-        start_month_idx = (start_year - base_year) * 12
-        end_month_idx = (end_year - base_year + 1) * 12
-        monthly_prediction = monthly_prediction.isel(month=slice(start_month_idx, end_month_idx))
-        
-        # Get global mean temperature trajectory for noise model
-        monthly_warming = global_mean(monthly_prediction).values
+        # Get pattern scaling results (from cache or compute)
+        monthly_prediction, monthly_warming, em_data, conc_data = \
+            self._get_or_compute_pattern_scaling(variable, scenario, start_year, end_year, verbose)
         
         # Get noise model
         noise_model = self.noise_models[variable]

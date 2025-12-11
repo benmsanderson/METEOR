@@ -389,7 +389,7 @@ class MeteorInterface:
     
     def generate(self, scenario, start_year, end_year, n_realizations,
                  timeseries=None, gridded=None, impacts=None,
-                 save_to=None, verbose=True):
+                 include_noise=True, save_to=None, verbose=True):
         """
         Generate ensemble outputs for all variables.
         
@@ -402,7 +402,7 @@ class MeteorInterface:
         end_year : int
             Last year of output (inclusive)
         n_realizations : int
-            Number of ensemble members to generate
+            Number of ensemble members to generate. Ignored if include_noise=False.
         timeseries : list of str, optional
             Spatial aggregations for time series output. Options:
             - 'global' : Global mean
@@ -415,6 +415,9 @@ class MeteorInterface:
             - 'climatology' : {period: season} for multi-year seasonal means
         impacts : dict, optional
             Impact models to apply. Format: {variable: {impact_name: config}}
+        include_noise : bool, optional
+            If True, generate ensemble with stochastic variability (default).
+            If False, return climatology only (n_realizations forced to 1).
         save_to : str, optional
             Path to save outputs to netCDF
         verbose : bool, optional
@@ -427,6 +430,7 @@ class MeteorInterface:
         
         Examples
         --------
+        >>> # Generate ensemble with noise
         >>> ensemble = emulator.generate(
         ...     scenario='ssp245',
         ...     start_year=2020,
@@ -436,7 +440,23 @@ class MeteorInterface:
         ...     gridded={'annual': [2030, 2050, 2100]},
         ...     impacts={'tas': {'degree_days': {'hdd_base': 18.0, 'cdd_base': 18.0}}}
         ... )
+        >>> 
+        >>> # Generate climatology only (no noise)
+        >>> climatology = emulator.generate(
+        ...     scenario='ssp245',
+        ...     start_year=2020,
+        ...     end_year=2100,
+        ...     n_realizations=1,  # Ignored, forced to 1
+        ...     timeseries=['global'],
+        ...     include_noise=False
+        ... )
         """
+        # Handle climatology-only mode
+        if not include_noise:
+            if verbose and n_realizations > 1:
+                print("Note: include_noise=False, forcing n_realizations=1 (climatology only)")
+            n_realizations = 1
+        
         # Check all variables are trained
         for var in self.variables:
             if not self._is_trained[var]:
@@ -465,7 +485,7 @@ class MeteorInterface:
                     print(f"   → Time series: {len(timeseries)} aggregations")
                 var_output.timeseries = self._generate_timeseries(
                     variable, scenario, start_year, end_year,
-                    n_realizations, timeseries, verbose=verbose
+                    n_realizations, timeseries, include_noise=include_noise, verbose=verbose
                 )
             
             # Generate gridded if requested
@@ -474,7 +494,7 @@ class MeteorInterface:
                     print("   → Gridded outputs...")
                 var_output.gridded = self._generate_gridded(
                     variable, scenario, start_year, end_year,
-                    n_realizations, gridded, verbose=verbose
+                    n_realizations, gridded, include_noise=include_noise, verbose=verbose
                 )
             
             # Apply impacts if requested
@@ -514,7 +534,7 @@ class MeteorInterface:
         return ensemble
     
     def _generate_timeseries(self, variable, scenario, start_year, end_year,
-                            n_realizations, aggregations, verbose=True):
+                            n_realizations, aggregations, include_noise=True, verbose=True):
         """Generate time series outputs with aggregations."""
         from meteor import global_mean, regional_mean, extract_point
         from ciceroscm import input_handler
@@ -565,18 +585,24 @@ class MeteorInterface:
             ["historical", scenario], self.model, monthly=True
         )[variable]
         
-        # ✅ CRITICAL: Generate stochastic PCs ONCE for all aggregations
-        # This ensures all spatial scales share the same underlying variability
+        # ✅ Generate stochastic PCs (or skip if climatology only)
         noise_model = self.noise_models[variable]
+        stochastic_pcs = None
         
-        if verbose:
-            print(f"      → Generating {n_realizations} stochastic PC realizations...")
-        
-        stochastic_pcs = noise_model.generate_stochastic_pcs(
-            monthly_warming,
-            n_realizations=n_realizations,
-            random_seed=None  # Can expose this as parameter if needed
-        )
+        if include_noise:
+            # CRITICAL: Generate stochastic PCs ONCE for all aggregations
+            # This ensures all spatial scales share the same underlying variability
+            if verbose:
+                print(f"      → Generating {n_realizations} stochastic PC realizations...")
+            
+            stochastic_pcs = noise_model.generate_stochastic_pcs(
+                monthly_warming,
+                n_realizations=n_realizations,
+                random_seed=None  # Can expose this as parameter if needed
+            )
+        else:
+            if verbose:
+                print("      → Climatology only (no stochastic variability)")
         
         # Generate outputs for each aggregation
         results = {}
@@ -596,30 +622,38 @@ class MeteorInterface:
             if agg == 'global':
                 # Global mean
                 pattern_agg = global_mean(monthly_prediction).values
-                raw_ensemble = noise_model.generate_regional_mean_realizations(
-                    monthly_warming,
-                    region='global',
-                    n_realizations=n_realizations,
-                    stochastic_pcs=stochastic_pcs,  # ✅ Reuse PCs
-                    noise_only=True,
-                    add_base=pattern_agg,
-                    return_numpy=False
-                )
+                if include_noise:
+                    raw_ensemble = noise_model.generate_regional_mean_realizations(
+                        monthly_warming,
+                        region='global',
+                        n_realizations=n_realizations,
+                        stochastic_pcs=stochastic_pcs,
+                        noise_only=True,
+                        add_base=pattern_agg,
+                        return_numpy=False
+                    )
+                else:
+                    # Climatology only: return pattern scaling with shape (1, time)
+                    raw_ensemble = pattern_agg[np.newaxis, :]
                 cmip6_agg = global_mean(ssp_data)
                 
             elif agg.startswith('regional:'):
                 # Regional mean
                 region_code = agg.split(':')[1]
                 pattern_agg = regional_mean(monthly_prediction, region_code).values
-                raw_ensemble = noise_model.generate_regional_mean_realizations(
-                    monthly_warming,
-                    region=region_code,
-                    n_realizations=n_realizations,
-                    stochastic_pcs=stochastic_pcs,  # ✅ Reuse PCs
-                    noise_only=True,
-                    add_base=pattern_agg,
-                    return_numpy=False
-                )
+                if include_noise:
+                    raw_ensemble = noise_model.generate_regional_mean_realizations(
+                        monthly_warming,
+                        region=region_code,
+                        n_realizations=n_realizations,
+                        stochastic_pcs=stochastic_pcs,
+                        noise_only=True,
+                        add_base=pattern_agg,
+                        return_numpy=False
+                    )
+                else:
+                    # Climatology only: return pattern scaling with shape (1, time)
+                    raw_ensemble = pattern_agg[np.newaxis, :]
                 cmip6_agg = regional_mean(ssp_data, region_code)
                 
             elif agg.startswith('point:'):
@@ -630,25 +664,37 @@ class MeteorInterface:
                 lon = float(lon_str)
                 
                 pattern_agg = extract_point(monthly_prediction, lat, lon).values
-                raw_ensemble = noise_model.generate_regional_mean_realizations(
-                    monthly_warming,
-                    lat=lat,
-                    lon=lon,
-                    n_realizations=n_realizations,
-                    stochastic_pcs=stochastic_pcs,  # ✅ Reuse PCs
-                    noise_only=True,
-                    add_base=pattern_agg,
-                    return_numpy=False
-                )
+                if include_noise:
+                    raw_ensemble = noise_model.generate_regional_mean_realizations(
+                        monthly_warming,
+                        lat=lat,
+                        lon=lon,
+                        n_realizations=n_realizations,
+                        stochastic_pcs=stochastic_pcs,
+                        noise_only=True,
+                        add_base=pattern_agg,
+                        return_numpy=False
+                    )
+                else:
+                    # Climatology only: return pattern scaling with shape (1, time)
+                    raw_ensemble = pattern_agg[np.newaxis, :]
                 cmip6_agg = extract_point(ssp_data, lat, lon)
             else:
                 raise ValueError(f"Unknown aggregation type: {agg}")
             
             # Apply transform if needed
             if transform_config and transform_config.transform_type:
+                # Ensure raw_ensemble is 2D for transforms
+                # (noise model returns 1D for n_realizations=1, but transform expects 2D)
+                if isinstance(raw_ensemble, np.ndarray):
+                    ensemble_for_transform = raw_ensemble if raw_ensemble.ndim == 2 else raw_ensemble[np.newaxis, :]
+                else:
+                    # xarray DataArray
+                    ensemble_for_transform = raw_ensemble.values if raw_ensemble.ndim == 2 else raw_ensemble.values[np.newaxis, :]
+                
                 # Fit Gaussian to generated data
                 gaussian_params = transform_config.fit_1d_func(
-                    raw_ensemble, 'gaussian'
+                    ensemble_for_transform, 'gaussian'
                 )
                 
                 # Fit target distribution to CMIP6 data
@@ -658,7 +704,7 @@ class MeteorInterface:
                 
                 # Apply transform
                 transformed_ensemble = transform_config.apply_func(
-                    raw_ensemble,
+                    ensemble_for_transform,
                     gaussian_params,
                     target_params,
                     target_dist=transform_config.transform_type
@@ -666,25 +712,160 @@ class MeteorInterface:
                 
                 results[agg] = transformed_ensemble
             else:
-                results[agg] = raw_ensemble
+                # Convert to numpy if needed and ensure 2D
+                if isinstance(raw_ensemble, np.ndarray):
+                    results[agg] = raw_ensemble if raw_ensemble.ndim == 2 else raw_ensemble[np.newaxis, :]
+                else:
+                    # xarray DataArray
+                    results[agg] = raw_ensemble.values if raw_ensemble.ndim == 2 else raw_ensemble.values[np.newaxis, :]
         
         return results
     
     def _generate_gridded(self, variable, scenario, start_year, end_year,
-                         n_realizations, gridded_spec, verbose=True):
-        """Generate gridded outputs."""
-        # TODO: Implement full gridded generation
-        # This requires:
-        # 1. Generate full 3D realizations (memory intensive)
-        # 2. Extract specific time slices
-        # 3. Apply 3D transforms if needed
-        # 4. Handle annual means, climatologies, etc.
+                         n_realizations, gridded_spec, include_noise=True, verbose=True):
+        """
+        Generate gridded (spatial) outputs.
         
-        if verbose:
-            print("      ⚠️  Gridded output generation not yet implemented")
-            print("      Use timeseries outputs for now")
+        Parameters
+        ----------
+        gridded_spec : dict
+            Dictionary specifying gridded outputs:
+            - 'annual': list of years for annual mean fields
+            - 'monthly': list of years for monthly fields (all 12 months)
+            - 'climatology': list of [start, end] year pairs for climatological means
         
+        Returns
+        -------
+        dict
+            Dictionary with keys 'annual', 'monthly', 'climatology' containing
+            xarray DataArrays with gridded fields
+        """
+        from ciceroscm import input_handler
+        import xarray as xr
+        
+        # Load forcing data for the scenario
+        cscm_data_dir = os.path.join(
+            os.path.dirname(__file__), "default_scm_data"
+        )
+        conc_file = os.path.join(cscm_data_dir, f"{scenario}_conc_RCMIP.txt")
+        em_file = os.path.join(cscm_data_dir, f"{scenario}_em_RCMIP.txt")
+        
+        conc_data = input_handler.read_inputfile(conc_file)
+        em_data = input_handler.read_inputfile(em_file)
+        
+        # Get trained components
+        pattern_model = self.pattern_scaling_models[variable]
+        noise_model = self.noise_models[variable]
+        
+        # Run SCM to get forcing
+        scm_results = pattern_model.scm_runner.run_with_cmip_data(
+            conc_data, em_data, start_year, end_year
+        )
+        monthly_warming = pattern_model.scm_runner.get_monthly_temp_anomaly(
+            scm_results, start_year, end_year
+        )
+        
+        # Generate pattern scaling prediction (3D fields)
+        monthly_prediction = pattern_model.predict(monthly_warming)
+        
+        # Generate stochastic PCs (or skip if climatology only)
+        if include_noise:
+            # Generate PCs for consistent variability (though not used directly here)
+            _ = noise_model.generate_stochastic_pcs(
+                monthly_warming, n_realizations=n_realizations, random_seed=None
+            )
+            if verbose:
+                print(f"      → Generating {n_realizations} gridded realizations")
+        else:
+            if verbose:
+                print("      → Generating gridded climatology (no noise)")
+        
+        # Generate full 3D realizations
+        if include_noise:
+            # With noise: use noise model to generate full fields
+            realizations = []
+            for i in range(n_realizations):
+                # Generate single realization with this PC timeseries
+                realization = noise_model.generate_realization(
+                    monthly_warming,
+                    n_realizations=1,
+                    noise_only=True,
+                    add_base=monthly_prediction
+                )
+                realizations.append(realization[0] if isinstance(realization, list) else realization)
+            
+            # Stack into single array: (n_realizations, month, lat, lon)
+            full_fields = xr.concat(realizations, dim='realization')
+        else:
+            # Climatology only: just use pattern scaling
+            # Add realization dimension for consistency
+            full_fields = monthly_prediction.expand_dims(realization=[0])
+        
+        # Extract requested time slices
         results = {}
+        n_months = len(monthly_warming)
+        
+        # Helper to convert year to month index
+        def year_to_month_idx(year):
+            return (year - start_year) * 12
+        
+        # Annual means
+        if 'annual' in gridded_spec:
+            if verbose:
+                print(f"      → Extracting annual means for {len(gridded_spec['annual'])} years")
+            annual_fields = {}
+            for year in gridded_spec['annual']:
+                start_idx = year_to_month_idx(year)
+                end_idx = start_idx + 12
+                if start_idx >= 0 and end_idx <= n_months:
+                    # Average over 12 months for this year
+                    annual_mean = full_fields.isel(month=slice(start_idx, end_idx)).mean(dim='month')
+                    annual_fields[year] = annual_mean
+                else:
+                    if verbose:
+                        print(f"        ⚠️  Year {year} outside range {start_year}-{end_year}")
+            results['annual'] = annual_fields
+        
+        # Monthly fields
+        if 'monthly' in gridded_spec:
+            if verbose:
+                print(f"      → Extracting monthly fields for {len(gridded_spec['monthly'])} years")
+            monthly_fields = {}
+            for year in gridded_spec['monthly']:
+                start_idx = year_to_month_idx(year)
+                end_idx = start_idx + 12
+                if start_idx >= 0 and end_idx <= n_months:
+                    # Extract all 12 months for this year
+                    year_months = full_fields.isel(month=slice(start_idx, end_idx))
+                    # Add month-of-year coordinate
+                    year_months = year_months.assign_coords(month_of_year=('month', np.arange(1, 13)))
+                    monthly_fields[year] = year_months
+                else:
+                    if verbose:
+                        print(f"        ⚠️  Year {year} outside range {start_year}-{end_year}")
+            results['monthly'] = monthly_fields
+        
+        # Climatologies (multi-year means)
+        if 'climatology' in gridded_spec:
+            if verbose:
+                print(f"      → Computing {len(gridded_spec['climatology'])} climatological means")
+            climatology_fields = {}
+            for period in gridded_spec['climatology']:
+                if isinstance(period, (list, tuple)) and len(period) == 2:
+                    clim_start, clim_end = period
+                    start_idx = year_to_month_idx(clim_start)
+                    end_idx = year_to_month_idx(clim_end + 1)  # +1 to include end year
+                    if start_idx >= 0 and end_idx <= n_months:
+                        clim_mean = full_fields.isel(month=slice(start_idx, end_idx)).mean(dim='month')
+                        climatology_fields[f"{clim_start}-{clim_end}"] = clim_mean
+                    else:
+                        if verbose:
+                            print(f"        ⚠️  Period {clim_start}-{clim_end} outside range")
+                else:
+                    if verbose:
+                        print(f"        ⚠️  Invalid climatology period: {period}")
+            results['climatology'] = climatology_fields
+        
         return results
     
     def _apply_impacts(self, var_output, variable, impact_configs, verbose=True):

@@ -117,8 +117,9 @@ ensemble = emulator.generate(
     n_realizations=50,
     timeseries=['global'],  # Still compute global mean
     gridded={
-        'annual': [2030, 2050, 2100],  # Yearly averages for these years
-        'monthly': [2100]              # Full monthly fields for 2100
+        'annual': [2030, 2050, 2100],    # Annual mean fields for these years
+        'monthly': [2100],               # Monthly fields for 2100 (12 months)
+        'climatology': [[2080, 2100]]    # 20-year climatological mean
     }
 )
 
@@ -126,17 +127,63 @@ ensemble = emulator.generate(
 tas_2030_annual = ensemble['tas'].gridded['annual'][2030]  # Shape: (50, lat, lon)
 tas_2100_monthly = ensemble['tas'].gridded['monthly'][2100]  # Shape: (50, 12, lat, lon)
 pr_2050_annual = ensemble['pr'].gridded['annual'][2050]
+tas_climatology = ensemble['tas'].gridded['climatology']['2080-2100']
 
-# Example: Plot ensemble mean warming pattern for 2100
+# Example: Plot ensemble mean warming pattern for 2030
 import matplotlib.pyplot as plt
-warming_pattern = tas_2030_annual.mean(axis=0)  # Average over realizations
-plt.contourf(warming_pattern)
+warming_pattern = tas_2030_annual.mean(dim='realization')  # Average over realizations
+plt.contourf(warming_pattern.lon, warming_pattern.lat, warming_pattern.values)
 plt.colorbar(label='Temperature Anomaly (K)')
 plt.title('2030 Warming Pattern (50-member mean)')
 plt.show()
 ```
 
-#### Example 5: Multi-Scenario Comparison
+#### Example 5: Climatology Without Noise
+
+Generate pattern scaling output only (no stochastic variability):
+
+```python
+# Generate climatology - useful for deterministic scenarios or baseline projections
+climatology = emulator.generate(
+    scenario='ssp245',
+    start_year=1850,
+    end_year=2100,
+    n_realizations=1,  # Automatically set to 1 when include_noise=False
+    timeseries=['global', 'regional:NEU'],
+    include_noise=False  # Skip noise generation
+)
+
+# Access climatology (shape will be (1, time) for consistency)
+global_climatology = climatology['tas'].timeseries['global']  # Shape: (1, 3012)
+
+# Useful for comparing ensemble spread vs. forced response
+ensemble_with_noise = emulator.generate(
+    scenario='ssp245',
+    start_year=2020,
+    end_year=2100,
+    n_realizations=100,
+    timeseries=['global'],
+    include_noise=True
+)
+
+# Plot: forced response + ensemble spread
+import matplotlib.pyplot as plt
+years = np.arange(2020, 2101)
+monthly_to_annual = lambda x: x.reshape(-1, 12).mean(axis=1)  # Simple annual average
+
+forced = monthly_to_annual(global_climatology[0, :])
+ensemble = ensemble_with_noise['tas'].timeseries['global']
+ensemble_annual = np.array([monthly_to_annual(ensemble[i, :]) for i in range(100)])
+
+plt.fill_between(years, ensemble_annual.min(axis=0), ensemble_annual.max(axis=0), 
+                 alpha=0.3, label='Ensemble range')
+plt.plot(years, forced, 'k-', linewidth=2, label='Forced response')
+plt.plot(years, ensemble_annual.mean(axis=0), 'r--', label='Ensemble mean')
+plt.legend()
+plt.show()
+```
+
+#### Example 6: Multi-Scenario Comparison
 
 Compare different emission scenarios:
 

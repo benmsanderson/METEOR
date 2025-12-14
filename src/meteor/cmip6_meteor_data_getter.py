@@ -757,7 +757,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             return
 
         for filename in os.listdir(self.cache_dir):
-            if filename.endswith(".nc"):
+            if filename.endswith(".nc") or filename == "cmip6-zarr-consolidated-stores.csv":
                 try:
                     os.remove(os.path.join(self.cache_dir, filename))
                 except OSError:

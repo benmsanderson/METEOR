@@ -305,27 +305,34 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             1, min(9, compression_level)
         )  # Clamp to valid range 1-9
         if cache_dir is None:
-            # Default to .cache folder in the repository root
-            # Find the repository root by looking for setup.py or other marker files
+            # Try to locate the repository root by looking for setup.py, .git, etc.
+            # This works well for development environments (git clones).
+            # If not found (e.g., pip-installed package), fall back to home directory.
             current_dir = os.path.dirname(os.path.abspath(__file__))
             repo_root = current_dir
+            found_repo_root = False
             while repo_root != os.path.dirname(repo_root):  # Stop at filesystem root
                 if any(
                     os.path.exists(os.path.join(repo_root, marker))
                     for marker in ["setup.py", ".git", "README.md"]
                 ):
+                    found_repo_root = True
                     break
                 repo_root = os.path.dirname(repo_root)
-            cache_dir = os.path.join(repo_root, ".cache", "cmip6")
+            
+            if found_repo_root:
+                # Development: cache in repository root
+                cache_dir = os.path.join(repo_root, ".cache", "cmip6")
+            else:
+                # Pip-installed: cache in user home directory
+                cache_dir = os.path.join(os.path.expanduser("~"), ".meteor", "cmip6_cache")
         self.cache_dir = cache_dir
 
         if self.enable_cache:
             try:
-
                 os.makedirs(self.cache_dir, exist_ok=True)
                 logging.info(
-                    "Setting up local cache for CMIP6 data at: %s. "
-                    "This will improve performance by storing downloaded data locally.",
+                    "Cache enabled: Storing CMIP6 data at %s",
                     self.cache_dir,
                 )
             except OSError as e:

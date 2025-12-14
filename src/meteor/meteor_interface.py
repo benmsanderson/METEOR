@@ -88,6 +88,9 @@ class MeteorInterface:
         default_exps = ["piControl", "historical", "ssp245", "abrupt-4xCO2"]
         default_dbe = ['CMIP', 'CMIP', 'ScenarioMIP', 'CMIP']
         
+        # Note: We explicitly enable caching for the high-level interface to provide
+        # good performance by default. Users of the low-level Cmip6MeteorDataGetter
+        # can control caching behavior directly.
         self.data_getter = Cmip6MeteorDataGetter(
             exps=data_getter_kwargs.get('exps', default_exps),
             flds=self.variables,

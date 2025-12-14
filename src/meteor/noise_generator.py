@@ -54,7 +54,7 @@ class MeteorNoiseGenerator:
         Whether the model has been fitted
     """
 
-    def __init__(self, n_modes=10, lag_order=2, use_exog='temp_only'):
+    def __init__(self, n_modes=10, lag_order=2, use_exog="temp_only"):
         """
         Initialize the noise generator.
 
@@ -81,7 +81,7 @@ class MeteorNoiseGenerator:
 
         # In-memory cache for regional EOF projections (model-invariant)
         self._regional_eof_projections = {}
-        
+
         # Diagnostic outputs (optional, set during fit)
         self.diagnostic_X_features = None
         self.diagnostic_t_glob = None
@@ -123,7 +123,7 @@ class MeteorNoiseGenerator:
                 t_glob * annual_cos,
                 t_glob * annual_sin,
                 t_glob * semiannual_cos,
-                t_glob * semiannual_sin
+                t_glob * semiannual_sin,
             ]
         ).T
 
@@ -132,28 +132,30 @@ class MeteorNoiseGenerator:
     def _extract_exog_variables(self, X):
         """
         Extract exogenous variables from feature matrix based on use_exog setting.
-        
+
         Parameters
         ----------
         X : np.ndarray
             Full feature matrix from _create_harmonic_features
-            
+
         Returns
         -------
         np.ndarray or None
             Exogenous variables for VARX, or None for pure VAR
         """
-        if self.use_exog == 'all':
+        if self.use_exog == "all":
             return X[:, :3]  # t_glob, annual_cos, annual_sin
-        elif self.use_exog == 'temp_only':
+        elif self.use_exog == "temp_only":
             return X[:, :1]  # Only t_glob
-        elif self.use_exog == 'none':
+        elif self.use_exog == "none":
             return None  # Pure VAR
         else:
-            raise ValueError(f"Invalid use_exog value: {self.use_exog}. "
-                           f"Must be 'all', 'temp_only', or 'none'.")
+            raise ValueError(
+                f"Invalid use_exog value: {self.use_exog}. "
+                f"Must be 'all', 'temp_only', or 'none'."
+            )
 
-    # pylint: disable=missing-type-doc,too-many-locals
+    # pylint: disable=too-many-locals
     def fit(
         self,
         monthly_data,
@@ -164,8 +166,6 @@ class MeteorNoiseGenerator:
     ):
         """
         Fit the noise generator to monthly climate data.
-
-        # pylint: disable=missing-type-doc
 
         Parameters
         ----------
@@ -234,7 +234,7 @@ class MeteorNoiseGenerator:
 
         # Create harmonic features
         X = self._create_harmonic_features(time, t_glob)
-        
+
         # Save diagnostic outputs if requested
         if save_diagnostics:
             self.diagnostic_X_features = X.copy()
@@ -261,7 +261,9 @@ class MeteorNoiseGenerator:
             self.diagnostic_seasonal_intercept = self.seasonal_model.intercept_.copy()
             self.diagnostic_Y_data = Y.copy()
             print("   📊 Seasonal model diagnostics saved:")
-            print(f"      Coefficients shape: {self.seasonal_model.coef_.shape} (gridpoints × features)")
+            print(
+                f"      Coefficients shape: {self.seasonal_model.coef_.shape} (gridpoints × features)"
+            )
             print(f"      Intercept shape: {self.seasonal_model.intercept_.shape}")
             print(f"      Y data shape: {Y.shape} (time × gridpoints)")
 
@@ -273,7 +275,11 @@ class MeteorNoiseGenerator:
 
         # Calculate anomalies
         if picontrol_baseline is not None:
-            anomalies = ds[variable_name].mean(dim=["ens"]) - seasonal_cycle_fit_xr - picontrol_baseline
+            anomalies = (
+                ds[variable_name].mean(dim=["ens"])
+                - seasonal_cycle_fit_xr
+                - picontrol_baseline
+            )
         else:
             anomalies = ds[variable_name].mean(dim=["ens"]) - seasonal_cycle_fit_xr
         # Fit PCA to anomalies
@@ -306,14 +312,14 @@ class MeteorNoiseGenerator:
             f"   - Variance explained: {self.pca.explained_variance_ratio_.sum():.2%}"
         )
         print(f"   - VARX lag order: {self.lag_order}")
-        if self.use_exog == 'all':
+        if self.use_exog == "all":
             print("   - Exogenous vars: t_glob, annual_cos, annual_sin")
-        elif self.use_exog == 'temp_only':
+        elif self.use_exog == "temp_only":
             print("   - Exogenous vars: t_glob only")
         else:
             print("   - Exogenous vars: none (pure VAR)")
 
-    # pylint: disable=missing-type-doc,too-many-locals
+    # pylint: disable=too-many-locals
     def generate_stochastic_pcs(
         self,
         global_temp_trajectory,
@@ -376,7 +382,7 @@ class MeteorNoiseGenerator:
                 all_pcs.append(pcs)
             return np.array(all_pcs)  # Shape: (n_realizations, n_time, n_modes)
 
-    # pylint: disable=missing-type-doc,too-many-locals
+    # pylint: disable=too-many-locals
     def generate_realization(
         self,
         global_temp_trajectory,
@@ -1088,7 +1094,9 @@ class MeteorNoiseGenerator:
 
         self.n_modes = model_data["n_modes"]
         self.lag_order = model_data["lag_order"]
-        self.use_exog = model_data.get("use_exog", "all")  # Default to 'all' for backward compatibility
+        self.use_exog = model_data.get(
+            "use_exog", "all"
+        )  # Default to 'all' for backward compatibility
         self.seasonal_model = model_data["seasonal_model"]
         self.pca = model_data["pca"]
         self.varx_results = model_data["varx_results"]
@@ -1101,7 +1109,6 @@ class MeteorNoiseGenerator:
         print(f"Model loaded from {filepath}")
 
 
-# pylint: disable=too-many-arguments,too-many-positional-arguments,missing-type-doc
 def train_noise_model_from_cmip6(
     data_getter,
     experiments,
@@ -1113,7 +1120,7 @@ def train_noise_model_from_cmip6(
     custom_global_temp=None,
     use_picontrol_baseline=True,
     save_diagnostics=False,
-    use_exog='temp_only',
+    use_exog="temp_only",
 ):
     """
     Train a noise generator from CMIP6 data.
@@ -1198,7 +1205,9 @@ def train_noise_model_from_cmip6(
             picontrol_baseline = None
 
     # Create and fit noise generator
-    noise_gen = MeteorNoiseGenerator(n_modes=n_modes, lag_order=lag_order, use_exog=use_exog)
+    noise_gen = MeteorNoiseGenerator(
+        n_modes=n_modes, lag_order=lag_order, use_exog=use_exog
+    )
     noise_gen.fit(
         monthly_data,
         variable_name,
@@ -1218,7 +1227,6 @@ def train_noise_model_from_cmip6(
     return noise_gen
 
 
-# pylint: disable=too-many-arguments,too-many-positional-arguments,missing-type-doc
 def train_multiple_noise_models_from_cmip6(
     data_getter,
     experiments,
@@ -1229,7 +1237,7 @@ def train_multiple_noise_models_from_cmip6(
     cache_dir=None,
     custom_global_temp=None,
     use_picontrol_baseline=True,
-    use_exog='temp_only',
+    use_exog="temp_only",
 ):
     """
     Train noise generators for multiple model/variable combinations.
@@ -1358,7 +1366,6 @@ def load_noise_model_from_cache(cache_dir, model_name, variable_name):
     return noise_gen
 
 
-# pylint: disable=too-many-arguments,too-many-positional-arguments,missing-type-doc
 def train_noise_model_from_composite(
     data_getter,
     experiments,

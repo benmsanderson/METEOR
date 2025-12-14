@@ -319,13 +319,15 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                     found_repo_root = True
                     break
                 repo_root = os.path.dirname(repo_root)
-            
+
             if found_repo_root:
                 # Development: cache in repository root
                 cache_dir = os.path.join(repo_root, ".cache", "cmip6")
             else:
                 # Pip-installed: cache in user home directory
-                cache_dir = os.path.join(os.path.expanduser("~"), ".meteor", "cmip6_cache")
+                cache_dir = os.path.join(
+                    os.path.expanduser("~"), ".meteor", "cmip6_cache"
+                )
         self.cache_dir = cache_dir
 
         if self.enable_cache:
@@ -348,12 +350,10 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         catalog_cache_file = os.path.join(
             self.cache_dir, "cmip6-zarr-consolidated-stores.csv"
         )
-        
+
         if self.enable_cache and os.path.exists(catalog_cache_file):
             # Use cached catalog
-            logging.info(
-                "Loading CMIP6 catalog from cache: %s", catalog_cache_file
-            )
+            logging.info("Loading CMIP6 catalog from cache: %s", catalog_cache_file)
             df = pd.read_csv(catalog_cache_file, low_memory=False)
         else:
             # Download catalog from Google Cloud Storage
@@ -369,14 +369,13 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                         df.to_csv(catalog_cache_file, index=False)
                         logging.info("Cached CMIP6 catalog to: %s", catalog_cache_file)
                     except OSError as e:
-                        logging.warning(
-                            "Failed to cache CMIP6 catalog: %s", e
-                        )
+                        logging.warning("Failed to cache CMIP6 catalog: %s", e)
             except Exception as e:
                 # If download fails and we have cache enabled, check if there's an old catalog
                 if self.enable_cache and os.path.exists(catalog_cache_file):
                     logging.warning(
-                        "Failed to download CMIP6 catalog (%s), using cached version.", e
+                        "Failed to download CMIP6 catalog (%s), using cached version.",
+                        e,
                     )
                     df = pd.read_csv(catalog_cache_file, low_memory=False)
                 else:
@@ -562,7 +561,9 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         cache_path = self._get_cache_path(cache_key)
         if os.path.exists(cache_path):
             try:
-                logging.info("Loading data from cache: %s", os.path.basename(cache_path))
+                logging.info(
+                    "Loading data from cache: %s", os.path.basename(cache_path)
+                )
                 dataset = xr.open_dataset(cache_path)
 
                 # Validate the cached data
@@ -764,7 +765,10 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             return
 
         for filename in os.listdir(self.cache_dir):
-            if filename.endswith(".nc") or filename == "cmip6-zarr-consolidated-stores.csv":
+            if (
+                filename.endswith(".nc")
+                or filename == "cmip6-zarr-consolidated-stores.csv"
+            ):
                 try:
                     os.remove(os.path.join(self.cache_dir, filename))
                 except OSError:
@@ -808,11 +812,8 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                 if exp.startswith("ssp"):
                     # SSP scenarios are in ScenarioMIP
                     dbe.append("ScenarioMIP")
-                elif exp in ["1pctCO2"]:
-                    # 1pctCO2 is in CMIP
-                    dbe.append("CMIP")
                 else:
-                    # Default experiments (piControl, abrupt-4xCO2, historical) are in CMIP
+                    # Default experiments (1pct, piControl, abrupt-4xCO2, historical) are in CMIP
                     dbe.append("CMIP")
         self.flds = flds
         self.exps = exps
@@ -956,7 +957,9 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                 return cached_data
 
         # Get monthly data (which may be cached) and compute yearly mean
-        logging.info("Computing yearly mean from monthly data for %s/%s/%s...", model, exp, fld)
+        logging.info(
+            "Computing yearly mean from monthly data for %s/%s/%s...", model, exp, fld
+        )
         var_monthly = self.get_single_var_mod_data_monthly(exp, fld, model)
         if var_monthly is None:
             return None
@@ -964,14 +967,14 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         # Convert monthly to yearly mean
         # var_monthly has dimensions (ens, month, lat, lon)
         # We need to reshape to compute yearly means
-        n_years = var_monthly.sizes['month'] // 12
+        n_years = var_monthly.sizes["month"] // 12
         var_monthly_subset = var_monthly.isel(month=slice(0, n_years * 12))
-        
+
         # Reshape and compute yearly mean
-        var_yearly = var_monthly_subset.coarsen(month=12, boundary='trim').mean()
-        var_yearly = var_yearly.assign_coords(
-            {"month": np.arange(n_years)}
-        ).rename({"month": "year"})
+        var_yearly = var_monthly_subset.coarsen(month=12, boundary="trim").mean()
+        var_yearly = var_yearly.assign_coords({"month": np.arange(n_years)}).rename(
+            {"month": "year"}
+        )
 
         # Cache the yearly data to avoid recomputing
         if self.enable_cache:
@@ -1006,11 +1009,15 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                 cache_key, expected_type="DataArray", expected_variable=fld
             )
             if cached_data is not None:
-                logging.info("✓ Using cached monthly data for %s/%s/%s", model, exp, fld)
+                logging.info(
+                    "✓ Using cached monthly data for %s/%s/%s", model, exp, fld
+                )
                 return cached_data
 
         # Original logic
-        logging.info("Downloading data from Google Cloud for %s/%s/%s...", model, exp, fld)
+        logging.info(
+            "Downloading data from Google Cloud for %s/%s/%s...", model, exp, fld
+        )
         ds = self.get_single_var_mod_data(exp, fld, model)
         if ds is None:
             return None
@@ -1402,14 +1409,17 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         os.makedirs(cache_dir, exist_ok=True)
         if variable:
             return os.path.join(
-                cache_dir, f"cmip6-{model_name}-{scenario}-{variable}_pattern_scaling.pkl"
+                cache_dir,
+                f"cmip6-{model_name}-{scenario}-{variable}_pattern_scaling.pkl",
             )
         else:
             return os.path.join(
                 cache_dir, f"cmip6-{model_name}-{scenario}_pattern_scaling.pkl"
             )
 
-    def validate_pattern_scaling_cache(self, cache_file, model_name, scenario="aer", variable=None):
+    def validate_pattern_scaling_cache(
+        self, cache_file, model_name, scenario="aer", variable=None
+    ):
         """
         Validate a cached pattern scaling model file.
 
@@ -1446,7 +1456,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         >>> if is_valid:
         ...     print(f"✅ {info['message']}")
         """
-        import pickle
+        import pickle  # nosec B403
 
         expected_name = f"cmip6-{model_name}-{scenario}"
         expected_vars = set(self.flds)
@@ -1467,7 +1477,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         # Try to load and validate
         try:
             with open(cache_file, "rb") as f:
-                cached_data = pickle.load(f)
+                cached_data = pickle.load(f)  # nosec B301
 
             # The MeteorPatternScaling.save_model() saves a dict, not the object itself
             # Check if we loaded a dict (new format) or object (old format)

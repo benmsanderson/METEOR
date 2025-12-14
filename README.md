@@ -100,13 +100,8 @@ Emissions/Concentrations → Pattern Scaling → Annual Climate → Monthly Base
 
 ### Documentation
 - **[METEOR Interface Examples](notebooks/METEOR_Interface_Examples.ipynb)**: Complete tutorial with visualizations
-- **`QUICK_START.md`**: Detailed workflow examples (lower-level API)
-- **`MONTHLY_NOISE_README.md`**: Complete monthly modeling guide
 
 ### Other Notebooks
-- `METEOR_single_model_pattern_example.ipynb`: Single model pattern creation
-- `CMIP6_demo_with_residual.ipynb`: Aerosol forcing from residuals
-- `CMIP6_noise_model_examples.ipynb`: Multi-model workflow
 - `Climate_Bench_METEOR.ipynb`: ClimateBench metrics
 
 ### Module Reference
@@ -135,8 +130,18 @@ make checks
 pytest tests/unit
 pytest tests/integration
 
-# Check code style
-make lint
+#other make options
+make format-checks        # run all the checks
+make format               # re-format files
+make format-notebooks     # format the notebooks
+make black                # apply black formatter to source and tests
+make isort                # format the code
+make docs                 # build the docs
+make test                 # run the full testsuite
+make test-pypi-install    # test whether installing from PyPI works
+make test-install         # test installing works
+make virtual-environment  # update venv, create a new venv if it doesn't exist make
+make first-venv           # create a new virtual environment for the very first repo 
 ```
 
 ### Contributing
@@ -167,7 +172,6 @@ DOI = {10.5194/egusphere-2025-1038}
 
 ## Support
 
-- **Documentation**: See `QUICK_START.md` and `MONTHLY_NOISE_README.md`
 - **Examples**: Explore `notebooks/` directory
 - **Issues**: [GitHub Issues](https://github.com/benmsanderson/METEOR/issues)
 - **Updates**: `git pull && make virtual-environment`

@@ -676,10 +676,10 @@ def regional_mean(
 ):
     """
     Calculate area-weighted regional mean for a specific AR6 region.
-    
+
     This function uses the IPCC AR6 reference regions from regionmask to
     calculate spatial averages over specific regions (e.g., 'EAS' for East Asia).
-    
+
     Parameters
     ----------
     ds : xarray.Dataset or xarray.DataArray
@@ -695,21 +695,21 @@ def regional_mean(
         Custom weights for averaging (if None, uses cosine of latitude)
     normalize_weights : bool, optional
         Whether to normalize weights by their mean (default True)
-    
+
     Returns
     -------
     xarray.Dataset or xarray.DataArray
         Regional mean with spatial dimensions removed
         Includes 'region_code' and 'region_name' in attributes
-    
+
     Examples
     --------
     >>> # Calculate mean temperature over East Asia
     >>> tas_eas = regional_mean(temperature_data, 'EAS')
-    >>> 
+    >>>
     >>> # Calculate mean precipitation over Northern Europe
     >>> pr_neu = regional_mean(precipitation_data, 'NEU')
-    
+
     See Also
     --------
     list_ar6_regions : List all available AR6 regions
@@ -723,11 +723,11 @@ def regional_mean(
             "regionmask is required for regional_mean(). "
             "Install it with: pip install regionmask"
         )
-    
+
     # Auto-detect latitude coordinate if not provided
     if lat_name is None:
         lat_name = get_lat_name(ds)
-    
+
     # Auto-detect longitude coordinate if not provided
     if lon_name is None:
         lon_variants = ["lon", "longitude", "x", "lon_rho"]
@@ -739,13 +739,13 @@ def regional_mean(
             raise RuntimeError(
                 f"Couldn't find a longitude coordinate. Tried: {lon_variants}"
             )
-    
+
     # Load AR6 regions
     ar6_regions = regionmask.defined_regions.ar6.all
-    
+
     # Create mask for the data grid
     mask = ar6_regions.mask(ds)
-    
+
     # Find the region number for the given code
     region_number = None
     region_name = None
@@ -754,39 +754,39 @@ def regional_mean(
             region_number = region.number
             region_name = region.name
             break
-    
+
     if region_number is None:
         raise ValueError(
             f"Region code '{region_code}' not found in AR6 regions. "
             f"Use list_ar6_regions() to see available regions."
         )
-    
+
     # Apply mask to data (keep only the specified region)
     regional_data = ds.where(mask == region_number)
-    
+
     # Create weights if not provided
     if weights is None:
         lat = regional_data[lat_name]
         weights = np.cos(np.deg2rad(lat))
-        
+
         # Broadcast to longitude if needed
         if lon_name in regional_data.dims:
             weights = weights * xr.ones_like(regional_data[lon_name])
-    
+
     # Apply mask to weights as well
     weights = weights.where(mask == region_number)
-    
+
     # Normalize weights if requested
     if normalize_weights:
         weights = weights / weights.mean()
-    
+
     # Get spatial dimensions to average over
     spatial_dims = [lat_name, lon_name]
-    
+
     # Calculate weighted mean
     weighted_data = regional_data * weights
     result = weighted_data.mean(spatial_dims, skipna=True)
-    
+
     # Update attributes
     if hasattr(result, "attrs"):
         if hasattr(ds, "attrs"):
@@ -794,7 +794,7 @@ def regional_mean(
         result.attrs["operation"] = "area_weighted_regional_mean"
         result.attrs["region_code"] = region_code
         result.attrs["region_name"] = region_name
-    
+
     return result
 
 
@@ -808,7 +808,7 @@ def extract_point(
 ):
     """
     Extract time series at a specific latitude/longitude point.
-    
+
     Parameters
     ----------
     ds : xarray.Dataset or xarray.DataArray
@@ -823,21 +823,21 @@ def extract_point(
         Name of latitude coordinate (auto-detected if None)
     lon_name : str, optional
         Name of longitude coordinate (auto-detected if None)
-    
+
     Returns
     -------
     xarray.Dataset or xarray.DataArray
         Time series at the specified point
         Includes 'lat_point' and 'lon_point' in attributes
-    
+
     Examples
     --------
     >>> # Extract temperature at Mumbai (19.08°N, 72.88°E)
     >>> tas_mumbai = extract_point(temperature_data, lat_point=19.08, lon_point=72.88)
-    >>> 
+    >>>
     >>> # Extract with interpolation instead of nearest neighbor
     >>> tas_mumbai_interp = extract_point(temperature_data, 19.08, 72.88, method='interp')
-    
+
     See Also
     --------
     regional_mean : Calculate regional mean
@@ -846,7 +846,7 @@ def extract_point(
     # Auto-detect latitude coordinate if not provided
     if lat_name is None:
         lat_name = get_lat_name(ds)
-    
+
     # Auto-detect longitude coordinate if not provided
     if lon_name is None:
         lon_variants = ["lon", "longitude", "x", "lon_rho"]
@@ -858,14 +858,14 @@ def extract_point(
             raise RuntimeError(
                 f"Couldn't find a longitude coordinate. Tried: {lon_variants}"
             )
-    
+
     # Handle longitude wrapping (convert -180:180 to 0:360 if needed)
     lon_data = ds[lon_name].values
     if lon_data.max() > 180 and lon_point < 0:
         lon_point = lon_point + 360
     elif lon_data.max() <= 180 and lon_point > 180:
         lon_point = lon_point - 360
-    
+
     # Extract point based on method
     if method == "nearest":
         result = ds.sel({lat_name: lat_point, lon_name: lon_point}, method="nearest")
@@ -873,7 +873,7 @@ def extract_point(
         result = ds.interp({lat_name: lat_point, lon_name: lon_point})
     else:
         raise ValueError(f"Unknown method '{method}'. Use 'nearest' or 'interp'.")
-    
+
     # Update attributes
     if hasattr(result, "attrs"):
         if hasattr(ds, "attrs"):
@@ -881,22 +881,22 @@ def extract_point(
         result.attrs["operation"] = f"point_extraction_{method}"
         result.attrs["lat_point"] = lat_point
         result.attrs["lon_point"] = lon_point
-    
+
     return result
 
 
 def list_ar6_regions():
     """
     List all available IPCC AR6 reference regions.
-    
+
     Prints a formatted table of region codes and names that can be used
     with the regional_mean() function.
-    
+
     Returns
     -------
     None
         Prints region information to stdout
-    
+
     Examples
     --------
     >>> list_ar6_regions()
@@ -906,7 +906,7 @@ def list_ar6_regions():
       NWN    : N.W. North America
       NEN    : N.E. North America
       ...
-    
+
     See Also
     --------
     regional_mean : Calculate regional mean using AR6 regions
@@ -918,9 +918,9 @@ def list_ar6_regions():
             "regionmask is required for list_ar6_regions(). "
             "Install it with: pip install regionmask"
         )
-    
+
     ar6_regions = regionmask.defined_regions.ar6.all
-    
+
     print("AR6 IPCC Reference Regions:")
     print("=" * 60)
     for region in ar6_regions:
@@ -961,7 +961,11 @@ def get_timescales(anomaly_data, n_modes):
     # initialise an LMFIT parameter object, with tmscl_0 timescales and
     # n_modes modes
     # our first guess for amplitude is just the mean of the 2d field
-    ampguess = anomaly_data.mean("lat", skipna=True).mean("lon", skipna=True).mean("time", skipna=True)
+    ampguess = (
+        anomaly_data.mean("lat", skipna=True)
+        .mean("lon", skipna=True)
+        .mean("time", skipna=True)
+    )
     # our time guess is 1,10,100 etc years
     tguess = 5 * 10 ** (np.arange(n_modes))
     # initialise the initial guess vector

@@ -6,16 +6,16 @@ climate variables to ensure physical realism (e.g., precipitation positivity).
 """
 
 from meteor.precipitation_transform import (
+    apply_distribution_transform,
     fit_distribution_parameters_1d,
     fit_distribution_parameters_3d,
-    apply_distribution_transform,
 )
 
 
 class VariableTransformConfig:
     """
     Configuration for variable-specific transformations.
-    
+
     Parameters
     ----------
     name : str
@@ -31,17 +31,25 @@ class VariableTransformConfig:
     apply_func : callable, optional
         Function to apply the transform
     """
-    
-    def __init__(self, name, transform_type, reason, 
-                 fit_1d_func=None, fit_3d_func=None, apply_func=None):
+
+    def __init__(
+        self,
+        name,
+        transform_type,
+        reason,
+        fit_1d_func=None,
+        fit_3d_func=None,
+        apply_func=None,
+    ):
         self.name = name
         self.transform_type = transform_type
         self.reason = reason
         self.fit_1d_func = fit_1d_func
         self.fit_3d_func = fit_3d_func
         self.apply_func = apply_func
-    
+
     def __repr__(self):
+        """Return string representation of VariableTransformConfig."""
         if self.transform_type is None:
             return "VariableTransformConfig(None - no transform)"
         return f"VariableTransformConfig('{self.transform_type}' - {self.reason})"
@@ -49,18 +57,18 @@ class VariableTransformConfig:
 
 # Registry of variable-specific transforms
 VARIABLE_TRANSFORMS = {
-    'pr': VariableTransformConfig(
-        name='precipitation_gamma',
-        transform_type='gamma',
-        reason='Ensure positive-only values (precipitation cannot be negative)',
+    "pr": VariableTransformConfig(
+        name="precipitation_gamma",
+        transform_type="gamma",
+        reason="Ensure positive-only values (precipitation cannot be negative)",
         fit_1d_func=fit_distribution_parameters_1d,
         fit_3d_func=fit_distribution_parameters_3d,
-        apply_func=apply_distribution_transform
+        apply_func=apply_distribution_transform,
     ),
-    'tas': VariableTransformConfig(
+    "tas": VariableTransformConfig(
         name=None,
         transform_type=None,
-        reason='No transform needed for temperature',
+        reason="No transform needed for temperature",
     ),
     # Future variable transforms can be added here:
     # 'hurs': VariableTransformConfig(
@@ -84,12 +92,12 @@ VARIABLE_TRANSFORMS = {
 def get_variable_transform_config(variable):
     """
     Get the default transform configuration for a variable.
-    
+
     Parameters
     ----------
     variable : str
         Variable name (e.g., 'tas', 'pr')
-    
+
     Returns
     -------
     VariableTransformConfig
@@ -102,7 +110,7 @@ def get_variable_transform_config(variable):
         return VariableTransformConfig(
             name=None,
             transform_type=None,
-            reason=f'Unknown variable {variable} - no transform applied'
+            reason=f"Unknown variable {variable} - no transform applied",
         )
 
 

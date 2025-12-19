@@ -666,27 +666,96 @@ def global_mean(
     return result
 
 
+def create_region_mask(ds, bbox=None, mask=None):
+    """
+    Create a 2D boolean mask for a custom region.
+    
+    Parameters
+    ----------
+    ds : xarray.Dataset or xarray.DataArray
+        Data with lat/lon coordinates
+    bbox : dict, optional
+        Bounding box: {'lat': (min, max), 'lon': (min, max)}
+    mask : numpy.ndarray or xarray.DataArray, optional
+        Pre-computed boolean mask
+    
+    Returns
+    -------
+    xarray.DataArray
+        2D boolean mask (True = inside region)
+    """
+    if bbox is not None:
+        # Create mask from bounding box
+        lat_name = get_lat_name(ds)
+        
+        lon_variants = ["lon", "longitude", "x", "lon_rho"]
+        lon_name = None
+        for lon_var in lon_variants:
+            if lon_var in ds.coords or lon_var in ds.dims:
+                lon_name = lon_var
+                break
+        if lon_name is None:
+            raise RuntimeError(f"Couldn't find longitude coordinate")
+        
+        lat = ds[lat_name]
+        lon = ds[lon_name]
+        
+        lat_min, lat_max = bbox['lat']
+        lon_min, lon_max = bbox['lon']
+        
+        # Create boolean mask
+        mask_lat = (lat >= lat_min) & (lat <= lat_max)
+        mask_lon = (lon >= lon_min) & (lon <= lon_max)
+        
+        # Combine masks
+        region_mask = mask_lat & mask_lon
+        return region_mask
+    
+    elif mask is not None:
+        # Use provided mask
+        if isinstance(mask, np.ndarray):
+            # Convert to xarray with appropriate coordinates
+            lat_name = get_lat_name(ds)
+            lon_variants = ["lon", "longitude", "x", "lon_rho"]
+            lon_name = None
+            for lon_var in lon_variants:
+                if lon_var in ds.coords or lon_var in ds.dims:
+                    lon_name = lon_var
+                    break
+            
+            coords = {lat_name: ds[lat_name], lon_name: ds[lon_name]}
+            mask = xr.DataArray(mask, coords=coords, dims=[lat_name, lon_name])
+        return mask
+    
+    else:
+        raise ValueError("Must provide either bbox or mask")
+
+
 def regional_mean(
     ds,
-    region_code,
+    region_code=None,
+    region_mask=None,
     lat_name=None,
     lon_name=None,
     weights=None,
     normalize_weights=True,
 ):
     """
-    Calculate area-weighted regional mean for a specific AR6 region.
+    Calculate area-weighted regional mean for a specific AR6 region or custom region.
 
     This function uses the IPCC AR6 reference regions from regionmask to
-    calculate spatial averages over specific regions (e.g., 'EAS' for East Asia).
+    calculate spatial averages over specific regions (e.g., 'EAS' for East Asia),
+    or accepts a custom boolean mask for arbitrary regions.
 
     Parameters
     ----------
     ds : xarray.Dataset or xarray.DataArray
         Data to compute regional mean over
-    region_code : str
+    region_code : str, optional
         AR6 region abbreviation (e.g., 'WNA', 'NEU', 'EAS', 'ARP', etc.)
         Use list_ar6_regions() to see all available regions
+    region_mask : xarray.DataArray, optional
+        Custom 2D boolean mask (True = inside region)
     lat_name : str, optional
         Name of latitude coordinate (auto-detected if None)
     lon_name : str, optional
@@ -705,22 +774,73 @@ def regional_mean(
     Examples
     --------
     >>> # Calculate mean temperature over East Asia
-    >>> tas_eas = regional_mean(temperature_data, 'EAS')
+    >>> tas_eas = regional_mean(temperature_data, region_code='EAS')
     >>>
-    >>> # Calculate mean precipitation over Northern Europe
-    >>> pr_neu = regional_mean(precipitation_data, 'NEU')
+    >>> # Calculate mean precipitation over custom region
+    >>> custom_mask = create_region_mask(data, bbox={'lat': (45, 55), 'lon': (5, 20)})
+    >>> pr_custom = regional_mean(precipitation_data, region_mask=custom_mask)
 
     See Also
     --------
+    create_region_mask : Create custom region masks
     list_ar6_regions : List all available AR6 regions
     global_mean : Calculate global mean
     extract_point : Extract time series at a specific point
     """
+    # Handle custom region mask first
+    if region_mask is not None:
+        # Auto-detect coordinates
+        if lat_name is None:
+            lat_name = get_lat_name(ds)
+        if lon_name is None:
+            lon_variants = ["lon", "longitude", "x", "lon_rho"]
+            for lon_var in lon_variants:
+                if lon_var in ds.coords or lon_var in ds.dims:
+                    lon_name = lon_var
+                    break
+            if lon_name is None:
+                raise RuntimeError(f"Couldn't find longitude coordinate")
+        
+        # Apply mask
+        regional_data = ds.where(region_mask)
+        
+        # Create weights
+        if weights is None:
+            lat = regional_data[lat_name]
+            weights = np.cos(np.deg2rad(lat))
+            if lon_name in regional_data.dims:
+                weights = weights * xr.ones_like(regional_data[lon_name])
+        
+        # Apply mask to weights
+        weights = weights.where(region_mask)
+        
+        # Normalize weights
+        if normalize_weights:
+            weights = weights / weights.mean()
+        
+        # Calculate weighted mean
+        spatial_dims = [lat_name, lon_name]
+        weighted_data = regional_data * weights
+        result = weighted_data.mean(spatial_dims, skipna=True)
+        
+        # Update attributes
+        if hasattr(result, "attrs"):
+            if hasattr(ds, "attrs"):
+                result.attrs.update(ds.attrs)
+            result.attrs["operation"] = "area_weighted_regional_mean"
+            result.attrs["region_type"] = "custom"
+        
+        return result
+    
+    # Handle AR6 region code
+    if region_code is None:
+        raise ValueError("Must provide either region_code or region_mask")
+    
     try:
         import regionmask
     except ImportError:
         raise ImportError(
-            "regionmask is required for regional_mean(). "
+            "regionmask is required for AR6 regions. "
             "Install it with: pip install regionmask"
         )
 

@@ -485,6 +485,7 @@ class MeteorInterface:
         impacts=None,
         include_noise=True,
         save_to=None,
+        custom_regions=None,
         verbose=True,
     ):
         """
@@ -510,6 +511,7 @@ class MeteorInterface:
             Spatial aggregations for time series output. Options:
             - 'global' : Global mean
             - 'regional:CODE' : AR6 region (e.g., 'regional:EAS')
+            - 'regional:custom:NAME' : Custom region (requires custom_regions dict)
             - 'point:LAT,LON' : Specific location (e.g., 'point:19.0,72.8')
         gridded : dict, optional
             Gridded output specification. Keys:
@@ -521,6 +523,9 @@ class MeteorInterface:
         include_noise : bool, optional
             If True, generate ensemble with stochastic variability (default).
             If False, return climatology only (n_realizations forced to 1).
+        custom_regions : dict, optional
+            Custom region definitions for 'regional:custom:NAME' aggregations.
+            Format: {'name': {'lat': (min, max), 'lon': (min, max)}}
         save_to : str, optional
             Path to save outputs to netCDF
         verbose : bool, optional
@@ -597,6 +602,7 @@ class MeteorInterface:
                     end_year,
                     n_realizations,
                     timeseries,
+                    custom_regions=custom_regions,
                     include_noise=include_noise,
                     verbose=verbose,
                 )
@@ -908,6 +914,7 @@ class MeteorInterface:
         end_year,
         n_realizations,
         aggregations,
+        custom_regions=None,
         include_noise=True,
         verbose=True,
     ):
@@ -930,7 +937,10 @@ class MeteorInterface:
             Spatial aggregations to compute:
             - 'global': Global mean
             - 'regional:CODE': AR6 region mean (e.g., 'regional:NEU')
+            - 'regional:custom:NAME': Custom region (requires custom_regions dict)
             - 'point:LAT,LON': Single grid point (e.g., 'point:59.9,10.8')
+        custom_regions : dict, optional
+            Custom region definitions: {'name': {'lat': (min, max), 'lon': (min, max)}}
         include_noise : bool
             If True, add stochastic noise; if False, return forced response only
         verbose : bool
@@ -942,7 +952,7 @@ class MeteorInterface:
             Dictionary mapping aggregation names to xarray DataArrays
             with shape (n_realizations, n_months)
         """
-        from meteor import extract_point, global_mean, regional_mean
+        from meteor import create_region_mask, extract_point, global_mean, regional_mean
 
         # Parse scenario to get the actual name (handle both string and dict)
         scenario_info = self._parse_scenario_input(scenario)
@@ -1034,23 +1044,56 @@ class MeteorInterface:
                 cmip6_agg = global_mean(ssp_data)
 
             elif agg.startswith("regional:"):
-                # Regional mean
-                region_code = agg.split(":")[1]
-                pattern_agg = regional_mean(monthly_prediction, region_code).values
-                if include_noise:
-                    raw_ensemble = noise_model.generate_regional_mean_realizations(
-                        monthly_warming,
-                        region=region_code,
-                        n_realizations=n_realizations,
-                        stochastic_pcs=stochastic_pcs,
-                        noise_only=True,
-                        add_base=pattern_agg,
-                        return_numpy=False,
-                    )
+                # Check if it's a custom region
+                parts = agg.split(":")
+                if len(parts) == 3 and parts[1] == "custom":
+                    # Custom region: regional:custom:NAME
+                    region_name = parts[2]
+                    if custom_regions is None or region_name not in custom_regions:
+                        raise ValueError(
+                            f"Custom region '{region_name}' not found in custom_regions. "
+                            f"Available: {list(custom_regions.keys()) if custom_regions else 'None'}"
+                        )
+                    
+                    # Create mask from bounding box
+                    region_bbox = custom_regions[region_name]
+                    region_mask = create_region_mask(monthly_prediction, bbox=region_bbox)
+                    
+                    # Apply to pattern and CMIP6 data
+                    pattern_agg = regional_mean(monthly_prediction, region_mask=region_mask).values
+                    cmip6_agg = regional_mean(ssp_data, region_mask=region_mask)
+                    
+                    # For noise, use global since we don't have EOFs for custom regions
+                    if include_noise:
+                        raw_ensemble = noise_model.generate_regional_mean_realizations(
+                            monthly_warming,
+                            region="global",  # Use global noise as approximation
+                            n_realizations=n_realizations,
+                            stochastic_pcs=stochastic_pcs,
+                            noise_only=True,
+                            add_base=pattern_agg,
+                            return_numpy=False,
+                        )
+                    else:
+                        raw_ensemble = pattern_agg[np.newaxis, :]
                 else:
-                    # Climatology only: return pattern scaling with shape (1, time)
-                    raw_ensemble = pattern_agg[np.newaxis, :]
-                cmip6_agg = regional_mean(ssp_data, region_code)
+                    # AR6 region
+                    region_code = parts[1]
+                    pattern_agg = regional_mean(monthly_prediction, region_code=region_code).values
+                    if include_noise:
+                        raw_ensemble = noise_model.generate_regional_mean_realizations(
+                            monthly_warming,
+                            region=region_code,
+                            n_realizations=n_realizations,
+                            stochastic_pcs=stochastic_pcs,
+                            noise_only=True,
+                            add_base=pattern_agg,
+                            return_numpy=False,
+                        )
+                    else:
+                        # Climatology only: return pattern scaling with shape (1, time)
+                        raw_ensemble = pattern_agg[np.newaxis, :]
+                    cmip6_agg = regional_mean(ssp_data, region_code=region_code)
 
             elif agg.startswith("point:"):
                 # Point extraction

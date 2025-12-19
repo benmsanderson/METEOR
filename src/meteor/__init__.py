@@ -21,6 +21,7 @@ from .precipitation_transform import (  # noqa: F401
     fit_distribution_parameters_3d,
 )
 from .prpatt import (  # noqa: F401
+    create_region_mask,
     extract_point,
     global_mean,
     list_ar6_regions,

@@ -627,7 +627,8 @@ class MeteorInterface:
                 if verbose:
                     print("   → Computing impact metrics...")
                 var_output.impacts = self._apply_impacts(
-                    var_output, variable, impacts[variable], verbose=verbose
+                    var_output, variable, impacts[variable], 
+                    custom_regions=custom_regions, verbose=verbose
                 )
 
             results[variable] = var_output
@@ -1386,7 +1387,7 @@ class MeteorInterface:
 
         return results
 
-    def _apply_impacts(self, var_output, variable, impact_configs, verbose=True):
+    def _apply_impacts(self, var_output, variable, impact_configs, custom_regions=None, verbose=True):
         """
         Calculate climate impact metrics from generated data.
 
@@ -1403,6 +1404,8 @@ class MeteorInterface:
         impact_configs : dict
             Impact calculation specifications:
             - 'degree_days': dict with 'hdd_base' and/or 'cdd_base' temperatures
+        custom_regions : dict, optional
+            Custom region definitions for baseline calculation
         verbose : bool
             Print calculation progress
 
@@ -1421,106 +1424,90 @@ class MeteorInterface:
 
                 dd_config = impact_configs["degree_days"]
 
+                # Determine base temperature - use hdd_base if provided, otherwise cdd_base
+                # Both HDD and CDD are calculated from the same base temperature
+                if "hdd_base" in dd_config:
+                    base_temp = dd_config["hdd_base"]
+                elif "cdd_base" in dd_config:
+                    base_temp = dd_config["cdd_base"]
+                else:
+                    raise ValueError("degree_days config must include either 'hdd_base' or 'cdd_base'")
+
                 # Get piControl baseline for absolute temperature calculation
                 # The timeseries data contains anomalies, we need to add baseline
                 picontrol_data = self.data_getter.make_meteor_training_data(
                     "piControl", self.model, monthly=True
                 )[variable]
 
+                # Create single calculator instance
+                dd_model = DegreeDaysCalculator(base_temperature=base_temp)
+
+                # Initialize impact dictionaries for both HDD and CDD
+                impacts["hdd"] = {}
+                impacts["cdd"] = {}
+
                 # Apply to all timeseries outputs
-                if "hdd_base" in dd_config:
-                    dd_model = DegreeDaysCalculator(
-                        base_temperature=dd_config["hdd_base"]
-                    )
-                    impacts["hdd"] = {}
-                    for key, ts_data in var_output.timeseries.items():
-                        # Calculate appropriate baseline for this aggregation
-                        if key == "global":
-                            baseline_k = float(global_mean(picontrol_data).mean())
-                        elif key.startswith("regional:"):
-                            from meteor import regional_mean
-
-                            region = key.split(":")[1]
-                            baseline_k = float(
-                                regional_mean(picontrol_data, region).mean()
-                            )
-                        elif key.startswith("point:"):
-                            from meteor import extract_point
-
-                            coords = key.split(":")[1]
-                            lat, lon = map(float, coords.split(","))
-                            baseline_k = float(
-                                extract_point(picontrol_data, lat, lon).mean()
-                            )
+                for key, ts_data in var_output.timeseries.items():
+                    # Calculate appropriate baseline for this aggregation
+                    if key == "global":
+                        baseline_k = float(global_mean(picontrol_data).mean())
+                    elif key.startswith("regional:custom:"):
+                        # Custom region - need to calculate baseline from bbox
+                        from meteor import create_region_mask
+                        region_name = key.split(":")[2]
+                        if custom_regions and region_name in custom_regions:
+                            bbox = custom_regions[region_name]
+                            mask = create_region_mask(picontrol_data, bbox=bbox)
+                            masked_data = picontrol_data.where(mask)
+                            baseline_k = float(masked_data.mean())
                         else:
-                            baseline_k = 287.15  # Fallback
+                            raise ValueError(f"Custom region '{region_name}' not found in custom_regions")
+                    elif key.startswith("regional:"):
+                        from meteor import regional_mean
 
-                        # Convert from anomaly (K) to absolute temperature (°C)
-                        # ts_data is anomaly in K, baseline_k is absolute temperature in K
-                        n_realizations, n_months = ts_data.shape
-
-                        # Create xarray with month dimension (required by calculator)
-                        # Absolute temperature in Celsius = (anomaly_K + baseline_K) - 273.15
-                        temp_celsius = xr.DataArray(
-                            ts_data + baseline_k - 273.15,
-                            dims=["realization", "month"],
-                            coords={"month": np.arange(n_months)},
+                        region = key.split(":")[1]
+                        baseline_k = float(
+                            regional_mean(picontrol_data, region).mean()
                         )
+                    elif key.startswith("point:"):
+                        from meteor import extract_point
 
-                        # Calculate degree days for each realization
-                        hdd_results = []
-                        for i in range(n_realizations):
-                            result = dd_model.calculate(temp_celsius[i])
-                            hdd_results.append(result.data["annual_hdd"].values)
+                        coords = key.split(":")[1]
+                        lat, lon = map(float, coords.split(","))
+                        baseline_k = float(
+                            extract_point(picontrol_data, lat, lon).mean()
+                        )
+                    else:
+                        raise ValueError(f"Unknown aggregation type: {key}")
 
-                        # Stack back into array (n_realizations, n_years)
-                        impacts["hdd"][key] = np.array(hdd_results)
+                    # Convert from anomaly (K) to absolute temperature (°C)
+                    # ts_data is anomaly in K, baseline_k is absolute temperature in K
+                    n_realizations, n_months = ts_data.shape
 
-                        if verbose:
-                            print(f"         • HDD for {key}")
-
-                if "cdd_base" in dd_config:
-                    dd_model = DegreeDaysCalculator(
-                        base_temperature=dd_config["cdd_base"]
+                    # Create xarray with month dimension (required by calculator)
+                    # Absolute temperature in Celsius = (anomaly_K + baseline_K) - 273.15
+                    temp_celsius = xr.DataArray(
+                        ts_data + baseline_k - 273.15,
+                        dims=["realization", "month"],
+                        coords={"month": np.arange(n_months)},
                     )
-                    impacts["cdd"] = {}
-                    for key, ts_data in var_output.timeseries.items():
-                        # Calculate appropriate baseline for this aggregation
-                        if key == "global":
-                            baseline_k = float(global_mean(picontrol_data).mean())
-                        elif key.startswith("regional:"):
-                            region = key.split(":")[1]
-                            baseline_k = float(
-                                regional_mean(picontrol_data, region).mean()
-                            )
-                        elif key.startswith("point:"):
-                            coords = key.split(":")[1]
-                            lat, lon = map(float, coords.split(","))
-                            baseline_k = float(
-                                extract_point(picontrol_data, lat, lon).mean()
-                            )
-                        else:
-                            baseline_k = 287.15  # Fallback
 
-                        # Convert from anomaly (K) to absolute temperature (°C)
-                        n_realizations, n_months = ts_data.shape
+                    # Calculate degree days for each realization
+                    # Both HDD and CDD are calculated in the same call
+                    hdd_results = []
+                    cdd_results = []
+                    for i in range(n_realizations):
+                        result = dd_model.calculate(temp_celsius[i])
+                        hdd_results.append(result.data["annual_hdd"].values)
+                        cdd_results.append(result.data["annual_cdd"].values)
 
-                        temp_celsius = xr.DataArray(
-                            ts_data + baseline_k - 273.15,
-                            dims=["realization", "month"],
-                            coords={"month": np.arange(n_months)},
-                        )
+                    # Stack back into arrays (n_realizations, n_years)
+                    impacts["hdd"][key] = np.array(hdd_results)
+                    impacts["cdd"][key] = np.array(cdd_results)
 
-                        # Calculate degree days for each realization
-                        cdd_results = []
-                        for i in range(n_realizations):
-                            result = dd_model.calculate(temp_celsius[i])
-                            cdd_results.append(result.data["annual_cdd"].values)
-
-                        impacts["cdd"][key] = np.array(cdd_results)
-
-                        if verbose:
-                            print(f"         • CDD for {key}")
+                    if verbose:
+                        print(f"         • HDD for {key}")
+                        print(f"         • CDD for {key}")
 
             except ImportError as e:
                 if verbose:

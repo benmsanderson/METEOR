@@ -224,6 +224,10 @@ class DegreeDaysCalculator(ImpactCalculator):
             + (self.sigma_m_c3 * sigma_y)
         )
 
+        # Ensure sigma_m is positive (can become negative for high temperatures)
+        # Use a minimum value of 0.5 to avoid division by zero and unrealistic results
+        sigma_m = xr.where(sigma_m < 0.5, 0.5, sigma_m)
+
         # a = c1_a * sqrt(D_m)
         a_val = self.a_val_c1 * np.sqrt(days_in_month)
 
@@ -255,6 +259,17 @@ class DegreeDaysCalculator(ImpactCalculator):
         monthly_cdd = xr.where(
             monthly_mean_temps > self.base_temperature, degree_days_m, 0
         )
+
+        # Debug: Check if we're getting any CDD
+        n_cdd_months = int((monthly_cdd > 0).sum())
+        n_total_months = len(monthly_cdd)
+        if n_cdd_months == 0 and n_total_months > 0:
+            temp_range = f"{float(monthly_mean_temps.min()):.1f} to {float(monthly_mean_temps.max()):.1f}"
+            warnings.warn(
+                f"No CDD calculated (all {n_total_months} months below {self.base_temperature}°C). "
+                f"Temperature range: {temp_range}°C. Consider using a lower base temperature.",
+                UserWarning
+            )
 
         # Set names and attributes
         monthly_hdd.name = "monthly_hdd"

@@ -703,9 +703,16 @@ def create_region_mask(ds, bbox=None, mask=None):
         lat_min, lat_max = bbox['lat']
         lon_min, lon_max = bbox['lon']
         
-        # Create boolean mask
+        # Create boolean mask for latitude
         mask_lat = (lat >= lat_min) & (lat <= lat_max)
-        mask_lon = (lon >= lon_min) & (lon <= lon_max)
+        
+        # Handle longitude wrapping (for regions crossing 0° or 180°)
+        if lon_min > lon_max:
+            # Region crosses the prime meridian (e.g., -10° to 10° stored as 350° to 10°)
+            mask_lon = (lon >= lon_min) | (lon <= lon_max)
+        else:
+            # Normal case: region doesn't wrap
+            mask_lon = (lon >= lon_min) & (lon <= lon_max)
         
         # Combine masks
         region_mask = mask_lat & mask_lon

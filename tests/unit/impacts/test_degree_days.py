@@ -11,7 +11,10 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from meteor.impacts.calculators.degree_days import DegreeDaysCalculator
+from meteor.impacts.calculators.degree_days import (
+    DegreeDaysCalculator,
+    validate_temperature_input_and_convert,
+)
 from meteor.impacts.impacts_core import ImpactResult
 
 
@@ -22,6 +25,54 @@ def test_degree_days_calculator_init():
     assert calc.base_temperature == 20.0
     assert calc.sigma_m_c1 == 1.5
     assert calc.name == "TestDD"
+
+
+def test_validate_temperature_input_and_convert():
+    """Test validation with suspicious temperature values."""
+    # Very hot temperatures that would be unusual even for Kelvin
+    hot_data = xr.DataArray(
+        [450, 460, 470], dims=["month"]
+    )  # ~177-197°C, unusual even for Kelvin
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        converted = validate_temperature_input_and_convert(hot_data)
+        assert len(w) > 0, "Should warn about high temperature values"
+        assert converted.equals(
+            hot_data - 273.15
+        ), "Should convert from Kelvin to Celsius"
+
+    # Mixed range that suggests unit confusion
+    mixed_data = xr.DataArray(
+        [50, 150, 250], dims=["month"]
+    )  # Mixed range triggering mixed warning
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        converted = validate_temperature_input_and_convert(mixed_data)
+        assert len(w) > 0, "Should warn about mixed/unusual temperature values"
+        assert "unusual" in str(w[0].message)
+        assert converted.equals(mixed_data), "Should not convert mixed data"
+
+    # Very cold temperatures
+    cold_data = xr.DataArray([-200, -150, -100], dims=["month"])
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        converted = validate_temperature_input_and_convert(cold_data)
+        assert len(w) > 0, "Should warn about very cold temperature values"
+        assert "unusual" in str(w[0].message)
+        assert converted.equals(cold_data), "Should not convert cold data"
+
+    float_data = 300.0  # Single float value
+    assert np.allclose(
+        validate_temperature_input_and_convert(float_data), 26.85
+    ), "Should convert float Kelvin to Celsius"
+
+    float_data = -50.0  # Single float value in Celsius range
+    assert (
+        validate_temperature_input_and_convert(float_data) == -50.0
+    ), "Should not convert float Celsius"
 
 
 class TestDegreeDaysCalculator:
@@ -94,38 +145,6 @@ class TestDegreeDaysCalculator:
 
         with pytest.raises(ValueError, match="must have a dimension named 'month'"):
             self.calculator.validate_input(bad_data)
-
-    def test_validate_input_temperature_warnings(self):
-        """Test validation with suspicious temperature values."""
-        # Very hot temperatures that would be unusual even for Kelvin
-        hot_data = xr.DataArray(
-            [450, 460, 470], dims=["month"]
-        )  # ~177-197°C, unusual even for Kelvin
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            self.calculator.validate_input(hot_data)
-            assert len(w) > 0, "Should warn about high temperature values"
-
-        # Mixed range that suggests unit confusion
-        mixed_data = xr.DataArray(
-            [50, 150, 250], dims=["month"]
-        )  # Mixed range triggering mixed warning
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            self.calculator.validate_input(mixed_data)
-            assert len(w) > 0, "Should warn about mixed/unusual temperature values"
-            assert "unusual" in str(w[0].message)
-
-        # Very cold temperatures
-        cold_data = xr.DataArray([-200, -150, -100], dims=["month"])
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            self.calculator.validate_input(cold_data)
-            assert len(w) > 0, "Should warn about very cold temperature values"
-            assert "unusual" in str(w[0].message)
 
     def test_calculate_basic(self):
         """Test basic degree days calculation."""

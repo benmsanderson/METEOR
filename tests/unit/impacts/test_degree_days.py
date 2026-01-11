@@ -74,6 +74,9 @@ def test_validate_temperature_input_and_convert():
         validate_temperature_input_and_convert(float_data) == -50.0
     ), "Should not convert float Celsius"
 
+    with pytest.raises(ValueError, match="Input must be an xarray.DataArray or float"):
+        validate_temperature_input_and_convert("not a data array or float")
+
 
 class TestDegreeDaysCalculator:
     """Test DegreeDaysCalculator functionality."""

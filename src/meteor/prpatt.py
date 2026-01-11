@@ -669,7 +669,7 @@ def global_mean(
 def create_region_mask(ds, bbox=None, mask=None):
     """
     Create a 2D boolean mask for a custom region.
-    
+
     Parameters
     ----------
     ds : xarray.Dataset or xarray.DataArray
@@ -678,7 +678,7 @@ def create_region_mask(ds, bbox=None, mask=None):
         Bounding box: {'lat': (min, max), 'lon': (min, max)}
     mask : numpy.ndarray or xarray.DataArray, optional
         Pre-computed boolean mask
-    
+
     Returns
     -------
     xarray.DataArray
@@ -687,7 +687,7 @@ def create_region_mask(ds, bbox=None, mask=None):
     if bbox is not None:
         # Create mask from bounding box
         lat_name = get_lat_name(ds)
-        
+
         lon_variants = ["lon", "longitude", "x", "lon_rho"]
         lon_name = None
         for lon_var in lon_variants:
@@ -695,17 +695,17 @@ def create_region_mask(ds, bbox=None, mask=None):
                 lon_name = lon_var
                 break
         if lon_name is None:
-            raise RuntimeError(f"Couldn't find longitude coordinate")
-        
+            raise RuntimeError("Couldn't find longitude coordinate")
+
         lat = ds[lat_name]
         lon = ds[lon_name]
-        
-        lat_min, lat_max = bbox['lat']
-        lon_min, lon_max = bbox['lon']
-        
+
+        lat_min, lat_max = bbox["lat"]
+        lon_min, lon_max = bbox["lon"]
+
         # Create boolean mask for latitude
         mask_lat = (lat >= lat_min) & (lat <= lat_max)
-        
+
         # Handle longitude wrapping (for regions crossing 0° or 180°)
         if lon_min > lon_max:
             # Region crosses the prime meridian (e.g., -10° to 10° stored as 350° to 10°)
@@ -713,11 +713,11 @@ def create_region_mask(ds, bbox=None, mask=None):
         else:
             # Normal case: region doesn't wrap
             mask_lon = (lon >= lon_min) & (lon <= lon_max)
-        
+
         # Combine masks
         region_mask = mask_lat & mask_lon
         return region_mask
-    
+
     elif mask is not None:
         # Use provided mask
         if isinstance(mask, np.ndarray):
@@ -729,11 +729,11 @@ def create_region_mask(ds, bbox=None, mask=None):
                 if lon_var in ds.coords or lon_var in ds.dims:
                     lon_name = lon_var
                     break
-            
+
             coords = {lat_name: ds[lat_name], lon_name: ds[lon_name]}
             mask = xr.DataArray(mask, coords=coords, dims=[lat_name, lon_name])
         return mask
-    
+
     else:
         raise ValueError("Must provide either bbox or mask")
 
@@ -806,43 +806,43 @@ def regional_mean(
                     lon_name = lon_var
                     break
             if lon_name is None:
-                raise RuntimeError(f"Couldn't find longitude coordinate")
-        
+                raise RuntimeError("Couldn't find longitude coordinate")
+
         # Apply mask
         regional_data = ds.where(region_mask)
-        
+
         # Create weights
         if weights is None:
             lat = regional_data[lat_name]
             weights = np.cos(np.deg2rad(lat))
             if lon_name in regional_data.dims:
                 weights = weights * xr.ones_like(regional_data[lon_name])
-        
+
         # Apply mask to weights
         weights = weights.where(region_mask)
-        
+
         # Normalize weights
         if normalize_weights:
             weights = weights / weights.mean()
-        
+
         # Calculate weighted mean
         spatial_dims = [lat_name, lon_name]
         weighted_data = regional_data * weights
         result = weighted_data.mean(spatial_dims, skipna=True)
-        
+
         # Update attributes
         if hasattr(result, "attrs"):
             if hasattr(ds, "attrs"):
                 result.attrs.update(ds.attrs)
             result.attrs["operation"] = "area_weighted_regional_mean"
             result.attrs["region_type"] = "custom"
-        
+
         return result
-    
+
     # Handle AR6 region code
     if region_code is None:
         raise ValueError("Must provide either region_code or region_mask")
-    
+
     try:
         import regionmask
     except ImportError:

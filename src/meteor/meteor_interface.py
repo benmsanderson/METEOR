@@ -8,13 +8,16 @@ pattern scaling and noise generation capabilities.
 import os
 
 import numpy as np
+import pandas as pd
 import xarray as xr
+from ciceroscm import input_handler
 
-from meteor import MeteorPatternScaling
-from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
-from meteor.ensemble_output import EnsembleOutput, VariableOutput
-from meteor.noise_generator import train_noise_model_from_cmip6
-from meteor.variable_transforms import get_variable_transform_config
+from .cmip6_meteor_data_getter import Cmip6MeteorDataGetter
+from .ensemble_output import EnsembleOutput, VariableOutput
+from .meteor import MeteorPatternScaling
+from .noise_generator import train_noise_model_from_cmip6
+from .prpatt import create_region_mask, extract_point, global_mean, regional_mean
+from .variable_transforms import get_variable_transform_config
 
 
 class MeteorInterface:
@@ -395,9 +398,6 @@ class MeteorInterface:
 
             # ✅ Generate pattern scaling prediction for custom_global_temp
             # This ensures noise model training uses same temperature trajectory as generation
-            from ciceroscm import input_handler
-
-            from meteor import global_mean
 
             cscm_data_dir = os.path.join(os.path.dirname(__file__), "default_scm_data")
             conc_file = os.path.join(
@@ -569,7 +569,7 @@ class MeteorInterface:
 
         # Parse scenario to get name for display
         scenario_info = self._parse_scenario_input(scenario)
-        scenario_name = scenario_info['name']
+        scenario_name = scenario_info["name"]
 
         # Check all variables are trained
         for var in self.variables:
@@ -627,8 +627,11 @@ class MeteorInterface:
                 if verbose:
                     print("   → Computing impact metrics...")
                 var_output.impacts = self._apply_impacts(
-                    var_output, variable, impacts[variable], 
-                    custom_regions=custom_regions, verbose=verbose
+                    var_output,
+                    variable,
+                    impacts[variable],
+                    custom_regions=custom_regions,
+                    verbose=verbose,
                 )
 
             results[variable] = var_output
@@ -662,12 +665,12 @@ class MeteorInterface:
     def _parse_scenario_input(self, scenario):
         """
         Parse scenario input and return emissions/concentrations info.
-        
+
         Parameters
         ----------
         scenario : str or dict
             Scenario specification
-            
+
         Returns
         -------
         dict
@@ -680,44 +683,50 @@ class MeteorInterface:
         if isinstance(scenario, str):
             # Standard SSP scenario
             return {
-                'type': 'ssp',
-                'name': scenario,
-                'emissions': None,
-                'concentrations': None
+                "type": "ssp",
+                "name": scenario,
+                "emissions": None,
+                "concentrations": None,
             }
         elif isinstance(scenario, dict):
             # Custom scenario
-            if 'emissions' not in scenario:
+            if "emissions" not in scenario:
                 raise ValueError("Custom scenario dict must include 'emissions' key")
-            
+
             # Get emissions (path or DataFrame)
-            emissions = scenario['emissions']
-            
+            emissions = scenario["emissions"]
+
             # Get concentrations (path, DataFrame, or use base_scenario)
-            if 'concentrations' in scenario:
-                concentrations = scenario['concentrations']
+            if "concentrations" in scenario:
+                concentrations = scenario["concentrations"]
             else:
                 # Use base_scenario concentrations (default: ssp245)
-                base_scenario = scenario.get('base_scenario', 'ssp245')
-                cscm_data_dir = os.path.join(os.path.dirname(__file__), "default_scm_data")
-                concentrations = os.path.join(cscm_data_dir, f"{base_scenario}_conc_RCMIP.txt")
-            
+                base_scenario = scenario.get("base_scenario", "ssp245")
+                cscm_data_dir = os.path.join(
+                    os.path.dirname(__file__), "default_scm_data"
+                )
+                concentrations = os.path.join(
+                    cscm_data_dir, f"{base_scenario}_conc_RCMIP.txt"
+                )
+
             # Get scenario name for labeling
-            scenario_name = scenario.get('name', 'custom')
-            
+            scenario_name = scenario.get("name", "custom")
+
             return {
-                'type': 'custom',
-                'name': scenario_name,
-                'emissions': emissions,
-                'concentrations': concentrations
+                "type": "custom",
+                "name": scenario_name,
+                "emissions": emissions,
+                "concentrations": concentrations,
             }
         else:
             raise TypeError(f"scenario must be str or dict, got {type(scenario)}")
 
-    def _load_emissions_concentrations(self, emissions_spec, concentrations_spec, verbose=False):
+    def _load_emissions_concentrations(
+        self, emissions_spec, concentrations_spec, verbose=False
+    ):
         """
         Load emissions and concentrations from files or DataFrames.
-        
+
         Parameters
         ----------
         emissions_spec : str or pd.DataFrame
@@ -726,40 +735,45 @@ class MeteorInterface:
             Path to concentrations file or DataFrame
         verbose : bool
             Print loading messages
-            
+
         Returns
         -------
         tuple
             (emissions_data, concentrations_data) as DataFrames
         """
-        from ciceroscm import input_handler
-        import pandas as pd
-        
         # Load emissions
         if isinstance(emissions_spec, pd.DataFrame):
             em_data = emissions_spec
             if verbose:
-                print(f"      → Using provided emissions DataFrame")
+                print("      → Using provided emissions DataFrame")
         elif isinstance(emissions_spec, str):
             ih = input_handler.InputHandler({})
             em_data = ih.read_emissions(emissions_spec)
             if verbose:
-                print(f"      → Loaded emissions from {os.path.basename(emissions_spec)}")
+                print(
+                    f"      → Loaded emissions from {os.path.basename(emissions_spec)}"
+                )
         else:
-            raise TypeError(f"emissions must be str path or DataFrame, got {type(emissions_spec)}")
-        
+            raise TypeError(
+                f"emissions must be str path or DataFrame, got {type(emissions_spec)}"
+            )
+
         # Load concentrations
         if isinstance(concentrations_spec, pd.DataFrame):
             conc_data = concentrations_spec
             if verbose:
-                print(f"      → Using provided concentrations DataFrame")
+                print("      → Using provided concentrations DataFrame")
         elif isinstance(concentrations_spec, str):
             conc_data = input_handler.read_inputfile(concentrations_spec)
             if verbose:
-                print(f"      → Loaded concentrations from {os.path.basename(concentrations_spec)}")
+                print(
+                    f"      → Loaded concentrations from {os.path.basename(concentrations_spec)}"
+                )
         else:
-            raise TypeError(f"concentrations must be str path or DataFrame, got {type(concentrations_spec)}")
-        
+            raise TypeError(
+                f"concentrations must be str path or DataFrame, got {type(concentrations_spec)}"
+            )
+
         return em_data, conc_data
 
     def _get_or_compute_pattern_scaling(
@@ -790,22 +804,22 @@ class MeteorInterface:
         tuple
             (monthly_prediction_sliced, monthly_warming_sliced, em_data, conc_data)
         """
-        from ciceroscm import input_handler
-
-        from meteor import global_mean
-
         # Parse scenario input
         scenario_info = self._parse_scenario_input(scenario)
-        scenario_name = scenario_info['name']
-        
+        scenario_name = scenario_info["name"]
+
         if verbose:
-            if scenario_info['type'] == 'ssp':
-                print(f"      → Computing pattern scaling for {variable}, {scenario_name}...")
+            if scenario_info["type"] == "ssp":
+                print(
+                    f"      → Computing pattern scaling for {variable}, {scenario_name}..."
+                )
             else:
-                print(f"      → Computing pattern scaling for {variable}, custom scenario '{scenario_name}'...")
+                print(
+                    f"      → Computing pattern scaling for {variable}, custom scenario '{scenario_name}'..."
+                )
 
         # Load forcing data
-        if scenario_info['type'] == 'ssp':
+        if scenario_info["type"] == "ssp":
             # Standard SSP scenario
             cscm_data_dir = os.path.join(os.path.dirname(__file__), "default_scm_data")
             conc_file = os.path.join(cscm_data_dir, f"{scenario_name}_conc_RCMIP.txt")
@@ -817,56 +831,61 @@ class MeteorInterface:
         else:
             # Custom scenario
             em_data, conc_data = self._load_emissions_concentrations(
-                scenario_info['emissions'],
-                scenario_info['concentrations'],
-                verbose=verbose
+                scenario_info["emissions"],
+                scenario_info["concentrations"],
+                verbose=verbose,
             )
-            
+
             # Check if emissions data covers requested time range
             em_start_year = em_data.index[0]
             em_end_year = em_data.index[-1]
-            
+
             if end_year > em_end_year:
                 if verbose:
-                    print(f"      ⚠️  Warning: Emissions data ends at {em_end_year}, requested {end_year}")
+                    print(
+                        f"      ⚠️  Warning: Emissions data ends at {em_end_year}, requested {end_year}"
+                    )
                     print(f"      → Clipping output to {em_start_year}-{em_end_year}")
                 # Update end_year to match data availability
                 end_year = em_end_year
-            
+
             if start_year < em_start_year:
                 if verbose:
-                    print(f"      ⚠️  Warning: Emissions data starts at {em_start_year}, requested {start_year}")
+                    print(
+                        f"      ⚠️  Warning: Emissions data starts at {em_start_year}, requested {start_year}"
+                    )
                     print(f"      → Clipping output to {em_start_year}-{em_end_year}")
                 start_year = em_start_year
 
         # Handle custom emissions data range
         # The pattern model SCM runs to 2100 by default, so we need to extend data if needed
-        if scenario_info['type'] == 'custom':
-            data_start = max(em_data.index[0], conc_data.index[0])
+        if scenario_info["type"] == "custom":
+            # data_start = max(em_data.index[0], conc_data.index[0])
             data_end = min(em_data.index[-1], conc_data.index[-1])
-            
+
             # Extend data to 2100 if needed (hold last value constant)
             # This allows the SCM to run to its default nyend=2100
             if data_end < 2100:
                 if verbose:
-                    print(f"      → Emissions data ends at {data_end}, extending to 2100 (holding final values)")
-                
-                import pandas as pd
+                    print(
+                        f"      → Emissions data ends at {data_end}, extending to 2100 (holding final values)"
+                    )
+
                 # Extend emissions - create new rows by repeating last year's values
                 years_to_add = list(range(data_end + 1, 2101))
                 for year in years_to_add:
                     em_data.loc[year] = em_data.loc[data_end]
                     conc_data.loc[year] = conc_data.loc[data_end]
-                
+
                 # Sort index to maintain chronological order
                 em_data = em_data.sort_index()
                 conc_data = conc_data.sort_index()
-            
+
             # Store the actual data end year for later clipping
             actual_data_end = data_end
         else:
             actual_data_end = None
-        
+
         # Generate FULL pattern scaling prediction (annual)
         pattern_model = self.pattern_models[variable]
         climate_prediction = pattern_model.predict_from_combined_experiment(
@@ -889,16 +908,20 @@ class MeteorInterface:
         full_monthly_warming = global_mean(full_monthly_prediction).values
 
         # Slice to requested time range (or actual data range for custom scenarios)
-        if scenario_info['type'] == 'custom' and actual_data_end is not None:
+        if scenario_info["type"] == "custom" and actual_data_end is not None:
             # Clip to actual data availability
             effective_end_year = min(end_year, actual_data_end)
             if effective_end_year < end_year and verbose:
-                print(f"      → Clipping output to {start_year}-{effective_end_year} (data availability)")
+                print(
+                    f"      → Clipping output to {start_year}-{effective_end_year} (data availability)"
+                )
         else:
             effective_end_year = end_year
-            
+
         start_month_idx = (start_year - base_year) * 12
-        end_month_idx = (effective_end_year - base_year + 1) * 12  # +1 to include end_year
+        end_month_idx = (
+            effective_end_year - base_year + 1
+        ) * 12  # +1 to include end_year
 
         monthly_prediction_sliced = full_monthly_prediction.isel(
             month=slice(start_month_idx, end_month_idx)
@@ -953,15 +976,15 @@ class MeteorInterface:
             Dictionary mapping aggregation names to xarray DataArrays
             with shape (n_realizations, n_months)
         """
-        from meteor import create_region_mask, extract_point, global_mean, regional_mean
-
         # Parse scenario to get the actual name (handle both string and dict)
         scenario_info = self._parse_scenario_input(scenario)
-        scenario_name = scenario_info['name']
-        
+        scenario_name = scenario_info["name"]
+
         # For custom scenarios, use ssp245 as the training scenario
         # (we need CMIP6 data for transform fitting, not custom emissions)
-        training_scenario = 'ssp245' if scenario_info['type'] == 'custom' else scenario_name
+        training_scenario = (
+            "ssp245" if scenario_info["type"] == "custom" else scenario_name
+        )
 
         # Get pattern scaling results
         monthly_prediction, monthly_warming, em_data, conc_data = (
@@ -1055,15 +1078,19 @@ class MeteorInterface:
                             f"Custom region '{region_name}' not found in custom_regions. "
                             f"Available: {list(custom_regions.keys()) if custom_regions else 'None'}"
                         )
-                    
+
                     # Create mask from bounding box
                     region_bbox = custom_regions[region_name]
-                    region_mask = create_region_mask(monthly_prediction, bbox=region_bbox)
-                    
+                    region_mask = create_region_mask(
+                        monthly_prediction, bbox=region_bbox
+                    )
+
                     # Apply to pattern and CMIP6 data
-                    pattern_agg = regional_mean(monthly_prediction, region_mask=region_mask).values
+                    pattern_agg = regional_mean(
+                        monthly_prediction, region_mask=region_mask
+                    ).values
                     cmip6_agg = regional_mean(ssp_data, region_mask=region_mask)
-                    
+
                     # For noise, use global since we don't have EOFs for custom regions
                     if include_noise:
                         raw_ensemble = noise_model.generate_regional_mean_realizations(
@@ -1080,7 +1107,9 @@ class MeteorInterface:
                 else:
                     # AR6 region
                     region_code = parts[1]
-                    pattern_agg = regional_mean(monthly_prediction, region_code=region_code).values
+                    pattern_agg = regional_mean(
+                        monthly_prediction, region_code=region_code
+                    ).values
                     if include_noise:
                         raw_ensemble = noise_model.generate_regional_mean_realizations(
                             monthly_warming,
@@ -1387,7 +1416,9 @@ class MeteorInterface:
 
         return results
 
-    def _apply_impacts(self, var_output, variable, impact_configs, custom_regions=None, verbose=True):
+    def _apply_impacts(
+        self, var_output, variable, impact_configs, custom_regions=None, verbose=True
+    ):
         """
         Calculate climate impact metrics from generated data.
 
@@ -1431,7 +1462,9 @@ class MeteorInterface:
                 elif "cdd_base" in dd_config:
                     base_temp = dd_config["cdd_base"]
                 else:
-                    raise ValueError("degree_days config must include either 'hdd_base' or 'cdd_base'")
+                    raise ValueError(
+                        "degree_days config must include either 'hdd_base' or 'cdd_base'"
+                    )
 
                 # Get piControl baseline for absolute temperature calculation
                 # The timeseries data contains anomalies, we need to add baseline
@@ -1454,6 +1487,7 @@ class MeteorInterface:
                     elif key.startswith("regional:custom:"):
                         # Custom region - need to calculate baseline from bbox
                         from meteor import create_region_mask
+
                         region_name = key.split(":")[2]
                         if custom_regions and region_name in custom_regions:
                             bbox = custom_regions[region_name]
@@ -1461,14 +1495,14 @@ class MeteorInterface:
                             masked_data = picontrol_data.where(mask)
                             baseline_k = float(masked_data.mean())
                         else:
-                            raise ValueError(f"Custom region '{region_name}' not found in custom_regions")
+                            raise ValueError(
+                                f"Custom region '{region_name}' not found in custom_regions"
+                            )
                     elif key.startswith("regional:"):
                         from meteor import regional_mean
 
                         region = key.split(":")[1]
-                        baseline_k = float(
-                            regional_mean(picontrol_data, region).mean()
-                        )
+                        baseline_k = float(regional_mean(picontrol_data, region).mean())
                     elif key.startswith("point:"):
                         from meteor import extract_point
 

@@ -568,11 +568,39 @@ def get_lat_name(ds):
     raise RuntimeError(f"Couldn't find a latitude coordinate. Tried: {lat_variants}")
 
 
+def get_lon_name(ds):
+    """
+    Get name of longitude dimension
+
+    Parameters
+    ----------
+    ds : xarray.Dataset or xarray.DataArray
+
+    Returns
+    -------
+    str
+        The name of the latitudinal dimension of the dataset,
+        provided it's either lat or latitude
+
+    Raises
+    ------
+    RuntimeError
+        If there is no dimension called lat or latitude
+        in the dataset
+    """
+    # Common latitude coordinate names
+    lat_variants = ["lon", "longitude", "x", "lon_rho"]
+
+    for lat_name in lat_variants:
+        if lat_name in ds.coords or lat_name in ds.dims:
+            return lat_name
+
+    raise RuntimeError(f"Couldn't find a latitude coordinate. Tried: {lat_variants}")
+
+
 # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-branches
 def global_mean(
     ds,
-    lat_name=None,
-    lon_name=None,
     weights=None,
     normalize_weights=True,
     skip_dims=None,
@@ -587,10 +615,6 @@ def global_mean(
     ----------
     ds : xarray.Dataset or xarray.DataArray
         Data to compute global mean over
-    lat_name : str, optional
-        Name of latitude coordinate (auto-detected if None)
-    lon_name : str, optional
-        Name of longitude coordinate (auto-detected if None)
     weights : xarray.DataArray, optional
         Custom weights for averaging (if None, uses cosine of latitude)
     normalize_weights : bool, optional
@@ -603,21 +627,11 @@ def global_mean(
     xarray.Dataset or xarray.DataArray
         Global mean with spatial dimensions removed
     """
-    # Auto-detect latitude coordinate if not provided
-    if lat_name is None:
-        lat_name = get_lat_name(ds)
+    # Auto-detect latitude coordinate
+    lat_name = get_lat_name(ds)
 
     # Auto-detect longitude coordinate if not provided
-    if lon_name is None:
-        lon_variants = ["lon", "longitude", "x", "lon_rho"]
-        for lon_var in lon_variants:
-            if lon_var in ds.coords or lon_var in ds.dims:
-                lon_name = lon_var
-                break
-        if lon_name is None:
-            raise RuntimeError(
-                f"Couldn't find a longitude coordinate. Tried: {lon_variants}"
-            )
+    lon_name = get_lon_name(ds)
 
     # Set default skip dimensions for backward compatibility
     if skip_dims is None:
@@ -688,14 +702,7 @@ def create_region_mask(ds, bbox=None, mask=None):
         # Create mask from bounding box
         lat_name = get_lat_name(ds)
 
-        lon_variants = ["lon", "longitude", "x", "lon_rho"]
-        lon_name = None
-        for lon_var in lon_variants:
-            if lon_var in ds.coords or lon_var in ds.dims:
-                lon_name = lon_var
-                break
-        if lon_name is None:
-            raise RuntimeError("Couldn't find longitude coordinate")
+        lon_name = get_lon_name(ds)
 
         lat = ds[lat_name]
         lon = ds[lon_name]
@@ -723,12 +730,7 @@ def create_region_mask(ds, bbox=None, mask=None):
         if isinstance(mask, np.ndarray):
             # Convert to xarray with appropriate coordinates
             lat_name = get_lat_name(ds)
-            lon_variants = ["lon", "longitude", "x", "lon_rho"]
-            lon_name = None
-            for lon_var in lon_variants:
-                if lon_var in ds.coords or lon_var in ds.dims:
-                    lon_name = lon_var
-                    break
+            lon_name = get_lon_name(ds)
 
             coords = {lat_name: ds[lat_name], lon_name: ds[lon_name]}
             mask = xr.DataArray(mask, coords=coords, dims=[lat_name, lon_name])
@@ -742,8 +744,6 @@ def regional_mean(
     ds,
     region_code=None,
     region_mask=None,
-    lat_name=None,
-    lon_name=None,
     weights=None,
     normalize_weights=True,
 ):
@@ -763,10 +763,6 @@ def regional_mean(
         Use list_ar6_regions() to see all available regions
     region_mask : xarray.DataArray, optional
         Custom 2D boolean mask (True = inside region)
-    lat_name : str, optional
-        Name of latitude coordinate (auto-detected if None)
-    lon_name : str, optional
-        Name of longitude coordinate (auto-detected if None)
     weights : xarray.DataArray, optional
         Custom weights for averaging (if None, uses cosine of latitude)
     normalize_weights : bool, optional
@@ -794,20 +790,11 @@ def regional_mean(
     global_mean : Calculate global mean
     extract_point : Extract time series at a specific point
     """
+    # Auto-detect coordinates
+    lat_name = get_lat_name(ds)
+    lon_name = get_lon_name(ds)
     # Handle custom region mask first
     if region_mask is not None:
-        # Auto-detect coordinates
-        if lat_name is None:
-            lat_name = get_lat_name(ds)
-        if lon_name is None:
-            lon_variants = ["lon", "longitude", "x", "lon_rho"]
-            for lon_var in lon_variants:
-                if lon_var in ds.coords or lon_var in ds.dims:
-                    lon_name = lon_var
-                    break
-            if lon_name is None:
-                raise RuntimeError("Couldn't find longitude coordinate")
-
         # Apply mask
         regional_data = ds.where(region_mask)
 
@@ -850,23 +837,6 @@ def regional_mean(
             "regionmask is required for AR6 regions. "
             "Install it with: pip install regionmask"
         )
-
-    # Auto-detect latitude coordinate if not provided
-    if lat_name is None:
-        lat_name = get_lat_name(ds)
-
-    # Auto-detect longitude coordinate if not provided
-    if lon_name is None:
-        lon_variants = ["lon", "longitude", "x", "lon_rho"]
-        for lon_var in lon_variants:
-            if lon_var in ds.coords or lon_var in ds.dims:
-                lon_name = lon_var
-                break
-        if lon_name is None:
-            raise RuntimeError(
-                f"Couldn't find a longitude coordinate. Tried: {lon_variants}"
-            )
-
     # Load AR6 regions
     ar6_regions = regionmask.defined_regions.ar6.all
 
@@ -930,8 +900,6 @@ def extract_point(
     lat_point,
     lon_point,
     method="nearest",
-    lat_name=None,
-    lon_name=None,
 ):
     """
     Extract time series at a specific latitude/longitude point.
@@ -946,10 +914,6 @@ def extract_point(
         Longitude of the point (degrees East, -180 to 180 or 0 to 360)
     method : str, optional
         Selection method: 'nearest' (default) or 'interp' for interpolation
-    lat_name : str, optional
-        Name of latitude coordinate (auto-detected if None)
-    lon_name : str, optional
-        Name of longitude coordinate (auto-detected if None)
 
     Returns
     -------
@@ -970,21 +934,8 @@ def extract_point(
     regional_mean : Calculate regional mean
     global_mean : Calculate global mean
     """
-    # Auto-detect latitude coordinate if not provided
-    if lat_name is None:
-        lat_name = get_lat_name(ds)
-
-    # Auto-detect longitude coordinate if not provided
-    if lon_name is None:
-        lon_variants = ["lon", "longitude", "x", "lon_rho"]
-        for lon_var in lon_variants:
-            if lon_var in ds.coords or lon_var in ds.dims:
-                lon_name = lon_var
-                break
-        if lon_name is None:
-            raise RuntimeError(
-                f"Couldn't find a longitude coordinate. Tried: {lon_variants}"
-            )
+    lat_name = get_lat_name(ds)
+    lon_name = get_lon_name(ds)
 
     # Handle longitude wrapping (convert -180:180 to 0:360 if needed)
     lon_data = ds[lon_name].values

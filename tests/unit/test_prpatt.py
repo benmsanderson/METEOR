@@ -21,296 +21,269 @@ from meteor.prpatt import (
 )
 
 
-class TestPrpattMathFunctions:
-    """Test mathematical utility functions in prpatt module."""
+def test_expotas_function():
+    """Test the exponential pulse response function."""
+    # Test with scalar inputs
+    time = 1.0
+    coeff = 2.0
+    decay_time = 3.0
 
-    def test_expotas_function(self):
-        """Test the exponential pulse response function."""
-        # Test with scalar inputs
-        time = 1.0
-        coeff = 2.0
-        decay_time = 3.0
+    result = expotas(time, coeff, decay_time)
 
-        result = expotas(time, coeff, decay_time)
+    # Should return expected exponential value
+    expected = coeff * (1 - np.exp(-time / decay_time))
+    assert np.isclose(result, expected)
 
-        # Should return expected exponential value
-        expected = coeff * (1 - np.exp(-time / decay_time))
-        assert np.isclose(result, expected)
+    # Test with array inputs
+    times = np.array([0, 1, 2, 5, 10])
+    results = expotas(times, coeff, decay_time)
 
-        # Test with array inputs
-        times = np.array([0, 1, 2, 5, 10])
-        results = expotas(times, coeff, decay_time)
+    # Should be same shape as input
+    assert results.shape == times.shape
 
-        # Should be same shape as input
-        assert results.shape == times.shape
+    # Should be monotonically increasing (for positive coeff)
+    assert np.all(np.diff(results) >= 0)
 
-        # Should be monotonically increasing (for positive coeff)
-        assert np.all(np.diff(results) >= 0)
+    # At t=0, should be 0
+    result_t0 = expotas(0, coeff, decay_time)
+    assert np.isclose(result_t0, 0)
+
+    # At t=infinity, should approach coeff
+    result_large_t = expotas(1000, coeff, decay_time)
+    assert np.isclose(result_large_t, coeff, rtol=1e-3)
+
+
+def test_expotas_edge_cases():
+    """Test edge cases for expotas function."""
+    # Test with zero coefficient
+    result = expotas(1.0, 0.0, 1.0)
+    assert result == 0.0
+
+    # Test with very small decay time
+    result = expotas(1.0, 1.0, 0.001)
+    assert np.isclose(result, 1.0, rtol=1e-3)
+
+    # Test with very large decay time
+    result = expotas(1.0, 1.0, 1000.0)
+    assert result < 0.01  # Should be very small
+
+
+def test_expfun_function():
+    """Test the expfun function."""
+    # Test with simple parameters
+    t = np.array([0, 1, 2, 3])
+    pars = Mock()
+    pars.s1 = 1.0
+    pars.t1 = 2.0
+    pars.s2 = 0.5
+    pars.t2 = 1.0
+    pars.s3 = 0.0  # Zero third component
+    pars.t3 = 1.0
+
+    try:
+        result = expfun(t, pars)
+
+        # Should return array same shape as t
+        assert result.shape == t.shape
+
+        # Should be real values
+        assert np.all(np.isreal(result))
 
         # At t=0, should be 0
-        result_t0 = expotas(0, coeff, decay_time)
-        assert np.isclose(result_t0, 0)
+        assert np.isclose(result[0], 0)
 
-        # At t=infinity, should approach coeff
-        result_large_t = expotas(1000, coeff, decay_time)
-        assert np.isclose(result_large_t, coeff, rtol=1e-3)
+    except Exception:
+        # If function has complex dependencies, just verify it exists
+        assert callable(expfun)
 
-    def test_expotas_edge_cases(self):
-        """Test edge cases for expotas function."""
-        # Test with zero coefficient
-        result = expotas(1.0, 0.0, 1.0)
-        assert result == 0.0
 
-        # Test with very small decay time
-        result = expotas(1.0, 1.0, 0.001)
-        assert np.isclose(result, 1.0, rtol=1e-3)
-
-        # Test with very large decay time
-        result = expotas(1.0, 1.0, 1000.0)
-        assert result < 0.01  # Should be very small
-
-    def test_expfun_function(self):
-        """Test the expfun function."""
+def test_make_amat_function():
+    """Test the make_amat function."""
+    try:
         # Test with simple parameters
-        t = np.array([0, 1, 2, 3])
         pars = Mock()
         pars.s1 = 1.0
         pars.t1 = 2.0
         pars.s2 = 0.5
         pars.t2 = 1.0
-        pars.s3 = 0.0  # Zero third component
+        pars.s3 = 0.0
         pars.t3 = 1.0
 
-        try:
-            result = expfun(t, pars)
+        nt = 10  # Number of time steps
 
-            # Should return array same shape as t
-            assert result.shape == t.shape
+        result = make_amat(pars, nt)
 
-            # Should be real values
-            assert np.all(np.isreal(result))
+        # Should return a matrix
+        assert isinstance(result, np.ndarray)
 
-            # At t=0, should be 0
-            assert np.isclose(result[0], 0)
+        # Should have expected shape (nt x nt)
+        assert result.shape == (nt, nt)
 
-        except Exception:
-            # If function has complex dependencies, just verify it exists
-            assert callable(expfun)
+        # Should be real values
+        assert np.all(np.isreal(result))
 
-    def test_make_amat_function(self):
-        """Test the make_amat function."""
-        try:
-            # Test with simple parameters
-            pars = Mock()
-            pars.s1 = 1.0
-            pars.t1 = 2.0
-            pars.s2 = 0.5
-            pars.t2 = 1.0
-            pars.s3 = 0.0
-            pars.t3 = 1.0
-
-            nt = 10  # Number of time steps
-
-            result = make_amat(pars, nt)
-
-            # Should return a matrix
-            assert isinstance(result, np.ndarray)
-
-            # Should have expected shape (nt x nt)
-            assert result.shape == (nt, nt)
-
-            # Should be real values
-            assert np.all(np.isreal(result))
-
-        except Exception:
-            # If function has complex dependencies, just verify it exists
-            assert callable(make_amat)
-
-    def test_make_pmat_function(self):
-        """Test the make_pmat function."""
-        try:
-            # Test with simple parameters
-            tauvec = np.array([1.0, 2.0, 3.0])
-            nt = 5
-
-            result = make_pmat(tauvec, nt)
-
-            # Should return a matrix
-            assert isinstance(result, np.ndarray)
-
-            # Should have expected shape
-            assert result.shape[0] == nt  # Time dimension
-            assert result.shape[1] == len(tauvec)  # Parameter dimension
-
-            # Should be real values
-            assert np.all(np.isreal(result))
-
-        except Exception:
-            # If function has complex dependencies, just verify it exists
-            assert callable(make_pmat)
-
-    def test_make_anom_function(self):
-        """Test the make_anom function."""
-        try:
-            # Create simple test datasets
-            ds_exp = xr.Dataset(
-                {
-                    "tas": xr.DataArray(
-                        np.random.randn(10, 3, 3),
-                        dims=["time", "lat", "lon"],
-                        coords={
-                            "time": range(2000, 2010),
-                            "lat": [0, 1, 2],
-                            "lon": [0, 1, 2],
-                        },
-                    )
-                }
-            )
-
-            ds_cnt = xr.Dataset(
-                {
-                    "tas": xr.DataArray(
-                        np.random.randn(10, 3, 3),
-                        dims=["time", "lat", "lon"],
-                        coords={
-                            "time": range(2000, 2010),
-                            "lat": [0, 1, 2],
-                            "lon": [0, 1, 2],
-                        },
-                    )
-                }
-            )
-
-            result = make_anom(ds_exp, ds_cnt)
-
-            # Should return a dataset
-            assert isinstance(result, xr.Dataset)
-
-            # Should have same variables as input
-            assert "tas" in result
-
-            # Should have same dimensions
-            assert result["tas"].dims == ds_exp["tas"].dims
-
-        except Exception:
-            # If function has complex dependencies, just verify it exists
-            assert callable(make_anom)
+    except Exception:
+        # If function has complex dependencies, just verify it exists
+        assert callable(make_amat)
 
 
-class TestPrpattUtilityFunctions:
-    """Test utility functions that don't require complex setup."""
+def test_make_pmat_function():
+    """Test the make_pmat function."""
+    try:
+        # Test with simple parameters
+        tauvec = np.array([1.0, 2.0, 3.0])
+        nt = 5
 
-    def test_function_imports(self):
-        """Test that key functions can be imported."""
-        # Test that main functions exist
-        from meteor.prpatt import (
-            expfun,
-            expotas,
-            fit_timescales,
-            make_amat,
-            make_anom,
-            make_pmat,
-            pmodel,
-            rmodel,
+        result = make_pmat(tauvec, nt)
+
+        # Should return a matrix
+        assert isinstance(result, np.ndarray)
+
+        # Should have expected shape
+        assert result.shape[0] == nt  # Time dimension
+        assert result.shape[1] == len(tauvec)  # Parameter dimension
+
+        # Should be real values
+        assert np.all(np.isreal(result))
+
+    except Exception:
+        # If function has complex dependencies, just verify it exists
+        assert callable(make_pmat)
+
+
+def test_make_anom_function():
+    """Test the make_anom function."""
+    try:
+        # Create simple test datasets
+        ds_exp = xr.Dataset(
+            {
+                "tas": xr.DataArray(
+                    np.random.randn(10, 3, 3),
+                    dims=["time", "lat", "lon"],
+                    coords={
+                        "time": range(2000, 2010),
+                        "lat": [0, 1, 2],
+                        "lon": [0, 1, 2],
+                    },
+                )
+            }
         )
 
-        # Test they are callable
-        assert callable(expotas)
+        ds_cnt = xr.Dataset(
+            {
+                "tas": xr.DataArray(
+                    np.random.randn(10, 3, 3),
+                    dims=["time", "lat", "lon"],
+                    coords={
+                        "time": range(2000, 2010),
+                        "lat": [0, 1, 2],
+                        "lon": [0, 1, 2],
+                    },
+                )
+            }
+        )
+
+        result = make_anom(ds_exp, ds_cnt)
+
+        # Should return a dataset
+        assert isinstance(result, xr.Dataset)
+
+        # Should have same variables as input
+        assert "tas" in result
+
+        # Should have same dimensions
+        assert result["tas"].dims == ds_exp["tas"].dims
+
+    except Exception:
+        # If function has complex dependencies, just verify it exists
         assert callable(make_anom)
-        assert callable(expfun)
-        assert callable(make_amat)
-        assert callable(make_pmat)
-        assert callable(fit_timescales)
+
+
+def test_pmodel_function():
+    """Test the pmodel function."""
+    try:
+        # Test with simple parameters
+        pars = Mock()
+        pars.s1 = 1.0
+        pars.t1 = 2.0
+        pars.s2 = 0.5
+        pars.t2 = 1.0
+        pars.s3 = 0.0
+        pars.t3 = 1.0
+
+        n_times = 10
+
+        result = pmodel(pars, n_times)
+
+        # Should return an array
+        assert isinstance(result, np.ndarray)
+
+        # Should have correct length
+        assert len(result) == n_times
+
+        # Should be real values
+        assert np.all(np.isreal(result))
+
+    except Exception:
+        # If function has complex dependencies, just verify it exists
         assert callable(pmodel)
-        assert callable(rmodel)
-
-    def test_pmodel_function(self):
-        """Test the pmodel function."""
-        try:
-            # Test with simple parameters
-            pars = Mock()
-            pars.s1 = 1.0
-            pars.t1 = 2.0
-            pars.s2 = 0.5
-            pars.t2 = 1.0
-            pars.s3 = 0.0
-            pars.t3 = 1.0
-
-            n_times = 10
-
-            result = pmodel(pars, n_times)
-
-            # Should return an array
-            assert isinstance(result, np.ndarray)
-
-            # Should have correct length
-            assert len(result) == n_times
-
-            # Should be real values
-            assert np.all(np.isreal(result))
-
-        except Exception:
-            # If function has complex dependencies, just verify it exists
-            assert callable(pmodel)
-
-    def test_wgt_function(self):
-        """Test the wgt function for calculating cosine weights."""
-        try:
-            # Create test data with latitude coordinates
-            test_array = xr.DataArray(
-                np.random.randn(5, 3, 4),
-                dims=["time", "lat", "lon"],
-                coords={
-                    "time": range(2000, 2005),
-                    "lat": [-45, 0, 45],
-                    "lon": [-90, -45, 0, 45],
-                },
-            )
-
-            result = wgt(test_array)
-
-            # Should return weights
-            assert isinstance(result, np.ndarray)
-
-            # Should have correct shape (matching spatial dimensions)
-            assert result.shape[0] == test_array.sizes["lat"]
-
-            # Cosine weights should be positive
-            assert np.all(result >= 0)
-
-        except Exception:
-            # If function has complex dependencies, just verify it exists
-            assert callable(wgt)
-
-    def test_residual_function(self):
-        """Test the residual function to hit lines 406-408."""
-        try:
-            # Create simple test data to test the residual function
-            # Mock parameters object
-            class MockParams:
-                def __getitem__(self, key):
-                    return 1.0
-
-            mock_pars = MockParams()
-            mode_weights = np.array([0.5, 0.8])
-            test_data = np.array([[1.0, 2.0], [3.0, 4.0]])  # 2 time steps, 2 modes
-
-            # Test the residual calculation directly
-            # This should hit the return statement at lines 406-408
-            result = residual(mock_pars, mode_weights, test_data)
-
-            # Should return an array with the same shape as test_data
-            assert isinstance(result, np.ndarray)
-            assert result.shape == test_data.shape
-
-        except Exception:
-            # If function has complex dependencies, just verify it exists
-
-            assert callable(residual)
 
 
-if __name__ == "__main__":
-    pytest.main([__file__])
+def test_wgt_function():
+    """Test the wgt function for calculating cosine weights."""
+    try:
+        # Create test data with latitude coordinates
+        test_array = xr.DataArray(
+            np.random.randn(5, 3, 4),
+            dims=["time", "lat", "lon"],
+            coords={
+                "time": range(2000, 2005),
+                "lat": [-45, 0, 45],
+                "lon": [-90, -45, 0, 45],
+            },
+        )
+
+        result = wgt(test_array)
+
+        # Should return weights
+        assert isinstance(result, np.ndarray)
+
+        # Should have correct shape (matching spatial dimensions)
+        assert result.shape[0] == test_array.sizes["lat"]
+
+        # Cosine weights should be positive
+        assert np.all(result >= 0)
+
+    except Exception:
+        # If function has complex dependencies, just verify it exists
+        assert callable(wgt)
+
+
+def test_residual_function():
+    """Test the residual function to hit lines 406-408."""
+    try:
+        # Create simple test data to test the residual function
+        # Mock parameters object
+        class MockParams:
+            def __getitem__(self, key):
+                return 1.0
+
+        mock_pars = MockParams()
+        mode_weights = np.array([0.5, 0.8])
+        test_data = np.array([[1.0, 2.0], [3.0, 4.0]])  # 2 time steps, 2 modes
+
+        # Test the residual calculation directly
+        # This should hit the return statement at lines 406-408
+        result = residual(mock_pars, mode_weights, test_data)
+
+        # Should return an array with the same shape as test_data
+        assert isinstance(result, np.ndarray)
+        assert result.shape == test_data.shape
+
+    except Exception:
+        # If function has complex dependencies, just verify it exists
+
+        assert callable(residual)
 
 
 def test_additional_prpatt_functions():
@@ -354,6 +327,34 @@ def test_additional_prpatt_functions():
     time_name_std = get_time_name(test_dataset_standard["tas"])
     assert lat_name_std == "lat"
     assert time_name_std == "time"
+
+
+def test_global_mean_function():
+    """Test the global_mean function."""
+    # Create test data
+    test_data = xr.DataArray(
+        np.random.rand(10, 4, 5),
+        dims=["time", "lat", "lon"],
+        coords={
+            "time": range(10),
+            "lat": [-60, -30, 0, 30],
+            "lon": [-180, -90, 0, 90, 180],
+        },
+    )
+
+    result = global_mean(test_data)
+
+    # Should return a DataArray
+    assert isinstance(result, xr.DataArray)
+
+    # Should have time dimension only
+    assert result.dims == ("time",)
+
+    # Should have correct length
+    assert result.sizes["time"] == test_data.sizes["time"]
+
+    result1 = global_mean(test_data, lat_name="lat", lon_name="lon", skip_dims="time")
+    assert np.allclose(result1.values, result.values)
 
 
 def test_numerical_edge_cases():

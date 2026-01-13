@@ -30,6 +30,7 @@ REQUIREMENTS = [
     "ciceroscm>=1.1.2",
     "scikit-learn",
     "statsmodels",
+    "regionmask",
 ]
 
 REQUIREMENTS_NOTEBOOKS = ["ipywidgets", "notebook", "seaborn", "ipykernel", "cartopy"]

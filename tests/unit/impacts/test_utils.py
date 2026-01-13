@@ -219,7 +219,7 @@ def test_global_mean_basic():
         data_values, dims=["lat", "lon"], coords={"lat": lats, "lon": lons}
     )
 
-    result = global_mean(test_data, skip_dims=[])
+    result = global_mean(test_data)
 
     # Should be a scalar (all spatial dims removed)
     assert result.ndim == 0
@@ -241,7 +241,7 @@ def test_global_mean_weighting_effect():
     )
 
     # With latitude weighting, equatorial values should have more influence
-    weighted_mean = global_mean(test_data, skip_dims=[])
+    weighted_mean = global_mean(test_data)
 
     # Simple unweighted mean
     unweighted_mean = test_data.mean()
@@ -263,9 +263,7 @@ def test_global_mean_custom_weights():
 
     # Equal weights (should give simple average)
     equal_weights = xr.ones_like(test_data)
-    result = global_mean(
-        test_data, weights=equal_weights, skip_dims=[], normalize_weights=False
-    )
+    result = global_mean(test_data, weights=equal_weights, normalize_weights=False)
 
     expected = test_data.mean()
     np.testing.assert_almost_equal(float(result), float(expected))
@@ -285,7 +283,7 @@ def test_global_mean_auto_coordinate_detection():
     # Rename coordinates
     renamed_data = test_data.rename({"lat": "latitude", "lon": "longitude"})
 
-    result = global_mean(renamed_data, skip_dims=[])
+    result = global_mean(renamed_data)
     assert result.ndim == 0  # Spatial dims should be removed
 
 

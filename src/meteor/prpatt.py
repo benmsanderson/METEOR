@@ -7,6 +7,7 @@ import logging
 import lmfit
 import numpy as np
 import pandas as pd
+import regionmask
 import xarray as xr
 from scipy.linalg import pinv
 from scipy.optimize import minimize
@@ -240,9 +241,9 @@ def fit_timescales(X, a0):
           exponential decays over the time series with respect to
           the amplitudes and timescales of the decays
     """
-    awgt = np.cos(X.lat / 180 * np.pi)
-    awgt = awgt / np.mean(awgt)
-    ts = (X * awgt).mean("lat", skipna=True).mean("lon", skipna=True).values
+    # awgt = np.cos(X.lat / 180 * np.pi)
+    # awgt = awgt / np.mean(awgt)
+    ts = (X * wgt(X)).mean("lat", skipna=True).mean("lon", skipna=True).values
     fit_params = make_params(a0)
     # print(ts)
     out = lmfit.minimize(
@@ -426,53 +427,6 @@ def wgt(array_w_lat):
     return weights
 
 
-def wgt2(array_w_latlon):
-    """
-    Calculate cosine weights for an xarray with latitude field on 2d
-
-    Parameters
-    ----------
-    array_w_latlon: xarray.DataArray
-                 Array that has latitudinal and longitudinal
-                 dimension
-    Returns
-    -------
-    xarray.Datarray
-                 2d xarray called weights, with weights per latitude
-                 on logitude by latitude grid
-    """
-    weights = wgt(array_w_latlon)
-    weights_2d = np.tile(weights, (len(array_w_latlon.lon), 1)).T * 0.99 + 0.01
-    return weights_2d
-
-
-def wgt3(array_w_latlontime):
-    """
-    Calculate cosine weights for an xarray with latitude field on 2d
-
-    Parameters
-    ----------
-    array_w_latlontime: xarray.DataArray
-                  Array that has latitudinal and longitudinal
-                  dimension
-
-    Returns
-    -------
-    xarray.Datarray
-                  2d xarray called weights, with weights per latitude
-                  on logitude by latitude grid
-    """
-    weights = wgt(array_w_latlontime)
-    weights_3d = (
-        np.tile(
-            weights.T, (len(array_w_latlontime.lon), len(array_w_latlontime.year), 1)
-        ).transpose([1, 2, 0])
-        * 0.99
-        + 0.01
-    )
-    return weights_3d
-
-
 def make_params(ain):
     """
     Create lmfit parameter object to define parameters used by pmodel to create
@@ -595,7 +549,82 @@ def get_lon_name(ds):
         if lat_name in ds.coords or lat_name in ds.dims:
             return lat_name
 
-    raise RuntimeError(f"Couldn't find a latitude coordinate. Tried: {lat_variants}")
+    raise RuntimeError(f"Couldn't find a longitude coordinate. Tried: {lat_variants}")
+
+
+def get_weights_for_ds(ds, lat_name=None, lon_name=None, weights=None):
+    """
+    Generate latitude-based weights for an xarray dataset or dataarray.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset or xarray.DataArray
+        Data with lat/lon coordinates
+    lat_name : str, optional
+        Name of latitude coordinate (if None, auto-detected)
+    lon_name : str, optional
+        Name of longitude coordinate (if None, auto-detected)
+    weights : xarray.DataArray, optional
+        Custom weights for averaging (if None, uses cosine of latitude)
+
+    Returns
+    -------
+    xarray.DataArray
+        Weights for latitude dimension (and longitude if applicable)
+    """
+    if weights is None:
+        # Get coordinate names if not provided
+        if lat_name is None:
+            lat_name = get_lat_name(ds)
+        if lon_name is None:
+            lon_name = get_lon_name(ds)
+        # Create weights if not provided
+        lat = ds[lat_name]
+        weights = np.cos(np.deg2rad(lat))
+
+        # Broadcast to longitude if needed
+        if lon_name in ds.dims:
+            weights = weights * xr.ones_like(ds[lon_name])
+    return weights
+
+
+def apply_weights_and_do_spatial_mean(
+    dataset, weights, normalize_weights=True, lat_name=None, lon_name=None
+):
+    """
+    Apply weights to dataset and compute spatial mean.
+
+    Parameters
+    ----------
+    dataset : xarray.Dataset or xarray.DataArray
+        Data to compute weighted mean over
+    weights : xarray.DataArray
+        Weights for averaging
+    normalize_weights : bool, optional
+        Whether to normalize weights by their mean (default True)
+    lat_name : str, optional
+        Name of latitude coordinate (if None, auto-detected)
+    lon_name : str, optional
+        Name of longitude coordinate (if None, auto-detected)
+
+    Returns
+    -------
+    xarray.Dataset or xarray.DataArray
+        Weighted mean with spatial dimensions removed
+    """
+    if lat_name is None:
+        lat_name = get_lat_name(dataset)
+    if lon_name is None:
+        lon_name = get_lon_name(dataset)
+    # Normalize weights
+    if normalize_weights:
+        weights = weights / weights.mean()
+
+    # Calculate weighted mean
+    spatial_dims = [lat_name, lon_name]
+    weighted_data = dataset * weights
+    result = weighted_data.mean(spatial_dims, skipna=True)
+    return result
 
 
 # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-branches
@@ -603,7 +632,6 @@ def global_mean(
     ds,
     weights=None,
     normalize_weights=True,
-    skip_dims=None,
 ):
     """
     Calculate latitude weighted global mean of xarray dataset or dataarray.
@@ -619,57 +647,19 @@ def global_mean(
         Custom weights for averaging (if None, uses cosine of latitude)
     normalize_weights : bool, optional
         Whether to normalize weights by their mean (default True for backward compatibility)
-    skip_dims : list of str, optional
-        Dimensions to skip when averaging (if None, skips 'time' and 'ens' for backward compatibility)
 
     Returns
     -------
     xarray.Dataset or xarray.DataArray
         Global mean with spatial dimensions removed
     """
-    # Auto-detect latitude coordinate
-    lat_name = get_lat_name(ds)
-
-    # Auto-detect longitude coordinate if not provided
-    lon_name = get_lon_name(ds)
-
-    # Set default skip dimensions for backward compatibility
-    if skip_dims is None:
-        skip_dims = ["time", "ens"]
-        # Add time dimension name detection for more robust backward compatibility
-        if hasattr(ds, "dims"):
-            time_variants = ["time", "month", "year"]
-            for time_var in time_variants:
-                if time_var in ds.dims and time_var not in skip_dims:
-                    skip_dims.append(time_var)
-
-    # Get spatial dimensions to average over
-    if hasattr(ds, "dims"):
-        spatial_dims = [dim for dim in ds.dims if dim not in skip_dims]
-        # Ensure lat/lon are in spatial dims if they exist
-        if lat_name in ds.dims and lat_name not in spatial_dims:
-            spatial_dims.append(lat_name)
-        if lon_name in ds.dims and lon_name not in spatial_dims:
-            spatial_dims.append(lon_name)
-    else:
-        spatial_dims = [lat_name, lon_name]
-
     # Create weights if not provided
-    if weights is None:
-        lat = ds[lat_name]
-        weights = np.cos(np.deg2rad(lat))
-
-        # Broadcast to longitude if needed
-        if lon_name in ds.dims:
-            weights = weights * xr.ones_like(ds[lon_name])
-
-    # Normalize weights if requested (default behavior for backward compatibility)
-    if normalize_weights:
-        weights = weights / weights.mean()
+    weights = get_weights_for_ds(ds, weights=weights)
 
     # Calculate weighted mean
-    weighted_data = ds * weights
-    result = weighted_data.mean(spatial_dims, skipna=True)
+    result = apply_weights_and_do_spatial_mean(
+        ds, weights, normalize_weights=normalize_weights
+    )
 
     # Update attributes if possible
     if hasattr(result, "attrs"):
@@ -698,12 +688,14 @@ def create_region_mask(ds, bbox=None, mask=None):
     xarray.DataArray
         2D boolean mask (True = inside region)
     """
+    if bbox is None and mask is None:
+        raise ValueError("Must provide either bbox or mask")
+
+    lat_name = get_lat_name(ds)
+    lon_name = get_lon_name(ds)
+
     if bbox is not None:
         # Create mask from bounding box
-        lat_name = get_lat_name(ds)
-
-        lon_name = get_lon_name(ds)
-
         lat = ds[lat_name]
         lon = ds[lon_name]
 
@@ -725,19 +717,12 @@ def create_region_mask(ds, bbox=None, mask=None):
         region_mask = mask_lat & mask_lon
         return region_mask
 
-    elif mask is not None:
-        # Use provided mask
-        if isinstance(mask, np.ndarray):
-            # Convert to xarray with appropriate coordinates
-            lat_name = get_lat_name(ds)
-            lon_name = get_lon_name(ds)
-
-            coords = {lat_name: ds[lat_name], lon_name: ds[lon_name]}
-            mask = xr.DataArray(mask, coords=coords, dims=[lat_name, lon_name])
-        return mask
-
-    else:
-        raise ValueError("Must provide either bbox or mask")
+    # Use provided mask
+    if isinstance(mask, np.ndarray):
+        # Convert to xarray with appropriate coordinates
+        coords = {lat_name: ds[lat_name], lon_name: ds[lon_name]}
+        mask = xr.DataArray(mask, coords=coords, dims=[lat_name, lon_name])
+    return mask
 
 
 def regional_mean(
@@ -790,6 +775,10 @@ def regional_mean(
     global_mean : Calculate global mean
     extract_point : Extract time series at a specific point
     """
+    # Handle AR6 region code
+    if region_code is None and region_mask is None:
+        raise ValueError("Must provide either region_code or region_mask")
+
     # Auto-detect coordinates
     lat_name = get_lat_name(ds)
     lon_name = get_lon_name(ds)
@@ -799,23 +788,14 @@ def regional_mean(
         regional_data = ds.where(region_mask)
 
         # Create weights
-        if weights is None:
-            lat = regional_data[lat_name]
-            weights = np.cos(np.deg2rad(lat))
-            if lon_name in regional_data.dims:
-                weights = weights * xr.ones_like(regional_data[lon_name])
+        weights = get_weights_for_ds(regional_data, lat_name, lon_name, weights=weights)
 
         # Apply mask to weights
         weights = weights.where(region_mask)
 
-        # Normalize weights
-        if normalize_weights:
-            weights = weights / weights.mean()
-
-        # Calculate weighted mean
-        spatial_dims = [lat_name, lon_name]
-        weighted_data = regional_data * weights
-        result = weighted_data.mean(spatial_dims, skipna=True)
+        result = apply_weights_and_do_spatial_mean(
+            regional_data, weights, normalize_weights, lat_name, lon_name
+        )
 
         # Update attributes
         if hasattr(result, "attrs"):
@@ -825,18 +805,6 @@ def regional_mean(
             result.attrs["region_type"] = "custom"
 
         return result
-
-    # Handle AR6 region code
-    if region_code is None:
-        raise ValueError("Must provide either region_code or region_mask")
-
-    try:
-        import regionmask
-    except ImportError:
-        raise ImportError(
-            "regionmask is required for AR6 regions. "
-            "Install it with: pip install regionmask"
-        )
     # Load AR6 regions
     ar6_regions = regionmask.defined_regions.ar6.all
 
@@ -861,28 +829,14 @@ def regional_mean(
     # Apply mask to data (keep only the specified region)
     regional_data = ds.where(mask == region_number)
 
-    # Create weights if not provided
-    if weights is None:
-        lat = regional_data[lat_name]
-        weights = np.cos(np.deg2rad(lat))
-
-        # Broadcast to longitude if needed
-        if lon_name in regional_data.dims:
-            weights = weights * xr.ones_like(regional_data[lon_name])
+    weights = get_weights_for_ds(regional_data, lat_name, lon_name, weights=weights)
 
     # Apply mask to weights as well
     weights = weights.where(mask == region_number)
 
-    # Normalize weights if requested
-    if normalize_weights:
-        weights = weights / weights.mean()
-
-    # Get spatial dimensions to average over
-    spatial_dims = [lat_name, lon_name]
-
-    # Calculate weighted mean
-    weighted_data = regional_data * weights
-    result = weighted_data.mean(spatial_dims, skipna=True)
+    result = apply_weights_and_do_spatial_mean(
+        regional_data, weights, normalize_weights, lat_name, lon_name
+    )
 
     # Update attributes
     if hasattr(result, "attrs"):
@@ -963,7 +917,7 @@ def extract_point(
     return result
 
 
-def list_ar6_regions():
+def list_ar6_regions():  # pragma: no cover
     """
     List all available IPCC AR6 reference regions.
 
@@ -989,14 +943,6 @@ def list_ar6_regions():
     --------
     regional_mean : Calculate regional mean using AR6 regions
     """
-    try:
-        import regionmask
-    except ImportError:
-        raise ImportError(
-            "regionmask is required for list_ar6_regions(). "
-            "Install it with: pip install regionmask"
-        )
-
     ar6_regions = regionmask.defined_regions.ar6.all
 
     print("AR6 IPCC Reference Regions:")

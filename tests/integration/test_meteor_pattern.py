@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from ciceroscm import input_handler
 
-from meteor import Cmip6MeteorDataGetter, MeteorPatternScaling, prpatt
+from meteor import Cmip6MeteorDataGetter, MeteorPatternScaling, geo_data_utils
 
 
 def test_meteor_scaling(test_data_dir):
@@ -131,11 +131,11 @@ def test_sulfate_from_residual_functionality(test_data_dir):
         em_data, conc_data, ["pr", "tas"]
     )
     assert set(patterns.keys()) == set(["pr", "tas"])
-    assert np.mean(prpatt.global_mean(patterns_ghg["tas"])) > np.mean(
-        prpatt.global_mean(patterns["tas"])
+    assert np.mean(geo_data_utils.global_mean(patterns_ghg["tas"])) > np.mean(
+        geo_data_utils.global_mean(patterns["tas"])
     )
-    assert np.mean(prpatt.global_mean(patterns_ghg["pr"])) > np.mean(
-        prpatt.global_mean(patterns["pr"])
+    assert np.mean(geo_data_utils.global_mean(patterns_ghg["pr"])) > np.mean(
+        geo_data_utils.global_mean(patterns["pr"])
     )
 
     patterns_separate = canesm_anomsulf_pattern.predict_from_combined_experiment(
@@ -268,8 +268,8 @@ def test_models_no_aer_fit(test_data_dir):
     patterns = anomsulf_pattern.predict_from_combined_experiment(
         em_data, conc_data, ["tas"], return_patterns_per_mode=True
     )
-    ghg_sum_prediction = prpatt.global_mean(
+    ghg_sum_prediction = geo_data_utils.global_mean(
         patterns["tas"][:3, :, :, :].sum(dim="mode")
     )
-    total_prediction = prpatt.global_mean(patterns["tas"].sum(dim="mode"))
+    total_prediction = geo_data_utils.global_mean(patterns["tas"].sum(dim="mode"))
     assert not np.allclose(ghg_sum_prediction, total_prediction)

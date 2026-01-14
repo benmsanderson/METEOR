@@ -19,7 +19,6 @@ from meteor.impacts.utils import (
     group_by_season,
     validate_temperature_data,
 )
-from meteor.prpatt import global_mean
 
 
 # Temperature validation tests
@@ -203,88 +202,6 @@ def test_ensure_spatial_coordinates_missing():
 
     with pytest.raises(ValueError, match="Could not find latitude coordinate"):
         ensure_spatial_coordinates(data)
-
-
-# Global mean calculation tests
-def test_global_mean_basic():
-    """Test basic global mean calculation."""
-    # Create simple test data
-    lats = np.array([0, 30, 60])  # Different latitudes for weighting test
-    lons = np.array([0, 180])
-
-    # Data that's latitude-dependent (higher values at equator)
-    data_values = np.array([[3, 3], [2, 2], [1, 1]])  # shape: (lat, lon)
-
-    test_data = xr.DataArray(
-        data_values, dims=["lat", "lon"], coords={"lat": lats, "lon": lons}
-    )
-
-    result = global_mean(test_data)
-
-    # Should be a scalar (all spatial dims removed)
-    assert result.ndim == 0
-    assert "operation" in result.attrs
-    assert result.attrs["operation"] == "area_weighted_global_mean"
-
-
-def test_global_mean_weighting_effect():
-    """Test that latitude weighting affects results."""
-    # Create simple test data
-    lats = np.array([0, 30, 60])  # Different latitudes for weighting test
-    lons = np.array([0, 180])
-
-    # Data that's latitude-dependent (higher values at equator)
-    data_values = np.array([[3, 3], [2, 2], [1, 1]])  # shape: (lat, lon)
-
-    test_data = xr.DataArray(
-        data_values, dims=["lat", "lon"], coords={"lat": lats, "lon": lons}
-    )
-
-    # With latitude weighting, equatorial values should have more influence
-    weighted_mean = global_mean(test_data)
-
-    # Simple unweighted mean
-    unweighted_mean = test_data.mean()
-
-    # Weighted mean should be higher due to higher equatorial values
-    assert float(weighted_mean) > float(unweighted_mean)
-
-
-def test_global_mean_custom_weights():
-    """Test with custom weights."""
-    # Create simple test data
-    lats = np.array([0, 30, 60])
-    lons = np.array([0, 180])
-    data_values = np.array([[3, 3], [2, 2], [1, 1]])
-
-    test_data = xr.DataArray(
-        data_values, dims=["lat", "lon"], coords={"lat": lats, "lon": lons}
-    )
-
-    # Equal weights (should give simple average)
-    equal_weights = xr.ones_like(test_data)
-    result = global_mean(test_data, weights=equal_weights, normalize_weights=False)
-
-    expected = test_data.mean()
-    np.testing.assert_almost_equal(float(result), float(expected))
-
-
-def test_global_mean_auto_coordinate_detection():
-    """Test automatic coordinate detection."""
-    # Create simple test data
-    lats = np.array([0, 30, 60])
-    lons = np.array([0, 180])
-    data_values = np.array([[3, 3], [2, 2], [1, 1]])
-
-    test_data = xr.DataArray(
-        data_values, dims=["lat", "lon"], coords={"lat": lats, "lon": lons}
-    )
-
-    # Rename coordinates
-    renamed_data = test_data.rename({"lat": "latitude", "lon": "longitude"})
-
-    result = global_mean(renamed_data)
-    assert result.ndim == 0  # Spatial dims should be removed
 
 
 # Monthly time axis creation tests

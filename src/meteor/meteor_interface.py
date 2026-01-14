@@ -14,9 +14,14 @@ from ciceroscm import input_handler
 
 from .cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 from .ensemble_output import EnsembleOutput, VariableOutput
+from .geo_data_utils import (
+    create_region_mask,
+    extract_point,
+    global_mean,
+    regional_mean,
+)
 from .meteor import MeteorPatternScaling
 from .noise_generator import train_noise_model_from_cmip6
-from .prpatt import create_region_mask, extract_point, global_mean, regional_mean
 from .variable_transforms import get_variable_transform_config
 
 

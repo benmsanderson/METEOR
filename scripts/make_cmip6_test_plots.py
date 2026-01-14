@@ -2,14 +2,13 @@ import os
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
-import xarray as xr
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 
 from functools import partial
 from ciceroscm import input_handler
 
 from meteor import MeteorPatternScaling
-from meteor import prpatt
+from meteor import geo_data_utils
 from meteor import Cmip6MeteorDataGetter
 from meteor import scm_forcer_engine
 
@@ -104,18 +103,18 @@ for i, model in enumerate(models):
     )
     for j, fld in enumerate(flds):
         zero_val = np.mean(
-            prpatt.global_mean(
+            geo_data_utils.global_mean(
                 data_getter.get_single_var_mod_data_yearmean("piControl", fld, model)
             ).values
         )
         print(zero_val)
-        hist_time = prpatt.global_mean(
+        hist_time = geo_data_utils.global_mean(
             data_getter.get_single_var_mod_data_yearmean("historical", fld, model)
         ).values[0]
         # print(f"Variable: {fld} and model {model}: {hist_time}")
         axs[j, i].plot(
             years_total,
-            prpatt.global_mean(pattern_ssp[fld]).values,
+            geo_data_utils.global_mean(pattern_ssp[fld]).values,
             color="blue",
             label="METEOR",
         )
@@ -128,7 +127,7 @@ for i, model in enumerate(models):
         )
         axs[j, i].plot(
             years_ssp,
-            prpatt.global_mean(
+            geo_data_utils.global_mean(
                 data_getter.get_single_var_mod_data_yearmean("ssp245", fld, model)
             ).values[0]
             - zero_val,

@@ -10,7 +10,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from . import prpatt, scm_forcer_engine
+from . import pattern_logic_lib, scm_forcer_engine
+from .geo_data_utils import global_mean
 
 LOGGER = logging.getLogger(__name__)
 
@@ -163,7 +164,7 @@ def calculate_residual_and_do_crude_nan_cut(daconom_field, predicted_without_fld
         ValueError will be raised.
     """
     if np.isnan(daconom_field.values).sum() > 0:
-        gm = prpatt.global_mean(daconom_field)
+        gm = global_mean(daconom_field)
         tot_len = len(gm.values)
         tot_nan_yrs = np.isnan(gm.values).sum()
         nan_in_last = np.isnan(gm.values[-tot_nan_yrs:]).sum()
@@ -375,7 +376,9 @@ class MeteorPatternScaling:
                     # now call get timescales to the fitted timescales and compute the patterns
                     # out is the lmfit object
                     # pattern_full is the pattern of impulse response timeseries and spatial patterns per mode
-                    (out, pattern_full) = prpatt.get_timescales(anomaly_data, trnc)
+                    out, pattern_full = pattern_logic_lib.get_timescales(
+                        anomaly_data, trnc
+                    )
                     pattern_dict[exp][fld]["pattern_full"] = pattern_full
                     pattern_dict[exp][fld]["outp"] = out.params
                 else:  # pragma: no cover
@@ -433,7 +436,7 @@ class MeteorPatternScaling:
             residual = calculate_residual_and_do_crude_nan_cut(
                 self.dacanom[fld][exp_index, :em_len, :, :], predicted_without_fld
             )
-            (out, pattern_full) = prpatt.get_timescales_from_anomaly(
+            out, pattern_full = pattern_logic_lib.get_timescales_from_anomaly(
                 residual, forcing_of_residual, n_modes=self.anom_timescales[fld]
             )
             self.pattern_dict[exp][fld]["pattern_full"] = pattern_full
@@ -472,18 +475,18 @@ class MeteorPatternScaling:
         !Todo: Add tests to check that variable and experiment are in the patterns
         patternfld and exp_lists
         """
-        convolved_pca = prpatt.imodel_filter(
+        convolved_pca = pattern_logic_lib.imodel_filter(
             self.pattern_dict[exp][fld]["outp"],
             forc_timeseries,
             forc_step=self.exp_forc_dict[exp],
             year_0=year_0,
         )
         if not return_patterns_per_mode:
-            predicted = prpatt.rmodel(
+            predicted = pattern_logic_lib.rmodel(
                 self.pattern_dict[exp][fld]["pattern_full"], convolved_pca
             )
         else:
-            predicted = prpatt.recon_separately(
+            predicted = pattern_logic_lib.recon_separately(
                 self.pattern_dict[exp][fld]["pattern_full"], convolved_pca
             )
         return predicted

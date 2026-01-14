@@ -6,7 +6,7 @@ import logging
 
 import matplotlib.pyplot as plt
 
-from . import prpatt
+from . import geo_data_utils, pattern_logic_lib
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,7 +30,9 @@ def make_prediction_plot(pattern, ax, forc_timeseries, fld, exp="co2x2"):
     """
     sim_data = pattern.predict_from_forcing_profile(forc_timeseries, fld, exp)
     mean_f_var = sim_data.weighted(
-        prpatt.wgt(pattern.dacanom[fld][pattern.exp_list.index(exp), :100, :, :])
+        pattern_logic_lib.wgt(
+            pattern.dacanom[fld][pattern.exp_list.index(exp), :100, :, :]
+        )
     ).mean(("lat", "lon"))
     ax.plot(mean_f_var)
 
@@ -55,10 +57,10 @@ def plot_global_mean_values(pattern, ax, fld, exp):
     """
     data = pattern.dacanom[fld][pattern.exp_list.index(exp), :100, :, :]
     trun = pattern.patternflds[fld]
-    ax.plot(prpatt.global_mean(data), label="Original Data")
+    ax.plot(geo_data_utils.global_mean(data), label="Original Data")
     ax.plot(
-        prpatt.global_mean(
-            prpatt.recon(pattern.pattern_dict[exp][fld]["pattern_full"])
+        geo_data_utils.global_mean(
+            pattern_logic_lib.recon(pattern.pattern_dict[exp][fld]["pattern_full"])
         ),
         label="Reconstruction (t=" + str(trun) + ")",
     )
@@ -109,10 +111,12 @@ def plot_reconstructed_globmean(pattern, ax, fld, exp):
         Experiment for which to plot global mean of original data, and pattern fields
     """
     raw_data = pattern.dacanom[fld][pattern.exp_list.index(exp), :100, :, :]
-    pca_pattern = prpatt.recon(pattern.pattern_dict[exp][fld]["pattern_full"])
-    raw_data.weighted(prpatt.wgt(raw_data)).mean(("lat", "lon")).plot(
+    pca_pattern = pattern_logic_lib.recon(
+        pattern.pattern_dict[exp][fld]["pattern_full"]
+    )
+    raw_data.weighted(pattern_logic_lib.wgt(raw_data)).mean(("lat", "lon")).plot(
         color="cyan", ax=ax
     )
-    pca_pattern.weighted(prpatt.wgt(raw_data)).mean(("lat", "lon")).plot(
+    pca_pattern.weighted(pattern_logic_lib.wgt(raw_data)).mean(("lat", "lon")).plot(
         color="k", ax=ax
     )

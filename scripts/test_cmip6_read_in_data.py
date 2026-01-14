@@ -3,7 +3,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from meteor import Cmip6MeteorDataGetter, prpatt
+from meteor import Cmip6MeteorDataGetter, geo_data_utils
 
 # plt.show()
 #
@@ -50,24 +50,24 @@ for k in range(np.ceil(tot_mod_num / 4.0).astype("int")):
         # Build pattern
         print(model)
         zero_val = np.mean(
-            prpatt.global_mean(
+            geo_data_utils.global_mean(
                 data_getter.get_single_var_mod_data_yearmean("piControl", fld, model)
             ).values
         )
         for j, exp in enumerate(exps_to_show):
 
-            glob_mean = prpatt.global_mean(
+            glob_mean = geo_data_utils.global_mean(
                 data_getter.make_meteor_training_data(exp, model)[fld]
             ).values[0]
             print(exp)
             years = np.arange(len(glob_mean))
             months = np.linspace(years[0], years[-1] + 11 / 12.0, num=len(years) * 12)
-            monthly_glob_mean = prpatt.global_mean(
+            monthly_glob_mean = geo_data_utils.global_mean(
                 data_getter.get_single_var_mod_data(exp, fld, model)
             )[fld].values
             axs[i, j].plot(months, monthly_glob_mean - zero_val, label="monthly")
             axs[i, j].plot(years, glob_mean - zero_val, label="glob_mean")
-            # axs[i,j].plot(years, prpatt.global_mean(full_data_yearly).values[0], label="yearmean_single")
+            # axs[i,j].plot(years, geo_data_utils.global_mean(full_data_yearly).values[0], label="yearmean_single")
             # axs[i,j].plot(years, year_mean_monthly_1d(monthly_glob_mean), label="mean_of_monthly")
             if i == 0:
                 axs[i, j].set_title(exp)

@@ -54,7 +54,7 @@ class TestMeteorInit:
         assert hasattr(meteor, "cmip6_meteor_data_getter")
         assert hasattr(meteor, "meteor")
         assert hasattr(meteor, "noise_generator")
-        assert hasattr(meteor, "prpatt")
+        assert hasattr(meteor, "pattern_logic_lib")
 
     def test_direct_class_instantiation(self):
         """Test that classes can be instantiated."""

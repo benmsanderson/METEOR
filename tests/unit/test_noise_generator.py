@@ -13,7 +13,7 @@ from meteor.noise_generator import MeteorNoiseGenerator, load_noise_model_from_c
 
 def test_meteor_noise_generator_initialization():
     """Test basic initialization of MeteorNoiseGenerator."""
-    generator = MeteorNoiseGenerator()
+    generator = MeteorNoiseGenerator(use_exog="not_exog_var")
 
     # Check that attributes are initialized
     assert hasattr(generator, "n_modes")
@@ -25,6 +25,12 @@ def test_meteor_noise_generator_initialization():
     assert generator.fitted is False
     assert generator.n_modes == 10  # default value
     assert generator.lag_order == 2  # default value
+
+    # Test error handling with uninitiated state
+    with pytest.raises(ValueError, match="Invalid use_exog value:"):
+        generator._extract_exog_variables(np.array([[1, 2, 3, 4]]))
+    with pytest.raises(ValueError, match="Model must be fitted"):
+        generator.generate_stochastic_pcs(np.array([1, 2, 3]))
 
 
 def test_meteor_noise_generator_validation_errors():

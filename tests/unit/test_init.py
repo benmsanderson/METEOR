@@ -21,14 +21,14 @@ class TestMeteorInit:
             Cmip6MeteorDataGetter,
             MeteorNoiseGenerator,
             MeteorPatternScaling,
-            train_noise_model_from_composite,
+            train_noise_model_from_cmip6,
         )
 
         # Verify they are classes/functions
         assert callable(Cmip6MeteorDataGetter)
         assert callable(MeteorPatternScaling)
         assert callable(MeteorNoiseGenerator)
-        assert callable(train_noise_model_from_composite)
+        assert callable(train_noise_model_from_cmip6)
 
     def test_impacts_submodule(self):
         """Test that impacts submodule is available."""

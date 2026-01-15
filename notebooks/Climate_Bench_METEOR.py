@@ -38,7 +38,7 @@ warnings.simplefilter(action='ignore', category=(SettingWithCopyWarning))
 warnings.filterwarnings("ignore", message=".*not in pamset.*")
  
 from meteor import MeteorPatternScaling, meteor
-from meteor import prpatt
+from meteor import geo_data_utils
 from meteor import Cmip6MeteorDataGetter
 from ciceroscm import input_handler
 
@@ -64,9 +64,9 @@ def global_mean(ds):
     Wrapper for calculating global mean values
     """
     try:
-        gm = prpatt.global_mean(ds)
+        gm = geo_data_utils.global_mean(ds)
     except RuntimeError:   
-        lat = ds[prpatt.get_lat_name(ds)]
+        lat = ds[geo_data_utils.get_lat_name(ds)]
         weight = np.cos(np.deg2rad(lat))
         weight = weight / weight.mean()
         other_dims = set(ds.dims) - {"ens"}

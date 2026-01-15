@@ -137,7 +137,7 @@ def fit_distribution_parameters_1d(timeseries_data, distribution="gamma"):
     else:
         raise ValueError(
             f"Unknown distribution: {distribution}. "
-            f"Supported: 'gaussian', 'gamma', 'weibull', 'lognorm', 'gengamma'"
+            "Supported: 'gaussian', 'gamma', 'weibull', 'lognorm', 'gengamma'"
         )
 
     return params
@@ -188,7 +188,7 @@ def fit_distribution_parameters_3d(spatial_data, distribution="gamma"):
         data_reshaped = data_array.reshape(n_ensemble * n_time, n_lat * n_lon)
     else:
         raise ValueError(
-            f"Data must be 3D (n_time, n_lat, n_lon) or "
+            "Data must be 3D (n_time, n_lat, n_lon) or "
             f"4D (n_ensemble, n_time, n_lat, n_lon), got shape {data_array.shape}"
         )
 
@@ -409,9 +409,7 @@ def apply_empirical_quantile_mapping(generated_data, target_data):
     if is_xarray:
         coords = generated_data.coords
         dims = generated_data.dims
-
-    # Convert to numpy
-    if isinstance(generated_data, xr.DataArray):
+        # Convert to numpy
         gen_values = generated_data.values
     else:
         gen_values = generated_data

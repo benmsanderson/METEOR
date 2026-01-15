@@ -14,6 +14,16 @@ The changes listed in this file are categorised as follows:
     - Fixed: any bug fixes
     - Security: in case of vulnerabilities.
 
+[Unreleased]
+---------------------
+
+### Changed
+
+- `prpatt.py` split into `geo_data_utils.py` and `pattern_logic_lib.py` for better readability and maintainability, some refactoring done in both
+- Updated test cases in `tests/unit/test_geo_data_utils.py` to reflect changes in `geo_data_utils.py` and improve real test coverage
+- Updated test imports in `tests/unit/test_pattern_logic_lib.py` to use `pattern_logic_lib` module and improve test coverage
+
+
 [Version 1.5.0]
 -----------------------------
 

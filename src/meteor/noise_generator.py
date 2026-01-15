@@ -22,7 +22,7 @@ from sklearn.decomposition import PCA
 from sklearn.linear_model import LinearRegression
 from statsmodels.tsa.api import VAR
 
-from .prpatt import global_mean
+from .geo_data_utils import global_mean
 
 
 class MeteorNoiseGenerator:

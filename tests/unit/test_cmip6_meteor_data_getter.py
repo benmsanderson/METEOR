@@ -5,7 +5,6 @@ import pytest
 import xarray as xr
 
 from meteor import cmip6_meteor_data_getter
-from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 
 
 def test_get_unique_models():
@@ -266,7 +265,9 @@ def test_error_handling_for_invalid_experiments_and_fields():
     """Test error handling for invalid experiments and fields to hit lines 585-593."""
 
     # Create a data getter with limited experiments and fields
-    data_getter = Cmip6MeteorDataGetter(exps=["historical"], flds=["tas"])
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        exps=["historical"], flds=["tas"]
+    )
 
     # Set models manually and mock the model check
     data_getter.models = ["test_model"]
@@ -278,3 +279,43 @@ def test_error_handling_for_invalid_experiments_and_fields():
         match="This datagetter does not handle data from the invalid_exp experiment",
     ):
         data_getter.get_single_var_mod_data("invalid_exp", "tas", "test_model")
+
+
+def test_cache_path_includes_variable_name():
+    """Test that cache paths include variable name for tas and pr."""
+
+    getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        flds=["tas", "pr"], exps=["piControl"]
+    )
+
+    # Get cache paths for different variables
+    tas_path = getter.get_pattern_scaling_cache_path(
+        "TestModel", cache_dir="/tmp/cache", variable="tas"
+    )
+    pr_path = getter.get_pattern_scaling_cache_path(
+        "TestModel", cache_dir="/tmp/cache", variable="pr"
+    )
+
+    # Verify different variables get different paths
+    assert tas_path != pr_path, "tas and pr should have different cache paths"
+    assert "tas" in tas_path, "tas cache path should contain 'tas'"
+    assert "pr" in pr_path, "pr cache path should contain 'pr'"
+    assert tas_path.endswith("_pattern_scaling.pkl")
+    assert pr_path.endswith("_pattern_scaling.pkl")
+
+
+def test_cache_path_without_variable():
+    """Test that cache path works without variable for backward compatibility."""
+
+    getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        flds=["tas"], exps=["piControl"]
+    )
+
+    # Get cache path without variable parameter
+    path_no_var = getter.get_pattern_scaling_cache_path(
+        "TestModel", cache_dir="/tmp/cache"
+    )
+
+    # Should still work (for backward compatibility)
+    assert path_no_var.endswith("_pattern_scaling.pkl")
+    assert "TestModel" in path_no_var

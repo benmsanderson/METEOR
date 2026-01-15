@@ -26,6 +26,142 @@ from .noise_generator import train_noise_model_from_cmip6
 from .variable_transforms import get_variable_transform_config
 
 
+def _get_default_config(variable):
+    """Get smart default configuration for a variable."""
+    config = {
+        "n_modes_pattern": 3,
+        "n_modes_noise": 40,
+        "lag_order": 2,
+        "use_picontrol_baseline": True,
+        "training_scenario": "ssp245",  # ✅ Add default training scenario
+    }
+
+    # Variable-specific defaults
+    if variable == "tas":
+        config["use_exog"] = "all"
+        config["transform"] = False
+    elif variable == "pr":
+        config["use_exog"] = "none"
+        config["transform"] = True
+        config["transform_type"] = "gamma"
+    else:
+        # Generic defaults for other variables
+        config["use_exog"] = "temp_only"
+        config["transform"] = False
+
+    return config
+
+
+def _parse_scenario_input(scenario):
+    """
+    Parse scenario input and return emissions/concentrations info.
+
+    Parameters
+    ----------
+    scenario : str or dict
+        Scenario specification
+
+    Returns
+    -------
+    dict
+        Dictionary with keys:
+        - 'type': 'ssp' or 'custom'
+        - 'name': scenario name
+        - 'emissions': emissions file path or DataFrame (if custom)
+        - 'concentrations': concentrations file path or DataFrame (if custom)
+    """
+    if isinstance(scenario, str):
+        # Standard SSP scenario
+        return {
+            "type": "ssp",
+            "name": scenario,
+            "emissions": None,
+            "concentrations": None,
+        }
+    elif isinstance(scenario, dict):
+        # Custom scenario
+        if "emissions" not in scenario:
+            raise ValueError("Custom scenario dict must include 'emissions' key")
+
+        # Get emissions (path or DataFrame)
+        emissions = scenario["emissions"]
+
+        # Get concentrations (path, DataFrame, or use base_scenario)
+        if "concentrations" in scenario:
+            concentrations = scenario["concentrations"]
+        else:
+            # Use base_scenario concentrations (default: ssp245)
+            base_scenario = scenario.get("base_scenario", "ssp245")
+            cscm_data_dir = os.path.join(os.path.dirname(__file__), "default_scm_data")
+            concentrations = os.path.join(
+                cscm_data_dir, f"{base_scenario}_conc_RCMIP.txt"
+            )
+
+        # Get scenario name for labeling
+        scenario_name = scenario.get("name", "custom")
+
+        return {
+            "type": "custom",
+            "name": scenario_name,
+            "emissions": emissions,
+            "concentrations": concentrations,
+        }
+    else:
+        raise TypeError(f"scenario must be str or dict, got {type(scenario)}")
+
+
+def _load_emissions_concentrations(emissions_spec, concentrations_spec, verbose=False):
+    """
+    Load emissions and concentrations from files or DataFrames.
+
+    Parameters
+    ----------
+    emissions_spec : str or pd.DataFrame
+        Path to emissions file or DataFrame
+    concentrations_spec : str or pd.DataFrame
+        Path to concentrations file or DataFrame
+    verbose : bool
+        Print loading messages
+
+    Returns
+    -------
+    tuple
+        (emissions_data, concentrations_data) as DataFrames
+    """
+    # Load emissions
+    if isinstance(emissions_spec, pd.DataFrame):
+        em_data = emissions_spec
+        if verbose:
+            print("      → Using provided emissions DataFrame")
+    elif isinstance(emissions_spec, str):
+        ih = input_handler.InputHandler({})
+        em_data = ih.read_emissions(emissions_spec)
+        if verbose:
+            print(f"      → Loaded emissions from {os.path.basename(emissions_spec)}")
+    else:
+        raise TypeError(
+            f"emissions must be str path or DataFrame, got {type(emissions_spec)}"
+        )
+
+    # Load concentrations
+    if isinstance(concentrations_spec, pd.DataFrame):
+        conc_data = concentrations_spec
+        if verbose:
+            print("      → Using provided concentrations DataFrame")
+    elif isinstance(concentrations_spec, str):
+        conc_data = input_handler.read_inputfile(concentrations_spec)
+        if verbose:
+            print(
+                f"      → Loaded concentrations from {os.path.basename(concentrations_spec)}"
+            )
+    else:
+        raise TypeError(
+            f"concentrations must be str path or DataFrame, got {type(concentrations_spec)}"
+        )
+
+    return em_data, conc_data
+
+
 class MeteorInterface:
     """
     High-level interface for training and generating METEOR emulators.
@@ -124,6 +260,7 @@ class MeteorInterface:
         # Note: We explicitly enable caching for the high-level interface to provide
         # good performance by default. Users of the low-level Cmip6MeteorDataGetter
         # can control caching behavior directly.
+        # TODO : Why are we not sending the cache_dir here?
         self.data_getter = Cmip6MeteorDataGetter(
             exps=data_getter_kwargs.get("exps", default_exps),
             flds=self.variables,
@@ -144,6 +281,7 @@ class MeteorInterface:
         self._training_config = {}
         self._is_trained = {var: False for var in self.variables}
 
+    # TODO: This is a weird factory method type of thing, needed?
     @classmethod
     def from_cmip6(cls, model, variable=None, variables=None, cache_dir=None, **kwargs):
         """
@@ -231,7 +369,7 @@ class MeteorInterface:
 
             # Get configuration with hybrid precedence
             if auto:
-                config = self._get_default_config(variable)
+                config = _get_default_config(variable)
                 # Override with method parameter if different from default
                 if training_scenario != "ssp245":
                     config["training_scenario"] = training_scenario
@@ -275,31 +413,6 @@ class MeteorInterface:
             print("\n" + "=" * 60)
             print("✅ All variables trained successfully")
             print("=" * 60)
-
-    def _get_default_config(self, variable):
-        """Get smart default configuration for a variable."""
-        config = {
-            "n_modes_pattern": 3,
-            "n_modes_noise": 40,
-            "lag_order": 2,
-            "use_picontrol_baseline": True,
-            "training_scenario": "ssp245",  # ✅ Add default training scenario
-        }
-
-        # Variable-specific defaults
-        if variable == "tas":
-            config["use_exog"] = "all"
-            config["transform"] = False
-        elif variable == "pr":
-            config["use_exog"] = "none"
-            config["transform"] = True
-            config["transform_type"] = "gamma"
-        else:
-            # Generic defaults for other variables
-            config["use_exog"] = "temp_only"
-            config["transform"] = False
-
-        return config
 
     def _train_pattern_scaling(self, variable, config, verbose=True):
         """
@@ -452,6 +565,7 @@ class MeteorInterface:
                 cache_dir=cache_dir,
             )
 
+    # TODO: Unused arguments, drop?
     def _fit_transform(self, variable, transform_config, config, verbose=True):
         """
         Prepare variable-specific transform configuration.
@@ -574,7 +688,7 @@ class MeteorInterface:
             n_realizations = 1
 
         # Parse scenario to get name for display
-        scenario_info = self._parse_scenario_input(scenario)
+        scenario_info = _parse_scenario_input(scenario)
         scenario_name = scenario_info["name"]
 
         # Check all variables are trained
@@ -668,120 +782,6 @@ class MeteorInterface:
 
         return ensemble
 
-    def _parse_scenario_input(self, scenario):
-        """
-        Parse scenario input and return emissions/concentrations info.
-
-        Parameters
-        ----------
-        scenario : str or dict
-            Scenario specification
-
-        Returns
-        -------
-        dict
-            Dictionary with keys:
-            - 'type': 'ssp' or 'custom'
-            - 'name': scenario name
-            - 'emissions': emissions file path or DataFrame (if custom)
-            - 'concentrations': concentrations file path or DataFrame (if custom)
-        """
-        if isinstance(scenario, str):
-            # Standard SSP scenario
-            return {
-                "type": "ssp",
-                "name": scenario,
-                "emissions": None,
-                "concentrations": None,
-            }
-        elif isinstance(scenario, dict):
-            # Custom scenario
-            if "emissions" not in scenario:
-                raise ValueError("Custom scenario dict must include 'emissions' key")
-
-            # Get emissions (path or DataFrame)
-            emissions = scenario["emissions"]
-
-            # Get concentrations (path, DataFrame, or use base_scenario)
-            if "concentrations" in scenario:
-                concentrations = scenario["concentrations"]
-            else:
-                # Use base_scenario concentrations (default: ssp245)
-                base_scenario = scenario.get("base_scenario", "ssp245")
-                cscm_data_dir = os.path.join(
-                    os.path.dirname(__file__), "default_scm_data"
-                )
-                concentrations = os.path.join(
-                    cscm_data_dir, f"{base_scenario}_conc_RCMIP.txt"
-                )
-
-            # Get scenario name for labeling
-            scenario_name = scenario.get("name", "custom")
-
-            return {
-                "type": "custom",
-                "name": scenario_name,
-                "emissions": emissions,
-                "concentrations": concentrations,
-            }
-        else:
-            raise TypeError(f"scenario must be str or dict, got {type(scenario)}")
-
-    def _load_emissions_concentrations(
-        self, emissions_spec, concentrations_spec, verbose=False
-    ):
-        """
-        Load emissions and concentrations from files or DataFrames.
-
-        Parameters
-        ----------
-        emissions_spec : str or pd.DataFrame
-            Path to emissions file or DataFrame
-        concentrations_spec : str or pd.DataFrame
-            Path to concentrations file or DataFrame
-        verbose : bool
-            Print loading messages
-
-        Returns
-        -------
-        tuple
-            (emissions_data, concentrations_data) as DataFrames
-        """
-        # Load emissions
-        if isinstance(emissions_spec, pd.DataFrame):
-            em_data = emissions_spec
-            if verbose:
-                print("      → Using provided emissions DataFrame")
-        elif isinstance(emissions_spec, str):
-            ih = input_handler.InputHandler({})
-            em_data = ih.read_emissions(emissions_spec)
-            if verbose:
-                print(
-                    f"      → Loaded emissions from {os.path.basename(emissions_spec)}"
-                )
-        else:
-            raise TypeError(
-                f"emissions must be str path or DataFrame, got {type(emissions_spec)}"
-            )
-
-        # Load concentrations
-        if isinstance(concentrations_spec, pd.DataFrame):
-            conc_data = concentrations_spec
-            if verbose:
-                print("      → Using provided concentrations DataFrame")
-        elif isinstance(concentrations_spec, str):
-            conc_data = input_handler.read_inputfile(concentrations_spec)
-            if verbose:
-                print(
-                    f"      → Loaded concentrations from {os.path.basename(concentrations_spec)}"
-                )
-        else:
-            raise TypeError(
-                f"concentrations must be str path or DataFrame, got {type(concentrations_spec)}"
-            )
-
-        return em_data, conc_data
-
     def _get_or_compute_pattern_scaling(
         self, variable, scenario, start_year, end_year, verbose=True
     ):
@@ -811,7 +811,7 @@ class MeteorInterface:
             (monthly_prediction_sliced, monthly_warming_sliced, em_data, conc_data)
         """
         # Parse scenario input
-        scenario_info = self._parse_scenario_input(scenario)
+        scenario_info = _parse_scenario_input(scenario)
         scenario_name = scenario_info["name"]
 
         if verbose:
@@ -836,7 +836,7 @@ class MeteorInterface:
             em_data = ih.read_emissions(em_file)
         else:
             # Custom scenario
-            em_data, conc_data = self._load_emissions_concentrations(
+            em_data, conc_data = _load_emissions_concentrations(
                 scenario_info["emissions"],
                 scenario_info["concentrations"],
                 verbose=verbose,
@@ -983,7 +983,7 @@ class MeteorInterface:
             with shape (n_realizations, n_months)
         """
         # Parse scenario to get the actual name (handle both string and dict)
-        scenario_info = self._parse_scenario_input(scenario)
+        scenario_info = _parse_scenario_input(scenario)
         scenario_name = scenario_info["name"]
 
         # For custom scenarios, use ssp245 as the training scenario

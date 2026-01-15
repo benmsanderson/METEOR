@@ -20,6 +20,7 @@ from .geo_data_utils import (
     global_mean,
     regional_mean,
 )
+from .impacts import DegreeDaysCalculator
 from .meteor import MeteorPatternScaling
 from .noise_generator import train_noise_model_from_cmip6
 from .variable_transforms import get_variable_transform_config
@@ -1239,8 +1240,6 @@ class MeteorInterface:
             Dictionary with keys 'annual', 'monthly', 'climatology' containing
             xarray DataArrays with gridded fields
         """
-        import xarray as xr
-
         # Get pattern scaling results (from cache or compute)
         monthly_prediction, monthly_warming, em_data, conc_data = (
             self._get_or_compute_pattern_scaling(
@@ -1455,9 +1454,6 @@ class MeteorInterface:
         # Check if degree days are requested
         if "degree_days" in impact_configs:
             try:
-                from meteor import global_mean
-                from meteor.impacts import DegreeDaysCalculator
-
                 dd_config = impact_configs["degree_days"]
 
                 # Determine base temperature - use hdd_base if provided, otherwise cdd_base
@@ -1491,7 +1487,6 @@ class MeteorInterface:
                         baseline_k = float(global_mean(picontrol_data).mean())
                     elif key.startswith("regional:custom:"):
                         # Custom region - need to calculate baseline from bbox
-                        from meteor import create_region_mask
 
                         region_name = key.split(":")[2]
                         if custom_regions and region_name in custom_regions:
@@ -1504,13 +1499,9 @@ class MeteorInterface:
                                 f"Custom region '{region_name}' not found in custom_regions"
                             )
                     elif key.startswith("regional:"):
-                        from meteor import regional_mean
-
                         region = key.split(":")[1]
                         baseline_k = float(regional_mean(picontrol_data, region).mean())
                     elif key.startswith("point:"):
-                        from meteor import extract_point
-
                         coords = key.split(":")[1]
                         lat, lon = map(float, coords.split(","))
                         baseline_k = float(
@@ -1547,12 +1538,6 @@ class MeteorInterface:
                     if verbose:
                         print(f"         • HDD for {key}")
                         print(f"         • CDD for {key}")
-
-            except ImportError as e:
-                if verbose:
-                    print(
-                        f"      ⚠️  meteor.impacts.DegreeDaysCalculator not available: {e}"
-                    )
             except Exception as e:
                 if verbose:
                     print(f"      ⚠️  Error calculating degree days: {e}")

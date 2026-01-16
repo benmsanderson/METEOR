@@ -6,6 +6,7 @@ import pytest
 
 from meteor import cmip6_meteor_data_getter
 from meteor.noise_generator import (
+    train_multiple_noise_models_from_cmip6,
     train_noise_model_from_cmip6,
     validate_noise_model_cache,
 )
@@ -164,15 +165,16 @@ def test_noise_model_validation(test_data_dir):
     assert validation_results[2]["message"].startswith("Error loading cache")
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        noise_model = train_noise_model_from_cmip6(
+        noise_models = train_multiple_noise_models_from_cmip6(
             data_getter,
             experiments=["historical", "ssp245"],
-            model_name="CanESM5",
-            variable_name="tas",
+            models=["CanESM5"],
+            variables=["tas"],
             n_modes=4,
             lag_order=1,
             cache_dir=tmpdir,
         )
+        assert set(noise_models.keys()) == set(["CanESM5"])
         cache_file = os.path.join(tmpdir, os.listdir(tmpdir)[0])
         # Valid case
         validation_results = validate_noise_model_cache(

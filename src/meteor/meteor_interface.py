@@ -12,6 +12,7 @@ import pandas as pd
 import xarray as xr
 from ciceroscm import input_handler
 
+from .cache_handling import CacheHandler
 from .cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 from .ensemble_output import EnsembleOutput, VariableOutput
 from .geo_data_utils import (
@@ -22,9 +23,8 @@ from .geo_data_utils import (
 )
 from .impacts import DegreeDaysCalculator
 from .meteor import MeteorPatternScaling
-from .noise_generator import train_noise_model_from_cmip6
+from .noise_generator import train_noise_model_from_cmip6, validate_noise_model_cache
 from .variable_transforms import get_variable_transform_config
-from .cache_handling import CacheHandler
 
 
 def _get_default_config(variable):
@@ -269,7 +269,7 @@ class MeteorInterface:
             flds=self.variables,
             dbe=data_getter_kwargs.get("dbe", default_dbe),
             enable_cache=True,
-            cache_dir=self.cache_handler,
+            cache_handler=self.cache_handler,
         )
 
         # Storage for trained models
@@ -385,7 +385,6 @@ class MeteorInterface:
                 # Apply method parameter as default if not in config
                 if "training_scenario" not in config:
                     config["training_scenario"] = training_scenario
-
             self._training_config[variable] = config
 
             # Train pattern scaling
@@ -434,16 +433,13 @@ class MeteorInterface:
         verbose : bool
             Print training progress messages
         """
-        cache_dir = os.path.join(self.cache_dir, "pattern_scaling")
-        os.makedirs(cache_dir, exist_ok=True)
-
         cache_file = self.cache_handler.get_pattern_scaling_cache_path(
-            self.model, cache_dir, variable=variable
+            self.model, variable=variable
         )
 
         # Check cache
         is_valid, cached_model, info = self.data_getter.validate_pattern_scaling_cache(
-            cache_file, self.model, variable=variable
+            cache_file, self.model
         )
 
         if is_valid and verbose:
@@ -469,7 +465,7 @@ class MeteorInterface:
             from_file=False,
             exp_list=None if training_data is None else ["base", "co2x4", "sulxanom"],
             anom_timescales={variable: config["n_modes_pattern"]},
-            cache_dir=cache_dir,
+            cache_dir=os.path.join(self.cache_handler, "pattern_scaling"),
         )
 
     def _train_noise_model(self, variable, config, verbose=True):
@@ -493,15 +489,10 @@ class MeteorInterface:
         verbose : bool
             Print training progress messages
         """
-        cache_dir = os.path.join(self.cache_dir, "noise_models")
-        os.makedirs(cache_dir, exist_ok=True)
-
-        cache_file = self.data_getter.get_noise_model_cache_path(
-            self.model, variable, cache_dir
-        )
+        cache_file = self.cache_handler.get_noise_model_cache_path(self.model, variable)
 
         # Check cache
-        is_valid, cached_model, info = self.data_getter.validate_noise_model_cache(
+        is_valid, cached_model, info = validate_noise_model_cache(
             cache_file,
             variable,
             n_modes=config["n_modes_noise"],
@@ -566,7 +557,7 @@ class MeteorInterface:
                 lag_order=config["lag_order"],
                 use_exog=config["use_exog"],
                 custom_global_temp=monthly_warming_trimmed,  # ✅ Pass pattern prediction
-                cache_dir=cache_dir,
+                cache_dir=self.cache_handler.cache_dir,
             )
 
     # TODO: Unused arguments, drop?

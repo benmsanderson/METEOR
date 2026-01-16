@@ -52,7 +52,9 @@ def test_cache_handler_setup(tmp_path):
         sub_cache_path = cache_dir / sub_cache
         assert sub_cache_path.exists()
 
-    assert handler.get_cmip6_query_catalogue() == os.path.join(cache_dir, "cmip6", "cmip6-zarr-consolidated-stores.csv")
+    assert handler.get_cmip6_query_catalogue() == os.path.join(
+        cache_dir, "cmip6", "cmip6-zarr-consolidated-stores.csv"
+    )
     shutil.rmtree(cache_dir)  # Clean up for next test
     handler_noise = cache_handling.CacheHandler(
         cache_dir=str(cache_dir), purpose="noise"
@@ -62,7 +64,7 @@ def test_cache_handler_setup(tmp_path):
     for sub_cache in expected_sub_caches:
         sub_cache_path = cache_dir / sub_cache
         assert sub_cache_path.exists()
-    shutil.rmtree(cache_dir)  # Clean up for next test   
+    shutil.rmtree(cache_dir)  # Clean up for next test
     handler_general = cache_handling.CacheHandler(
         cache_dir=str(cache_dir), purpose="general"
     )
@@ -73,9 +75,7 @@ def test_cache_handler_setup(tmp_path):
         assert sub_cache_path.exists()
 
     shutil.rmtree(cache_dir)  # Clean up for next test
-    handler_not_working = cache_handling.CacheHandler(
-        cache_dir=expected_sub_caches
-        )
+    handler_not_working = cache_handling.CacheHandler(cache_dir=expected_sub_caches)
     assert not handler_not_working.cache_functioning
     assert not handler_not_working.check_if_cmip6_cached(
         "get_single_var_mod_data_monthly", "piControl", "tas", "TestModel"
@@ -162,14 +162,45 @@ def test_cache_clearing(tmp_path):
     assert dummy_file.exists()
 
     # Clear the cache
-    handler.clear_cache(sub_cache= "cmip6")
+    handler.clear_cache(sub_cache="cmip6")
     assert not dummy_file.exists()
     assert dummy_file2.exists()
     # Should do nothing if sub_cache does not exist
-    handler.clear_cache(sub_cache = "not_a_cache")
+    handler.clear_cache(sub_cache="not_a_cache")
     assert dummy_file2.exists()
     handler.clear_cache()
     assert not dummy_file2.exists()
 
 
-      # Should not raise any error even if cache is already clear
+def test_cache_path_includes_variable_name():
+    """Test that cache paths include variable name for tas and pr."""
+
+    handler = cache_handling.CacheHandler(
+        cache_dir="/tmp/meteor_cache", purpose="classic"
+    )
+
+    # Get cache paths for different variables
+    tas_path = handler.get_pattern_scaling_cache_path("TestModel", variable="tas")
+    pr_path = handler.get_pattern_scaling_cache_path("TestModel", variable="pr")
+    print(tas_path)
+    print(pr_path)
+    # Verify different variables get different paths
+    assert tas_path != pr_path, "tas and pr should have different cache paths"
+    assert "tas" in tas_path, "tas cache path should contain 'tas'"
+    assert "pr" in pr_path, "pr cache path should contain 'pr'"
+    assert tas_path.endswith("_pattern_scaling.pkl")
+    assert pr_path.endswith("_pattern_scaling.pkl")
+
+
+def test_cache_path_without_variable():
+    """Test that cache path works without variable for backward compatibility."""
+
+    handler = cache_handling.CacheHandler(cache_dir="/tmp/", purpose="classic")
+    assert handler.cache_functioning
+    # Get cache path without variable parameter
+    path_no_var = handler.get_pattern_scaling_cache_path("TestModel")
+    print(path_no_var)
+    # Should still work (for backward compatibility)
+    assert "cmip6" in path_no_var
+    assert path_no_var.endswith("_pattern_scaling.pkl")
+    assert "TestModel" in path_no_var

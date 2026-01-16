@@ -320,7 +320,6 @@ def test_from_cmip6_creates_interface():
 
         assert interface.model == "TestModel"
         assert interface.variables == ["tas"]
-        assert interface.cache_dir == "/tmp/test"
 
 
 def test_multiple_variables_supported():

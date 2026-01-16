@@ -1079,6 +1079,7 @@ def train_noise_model_from_cmip6(
     n_modes=10,
     lag_order=2,
     cache_dir=None,
+    cache_handler=None,
     custom_global_temp=None,
     use_picontrol_baseline=True,
     save_diagnostics=False,
@@ -1170,6 +1171,7 @@ def train_noise_model_from_cmip6(
     noise_gen = MeteorNoiseGenerator(
         n_modes=n_modes, lag_order=lag_order, use_exog=use_exog
     )
+    print(n_modes, lag_order)
     noise_gen.fit(
         monthly_data,
         variable_name,
@@ -1177,7 +1179,6 @@ def train_noise_model_from_cmip6(
         picontrol_baseline=picontrol_baseline,
         save_diagnostics=save_diagnostics,
     )
-
     # Cache if requested
     if cache_dir is not None:
         os.makedirs(cache_dir, exist_ok=True)
@@ -1404,10 +1405,7 @@ def validate_noise_model_cache(
             return False, None, info
 
         # Validate lag_order
-        if (
-            not hasattr(noise_model, "lag_order")
-            or noise_model.lag_order != lag_order
-        ):
+        if not hasattr(noise_model, "lag_order") or noise_model.lag_order != lag_order:
             info["message"] = (
                 f"lag_order mismatch: expected {lag_order}, "
                 f"found {info['found']['lag_order']}"

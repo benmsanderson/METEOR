@@ -883,7 +883,6 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             f"   ✅ Training data prepared for experiments: {list(training_data.keys())}"
         )
         return training_data
-    
 
     # TODO: Move out of class and possibly into new module for SCM data handling
     def load_ssp_config(self, scenario="ssp245", nystart=1750, nyend=2100):
@@ -961,11 +960,8 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         print(f"   ✅ Config: {nystart}-{nyend}, emissions start: 1850")
 
         return ssp_config
-    
-    
-    def validate_pattern_scaling_cache(
-        self, cache_file, model_name, scenario="aer"
-    ):
+
+    def validate_pattern_scaling_cache(self, cache_file, model_name, scenario="aer"):
         """
         Validate a cached pattern scaling model file.
 

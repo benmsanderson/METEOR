@@ -139,13 +139,8 @@ class CacheHandler:
             Determines which sub-caches to set up. Default is 'general'.
         """
         if cache_dir is None:
-            cache_dir = find_suitable_cache_location()
+            cache_dir = find_suitable_cache_location()  # pragma: no cover
         self.cache_dir = cache_dir
-        if not os.path.exists(self.cache_dir):
-            os.makedirs(self.cache_dir)
-        logging.info(  # pylint: disable=logging-fstring-interpolation
-            f"Cache directory set to: {self.cache_dir}"
-        )
 
         self.sub_caches = ["cmip6"]
         if purpose == "classic":
@@ -171,10 +166,18 @@ class CacheHandler:
     def setup_cache_tree(self):
         """
         Set up the directory structure for caching.
+
+        Raises
+        ------
+        OSError
+            If the cache directory cannot be created.
         """
         # Logic to set up cache tree structure
-        if not os.path.exists(self.cache_dir):
-            os.makedirs(self.cache_dir)
+        try:
+            if not os.path.exists(self.cache_dir):
+                os.makedirs(self.cache_dir)
+        except Exception as e:
+            raise OSError(e)
         for sub_cache in self.sub_caches:
             sub_cache_path = os.path.join(self.cache_dir, sub_cache)
             if not os.path.exists(sub_cache_path):
@@ -227,22 +230,12 @@ class CacheHandler:
             dataset = xr.open_dataset(cache_file)
 
             # For methods that expect specific variables, extract variable name from args
-            expected_variable = None
-            if method_name in [
-                "get_single_var_mod_data",
-                "get_single_var_mod_data_yearmean",
-                "get_single_var_mod_data_monthly",
-            ]:
-                if len(args) >= 2:
-                    expected_variable = args[
-                        1
-                    ]  # fld parameter is usually second argument
-            elif method_name == "make_meteor_training_data":
-                # For training data, we expect variables from self.flds
-                # Since we can't easily determine which specific variable to check,
-                # we'll validate that the dataset has at least one data variable
-                # and that each variable in self.flds exists if we're checking a specific scenario
-                pass  # Basic validation below should catch empty datasets
+            expected_variable = _find_expected_variable_from_args(method_name, *args)
+            # For training data, we expect variables from self.flds
+            # Since we can't easily determine which specific variable to check,
+            # we'll validate that the dataset has at least one data variable
+            # and that each variable in self.flds exists if we're checking a specific scenario
+            # Basic validation below should catch empty datasets or weird dimensions
 
             is_valid = self._validate_cached_data(dataset, expected_variable)
             dataset.close()
@@ -485,9 +478,8 @@ class CacheHandler:
         data : xr.Dataset or xr.DataArray
             Data to cache
         """
-        if not self.cache_functioning:
+        if not self.cache_functioning:  # pragma: no cover
             return
-
         cache_path = self._get_cache_path(cache_key, subcache="cmip6")
         try:
             # Convert DataArray to Dataset if needed and mark the original type
@@ -561,7 +553,7 @@ class CacheHandler:
                 e,
             )
 
-    def clear_single_cache(self, sub_cache):
+    def _clear_single_cache(self, sub_cache):
         """
         Clear all cached data for a specific sub-cache.
 
@@ -578,7 +570,7 @@ class CacheHandler:
                 if os.path.isfile(os.path.join(sub_cache_path, filename)):
                     try:
                         os.remove(os.path.join(sub_cache_path, filename))
-                    except OSError:
+                    except OSError:  # pragma: no cover
                         pass
 
     def clear_cache(self, sub_cache="all"):
@@ -590,17 +582,209 @@ class CacheHandler:
         sub_cache : str, optional
             Name of the sub-cache to clear. If "all", clears all sub-caches. Default is "all".
         """
-        if not self.cache_functioning:
+        if not self.cache_functioning:  # pragma: no cover
             return
         if sub_cache == "all":
             for sub_cache_name in self.sub_caches:
-                self.clear_single_cache(sub_cache_name)
+                self._clear_single_cache(sub_cache_name)
         else:
             if sub_cache in self.sub_caches:
-                self.clear_single_cache(sub_cache)
+                self._clear_single_cache(sub_cache)
             else:
                 logging.warning(
                     "Sub-cache %s not recognized. Available sub-caches: %s",
                     sub_cache,
                     self.sub_caches,
                 )
+
+    def get_pattern_scaling_cache_path(
+        self, model_name, scenario="aer", variable=None
+    ):
+        """
+        Get the standardized cache file path for a pattern scaling model.
+
+        Parameters
+        ----------
+        model_name : str
+            Name of the CMIP6 model
+        cache_dir : str, optional
+            Directory for cache files. If None, uses default cache location.
+        scenario : str, optional
+            Scenario suffix for the model name. Default is "aer" (aerosol-inclusive).
+        variable : str, optional
+            Variable name (e.g., 'tas', 'pr'). If provided, included in filename.
+
+        Returns
+        -------
+        str
+            Full path to the cache file
+
+        Examples
+        --------
+        >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
+        >>> cache_path = data_getter.get_pattern_scaling_cache_path("CESM2")
+        >>> print(cache_path)
+        /path/to/.cache/trained_pattern_scaling_models/cmip6-CESM2-aer_pattern_scaling.pkl
+        """
+        if self.cache_functioning:
+            return None
+        cache_dir = os.path.join(self.cache_dir, "pattern_scaling")
+
+        os.makedirs(cache_dir, exist_ok=True)
+        if variable:
+            return os.path.join(
+                cache_dir,
+                f"cmip6-{model_name}-{scenario}-{variable}_pattern_scaling.pkl",
+            )
+        else:
+            return os.path.join(
+                cache_dir, f"cmip6-{model_name}-{scenario}_pattern_scaling.pkl"
+            )
+
+    def get_noise_model_cache_path(self, model_name, variable_name):
+        """
+        Get the standardized cache file path for a noise model.
+
+        Parameters
+        ----------
+        model_name : str
+            Name of the CMIP6 model
+        variable_name : str
+            Variable name (e.g., 'tas', 'pr')
+
+        Returns
+        -------
+        str
+            Full path to the cache file
+
+        Examples
+        --------
+        >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
+        >>> cache_path = data_getter.get_noise_model_cache_path("CESM2", "tas")
+        >>> print(cache_path)
+        /path/to/noise_cache/CESM2_tas_noise_model.pkl
+        """
+        if not self.cache_functioning:
+            return None
+        cache_dir = os.path.join(self.cache_dir, "noise_models")
+
+        os.makedirs(cache_dir, exist_ok=True)
+        return os.path.join(cache_dir, f"{model_name}_{variable_name}_noise_model.pkl")
+
+    def validate_noise_model_cache(
+        self,
+        cache_file,
+        variable_name,
+        n_modes=40,
+        lag_order=2,
+    ):
+        """
+        Validate a cached noise model file.
+
+        Checks if the cached pickle file exists, can be loaded, and contains
+        the expected configuration (n_modes, lag_order, variable_name) and
+        required attributes (pca, varx_results).
+
+        Parameters
+        ----------
+        cache_file : str
+            Path to the cached noise model file
+        variable_name : str
+            Expected variable name (e.g., 'tas', 'pr')
+        n_modes : int, optional
+            Expected number of PCA modes. Default is 40.
+        lag_order : int, optional
+            Expected temporal lag order. Default is 2.
+
+        Returns
+        -------
+        tuple
+            (is_valid, cached_model, info_dict) where:
+            - is_valid: bool indicating if cache is valid
+            - cached_model: loaded MeteorNoiseGenerator if valid, None otherwise
+            - info_dict: dict with 'message', 'expected', 'found' information
+
+        Examples
+        --------
+        >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
+        >>> cache_file = data_getter.get_noise_model_cache_path("CESM2", "tas")
+        >>> is_valid, model, info = data_getter.validate_noise_model_cache(
+        ...     cache_file, "tas", n_modes=40, lag_order=2
+        ... )
+        >>> if is_valid:
+        ...     print(f"✅ {info['message']}")
+        """
+        info = {
+            "expected": {
+                "variable_name": variable_name,
+                "n_modes": n_modes,
+                "lag_order": lag_order,
+            },
+            "found": {},
+            "message": "",
+        }
+
+        # Check if file exists
+        if not os.path.exists(cache_file):
+            info["message"] = f"Cache file not found: {cache_file}"
+            return False, None, info
+
+        # Try to load and validate
+        try:
+            noise_model = MeteorNoiseGenerator(n_modes=n_modes, lag_order=lag_order)
+            noise_model.load_model(cache_file)
+
+            # Extract found information
+            info["found"]["n_modes"] = getattr(noise_model, "n_modes", None)
+            info["found"]["lag_order"] = getattr(noise_model, "lag_order", None)
+            info["found"]["variable_name"] = getattr(noise_model, "variable_name", None)
+
+            # Validate n_modes
+            if not hasattr(noise_model, "n_modes") or noise_model.n_modes != n_modes:
+                info["message"] = (
+                    f"n_modes mismatch: expected {n_modes}, "
+                    f"found {info['found']['n_modes']}"
+                )
+                return False, None, info
+
+            # Validate lag_order
+            if (
+                not hasattr(noise_model, "lag_order")
+                or noise_model.lag_order != lag_order
+            ):
+                info["message"] = (
+                    f"lag_order mismatch: expected {lag_order}, "
+                    f"found {info['found']['lag_order']}"
+                )
+                return False, None, info
+
+            # Validate variable_name
+            if (
+                not hasattr(noise_model, "variable_name")
+                or noise_model.variable_name != variable_name
+            ):
+                info["message"] = (
+                    f"variable_name mismatch: expected '{variable_name}', "
+                    f"found '{info['found']['variable_name']}'"
+                )
+                return False, None, info
+
+            # Validate required attributes
+            required_attrs = ["pca", "varx_results"]
+            missing_attrs = [
+                attr for attr in required_attrs if not hasattr(noise_model, attr)
+            ]
+            if missing_attrs:
+                info["message"] = f"Missing required attributes: {missing_attrs}"
+                return False, None, info
+
+            # Cache is valid
+            info["message"] = (
+                f"Cache valid: variable={variable_name}, "
+                f"n_modes={n_modes}, lag_order={lag_order}"
+            )
+            return True, noise_model, info
+
+        except Exception as e:
+            info["message"] = f"Error loading cache: {e}"
+            return False, None, info

@@ -1,4 +1,5 @@
 import os
+import shutil
 
 from meteor import cache_handling
 
@@ -51,10 +52,34 @@ def test_cache_handler_setup(tmp_path):
         sub_cache_path = cache_dir / sub_cache
         assert sub_cache_path.exists()
 
+    assert handler.get_cmip6_query_catalogue() == os.path.join(cache_dir, "cmip6", "cmip6-zarr-consolidated-stores.csv")
+    shutil.rmtree(cache_dir)  # Clean up for next test
     handler_noise = cache_handling.CacheHandler(
         cache_dir=str(cache_dir), purpose="noise"
     )
     handler_noise.setup_cache_tree()
+    expected_sub_caches = ["cmip6", "noise_models"]
+    for sub_cache in expected_sub_caches:
+        sub_cache_path = cache_dir / sub_cache
+        assert sub_cache_path.exists()
+    shutil.rmtree(cache_dir)  # Clean up for next test   
+    handler_general = cache_handling.CacheHandler(
+        cache_dir=str(cache_dir), purpose="general"
+    )
+    handler_general.setup_cache_tree()
+    expected_sub_caches = ["cmip6", "pattern_scaling", "noise_models"]
+    for sub_cache in expected_sub_caches:
+        sub_cache_path = cache_dir / sub_cache
+        assert sub_cache_path.exists()
+
+    shutil.rmtree(cache_dir)  # Clean up for next test
+    handler_not_working = cache_handling.CacheHandler(
+        cache_dir=expected_sub_caches
+        )
+    assert not handler_not_working.cache_functioning
+    assert not handler_not_working.check_if_cmip6_cached(
+        "get_single_var_mod_data_monthly", "piControl", "tas", "TestModel"
+    )
 
 
 def test_generate_cache_key():
@@ -119,3 +144,32 @@ def test_find_expected_variable_from_args():
         "get_single_var_mod_data", "piControl"
     )
     assert var5 is None
+
+
+def test_cache_clearing(tmp_path):
+    cache_dir = tmp_path / "meteor_cache"
+    handler = cache_handling.CacheHandler(cache_dir=str(cache_dir), purpose="classic")
+    handler.setup_cache_tree()
+
+    # Create a dummy file in the cache
+    dummy_file = cache_dir / "cmip6" / "dummy.nc"
+    dummy_file.touch()
+    assert dummy_file.exists()
+
+    # Create a dummy file in the cache
+    dummy_file2 = cache_dir / "pattern_scaling" / "dummy.nc"
+    dummy_file2.touch()
+    assert dummy_file.exists()
+
+    # Clear the cache
+    handler.clear_cache(sub_cache= "cmip6")
+    assert not dummy_file.exists()
+    assert dummy_file2.exists()
+    # Should do nothing if sub_cache does not exist
+    handler.clear_cache(sub_cache = "not_a_cache")
+    assert dummy_file2.exists()
+    handler.clear_cache()
+    assert not dummy_file2.exists()
+
+
+      # Should not raise any error even if cache is already clear

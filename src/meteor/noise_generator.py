@@ -1328,6 +1328,124 @@ def load_noise_model_from_cache(cache_dir, model_name, variable_name):
     return noise_gen
 
 
+def validate_noise_model_cache(
+    cache_file,
+    variable_name,
+    n_modes=40,
+    lag_order=2,
+):
+    """
+    Validate a cached noise model file.
+
+    Checks if the cached pickle file exists, can be loaded, and contains
+    the expected configuration (n_modes, lag_order, variable_name) and
+    required attributes (pca, varx_results).
+
+    Parameters
+    ----------
+    cache_file : str
+        Path to the cached noise model file
+    variable_name : str
+        Expected variable name (e.g., 'tas', 'pr')
+    n_modes : int, optional
+        Expected number of PCA modes. Default is 40.
+    lag_order : int, optional
+        Expected temporal lag order. Default is 2.
+
+    Returns
+    -------
+    tuple
+        (is_valid, cached_model, info_dict) where:
+        - is_valid: bool indicating if cache is valid
+        - cached_model: loaded MeteorNoiseGenerator if valid, None otherwise
+        - info_dict: dict with 'message', 'expected', 'found' information
+
+    Examples
+    --------
+    >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
+    >>> cache_file = data_getter.get_noise_model_cache_path("CESM2", "tas")
+    >>> is_valid, model, info = data_getter.validate_noise_model_cache(
+    ...     cache_file, "tas", n_modes=40, lag_order=2
+    ... )
+    >>> if is_valid:
+    ...     print(f"✅ {info['message']}")
+    """
+    info = {
+        "expected": {
+            "variable_name": variable_name,
+            "n_modes": n_modes,
+            "lag_order": lag_order,
+        },
+        "found": {},
+        "message": "",
+    }
+
+    # Check if file exists
+    if not os.path.exists(cache_file):
+        info["message"] = f"Cache file not found: {cache_file}"
+        return False, None, info
+
+    # Try to load and validate
+    try:
+        noise_model = MeteorNoiseGenerator(n_modes=n_modes, lag_order=lag_order)
+        noise_model.load_model(cache_file)
+
+        # Extract found information
+        info["found"]["n_modes"] = getattr(noise_model, "n_modes", None)
+        info["found"]["lag_order"] = getattr(noise_model, "lag_order", None)
+        info["found"]["variable_name"] = getattr(noise_model, "variable_name", None)
+
+        # Validate n_modes
+        if not hasattr(noise_model, "n_modes") or noise_model.n_modes != n_modes:
+            info["message"] = (
+                f"n_modes mismatch: expected {n_modes}, "
+                f"found {info['found']['n_modes']}"
+            )
+            return False, None, info
+
+        # Validate lag_order
+        if (
+            not hasattr(noise_model, "lag_order")
+            or noise_model.lag_order != lag_order
+        ):
+            info["message"] = (
+                f"lag_order mismatch: expected {lag_order}, "
+                f"found {info['found']['lag_order']}"
+            )
+            return False, None, info
+
+        # Validate variable_name
+        if (
+            not hasattr(noise_model, "variable_name")
+            or noise_model.variable_name != variable_name
+        ):
+            info["message"] = (
+                f"variable_name mismatch: expected '{variable_name}', "
+                f"found '{info['found']['variable_name']}'"
+            )
+            return False, None, info
+
+        # Validate required attributes
+        required_attrs = ["pca", "varx_results"]
+        missing_attrs = [
+            attr for attr in required_attrs if not hasattr(noise_model, attr)
+        ]
+        if missing_attrs:
+            info["message"] = f"Missing required attributes: {missing_attrs}"
+            return False, None, info
+
+        # Cache is valid
+        info["message"] = (
+            f"Cache valid: variable={variable_name}, "
+            f"n_modes={n_modes}, lag_order={lag_order}"
+        )
+        return True, noise_model, info
+
+    except Exception as e:
+        info["message"] = f"Error loading cache: {e}"
+        return False, None, info
+
+
 # def train_noise_model_from_composite(
 #     data_getter,
 #     experiments,

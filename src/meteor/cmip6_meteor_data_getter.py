@@ -883,7 +883,9 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             f"   ✅ Training data prepared for experiments: {list(training_data.keys())}"
         )
         return training_data
+    
 
+    # TODO: Move out of class and possibly into new module for SCM data handling
     def load_ssp_config(self, scenario="ssp245", nystart=1750, nyend=2100):
         """
         Load CICERO-SCM forcing data and create configuration for pattern scaling.
@@ -959,64 +961,10 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         print(f"   ✅ Config: {nystart}-{nyend}, emissions start: 1850")
 
         return ssp_config
-
-    def get_pattern_scaling_cache_path(
-        self, model_name, cache_dir=None, scenario="aer", variable=None
-    ):
-        """
-        Get the standardized cache file path for a pattern scaling model.
-
-        Parameters
-        ----------
-        model_name : str
-            Name of the CMIP6 model
-        cache_dir : str, optional
-            Directory for cache files. If None, uses default cache location.
-        scenario : str, optional
-            Scenario suffix for the model name. Default is "aer" (aerosol-inclusive).
-        variable : str, optional
-            Variable name (e.g., 'tas', 'pr'). If provided, included in filename.
-
-        Returns
-        -------
-        str
-            Full path to the cache file
-
-        Examples
-        --------
-        >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
-        >>> cache_path = data_getter.get_pattern_scaling_cache_path("CESM2")
-        >>> print(cache_path)
-        /path/to/.cache/trained_pattern_scaling_models/cmip6-CESM2-aer_pattern_scaling.pkl
-        """
-        if cache_dir is None:
-            # Use default cache location in repository root
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            repo_root = current_dir
-            while repo_root != os.path.dirname(repo_root):
-                if any(
-                    os.path.exists(os.path.join(repo_root, marker))
-                    for marker in ["setup.py", ".git", "README.md"]
-                ):
-                    break
-                repo_root = os.path.dirname(repo_root)
-            cache_dir = os.path.join(
-                repo_root, ".cache", "trained_pattern_scaling_models"
-            )
-
-        os.makedirs(cache_dir, exist_ok=True)
-        if variable:
-            return os.path.join(
-                cache_dir,
-                f"cmip6-{model_name}-{scenario}-{variable}_pattern_scaling.pkl",
-            )
-        else:
-            return os.path.join(
-                cache_dir, f"cmip6-{model_name}-{scenario}_pattern_scaling.pkl"
-            )
-
+    
+    
     def validate_pattern_scaling_cache(
-        self, cache_file, model_name, scenario="aer", variable=None
+        self, cache_file, model_name, scenario="aer"
     ):
         """
         Validate a cached pattern scaling model file.
@@ -1030,8 +978,6 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             Path to the cached model file
         model_name : str
             Expected model name
-        variable : str, optional
-            Variable name to validate against
         scenario : str, optional
             Scenario suffix for expected model name. Default is "aer".
 
@@ -1122,158 +1068,5 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             return True, cached_data, info
 
         except Exception as e:
-            info["message"] = f"Error reading cache: {e}"
-            return False, None, info
-
-    def get_noise_model_cache_path(self, model_name, variable_name, cache_dir=None):
-        """
-        Get the standardized cache file path for a noise model.
-
-        Parameters
-        ----------
-        model_name : str
-            Name of the CMIP6 model
-        variable_name : str
-            Variable name (e.g., 'tas', 'pr')
-        cache_dir : str, optional
-            Directory for cache files. If None, uses default noise cache location.
-
-        Returns
-        -------
-        str
-            Full path to the cache file
-
-        Examples
-        --------
-        >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
-        >>> cache_path = data_getter.get_noise_model_cache_path("CESM2", "tas")
-        >>> print(cache_path)
-        /path/to/noise_cache/CESM2_tas_noise_model.pkl
-        """
-        if cache_dir is None:
-            # Use noise_cache in current working directory (notebook convention)
-            cache_dir = os.path.join(os.getcwd(), "noise_cache")
-
-        os.makedirs(cache_dir, exist_ok=True)
-        return os.path.join(cache_dir, f"{model_name}_{variable_name}_noise_model.pkl")
-
-    def validate_noise_model_cache(
-        self,
-        cache_file,
-        variable_name,
-        n_modes=40,
-        lag_order=2,
-    ):
-        """
-        Validate a cached noise model file.
-
-        Checks if the cached pickle file exists, can be loaded, and contains
-        the expected configuration (n_modes, lag_order, variable_name) and
-        required attributes (pca, varx_results).
-
-        Parameters
-        ----------
-        cache_file : str
-            Path to the cached noise model file
-        variable_name : str
-            Expected variable name (e.g., 'tas', 'pr')
-        n_modes : int, optional
-            Expected number of PCA modes. Default is 40.
-        lag_order : int, optional
-            Expected temporal lag order. Default is 2.
-
-        Returns
-        -------
-        tuple
-            (is_valid, cached_model, info_dict) where:
-            - is_valid: bool indicating if cache is valid
-            - cached_model: loaded MeteorNoiseGenerator if valid, None otherwise
-            - info_dict: dict with 'message', 'expected', 'found' information
-
-        Examples
-        --------
-        >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
-        >>> cache_file = data_getter.get_noise_model_cache_path("CESM2", "tas")
-        >>> is_valid, model, info = data_getter.validate_noise_model_cache(
-        ...     cache_file, "tas", n_modes=40, lag_order=2
-        ... )
-        >>> if is_valid:
-        ...     print(f"✅ {info['message']}")
-        """
-        # Import here to avoid circular dependency
-        from meteor.noise_generator import MeteorNoiseGenerator
-
-        info = {
-            "expected": {
-                "variable_name": variable_name,
-                "n_modes": n_modes,
-                "lag_order": lag_order,
-            },
-            "found": {},
-            "message": "",
-        }
-
-        # Check if file exists
-        if not os.path.exists(cache_file):
-            info["message"] = f"Cache file not found: {cache_file}"
-            return False, None, info
-
-        # Try to load and validate
-        try:
-            noise_model = MeteorNoiseGenerator(n_modes=n_modes, lag_order=lag_order)
-            noise_model.load_model(cache_file)
-
-            # Extract found information
-            info["found"]["n_modes"] = getattr(noise_model, "n_modes", None)
-            info["found"]["lag_order"] = getattr(noise_model, "lag_order", None)
-            info["found"]["variable_name"] = getattr(noise_model, "variable_name", None)
-
-            # Validate n_modes
-            if not hasattr(noise_model, "n_modes") or noise_model.n_modes != n_modes:
-                info["message"] = (
-                    f"n_modes mismatch: expected {n_modes}, "
-                    f"found {info['found']['n_modes']}"
-                )
-                return False, None, info
-
-            # Validate lag_order
-            if (
-                not hasattr(noise_model, "lag_order")
-                or noise_model.lag_order != lag_order
-            ):
-                info["message"] = (
-                    f"lag_order mismatch: expected {lag_order}, "
-                    f"found {info['found']['lag_order']}"
-                )
-                return False, None, info
-
-            # Validate variable_name
-            if (
-                not hasattr(noise_model, "variable_name")
-                or noise_model.variable_name != variable_name
-            ):
-                info["message"] = (
-                    f"variable_name mismatch: expected '{variable_name}', "
-                    f"found '{info['found']['variable_name']}'"
-                )
-                return False, None, info
-
-            # Validate required attributes
-            required_attrs = ["pca", "varx_results"]
-            missing_attrs = [
-                attr for attr in required_attrs if not hasattr(noise_model, attr)
-            ]
-            if missing_attrs:
-                info["message"] = f"Missing required attributes: {missing_attrs}"
-                return False, None, info
-
-            # Cache is valid
-            info["message"] = (
-                f"Cache valid: variable={variable_name}, "
-                f"n_modes={n_modes}, lag_order={lag_order}"
-            )
-            return True, noise_model, info
-
-        except Exception as e:
-            info["message"] = f"Error loading cache: {e}"
+            info["message"] = f"Error reading cached file {cache_file}: {e}"
             return False, None, info

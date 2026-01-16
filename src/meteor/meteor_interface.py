@@ -24,6 +24,7 @@ from .impacts import DegreeDaysCalculator
 from .meteor import MeteorPatternScaling
 from .noise_generator import train_noise_model_from_cmip6
 from .variable_transforms import get_variable_transform_config
+from .cache_handling import CacheHandler
 
 
 def _get_default_config(variable):
@@ -250,7 +251,10 @@ class MeteorInterface:
             self.variables = list(variables)
 
         self.model = model
-        self.cache_dir = cache_dir or "./cache"
+        self.cache_handler = CacheHandler(
+            purpose="general",
+            cache_dir=cache_dir,
+        )
 
         # Initialize data getter
         data_getter_kwargs = data_getter_kwargs or {}
@@ -260,13 +264,12 @@ class MeteorInterface:
         # Note: We explicitly enable caching for the high-level interface to provide
         # good performance by default. Users of the low-level Cmip6MeteorDataGetter
         # can control caching behavior directly.
-        # TODO : Why are we not sending the cache_dir here?
         self.data_getter = Cmip6MeteorDataGetter(
             exps=data_getter_kwargs.get("exps", default_exps),
             flds=self.variables,
             dbe=data_getter_kwargs.get("dbe", default_dbe),
             enable_cache=True,
-            cache_dir=self.cache_dir,
+            cache_dir=self.cache_handler,
         )
 
         # Storage for trained models
@@ -434,7 +437,7 @@ class MeteorInterface:
         cache_dir = os.path.join(self.cache_dir, "pattern_scaling")
         os.makedirs(cache_dir, exist_ok=True)
 
-        cache_file = self.data_getter.get_pattern_scaling_cache_path(
+        cache_file = self.cache_handler.get_pattern_scaling_cache_path(
             self.model, cache_dir, variable=variable
         )
 

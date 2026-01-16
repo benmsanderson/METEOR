@@ -23,7 +23,7 @@ def test_meteor_interface_integration(test_data_dir):
         end_year=2035,
         n_realizations=10,
         timeseries=["global", "regional:EAS"],
-        gridded=["annual"],
+        gridded={"annual": list(range(2020, 2026))},
         impacts=["hdd:point:59.9,10.8"],
     )
 

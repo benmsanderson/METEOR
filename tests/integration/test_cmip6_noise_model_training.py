@@ -5,7 +5,10 @@ import numpy as np
 import pytest
 
 from meteor import cmip6_meteor_data_getter
-from meteor.noise_generator import train_noise_model_from_cmip6
+from meteor.noise_generator import (
+    train_noise_model_from_cmip6,
+    validate_noise_model_cache,
+)
 
 
 def test_comprehensive_noise_model_training(test_data_dir):
@@ -133,3 +136,89 @@ def test_noise_model_error_handling(test_data_dir):
 
     # Test that the function is callable (basic smoke test)
     assert callable(train_noise_model_from_cmip6)
+
+
+def test_noise_model_validation(test_data_dir):
+    """Test the noise model validation function."""
+    cache_path = os.path.join(test_data_dir, "light_mock_cache")
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        exps=["historical", "ssp245"],
+        dbe=["CMIP", "ScenarioMIP"],
+        cache_dir=cache_path,
+        enable_cache=True,
+    )
+    # Test with non-existent file
+    validation_results = validate_noise_model_cache("not_a_file", "tas")
+    assert validation_results[0] is False
+    assert validation_results[1] is None
+    assert set(validation_results[2].keys()) == {"expected", "found", "message"}
+
+    invalid_cache_path = os.path.join(
+        test_data_dir, "light_mock_cache", "cmip6", "CanESM5_ssp370_pr_yearly.nc"
+    )
+    validation_results = validate_noise_model_cache(
+        invalid_cache_path, "tas", n_modes=4, lag_order=1
+    )
+    assert validation_results[0] is False
+    assert validation_results[1] is None
+    assert validation_results[2]["message"].startswith("Error loading cache")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        noise_model = train_noise_model_from_cmip6(
+            data_getter,
+            experiments=["historical", "ssp245"],
+            model_name="CanESM5",
+            variable_name="tas",
+            n_modes=4,
+            lag_order=1,
+            cache_dir=tmpdir,
+        )
+        cache_file = os.path.join(tmpdir, os.listdir(tmpdir)[0])
+        # Valid case
+        validation_results = validate_noise_model_cache(
+            cache_file, "tas", n_modes=4, lag_order=1
+        )
+        assert validation_results[0] is True
+        assert validation_results[1] is not None
+        assert validation_results[2]["found"]["variable_name"] == "tas"
+        assert validation_results[2]["found"]["n_modes"] == 4
+        assert validation_results[2]["found"]["lag_order"] == 1
+
+        # Invalid variable name
+        validation_results = validate_noise_model_cache(
+            cache_file, "pr", n_modes=4, lag_order=1
+        )
+        assert validation_results[0] is False
+        assert validation_results[1] is None
+        assert validation_results[2]["found"]["variable_name"] == "tas"
+        assert validation_results[2]["found"]["n_modes"] == 4
+        assert validation_results[2]["found"]["lag_order"] == 1
+        assert validation_results[2]["message"].startswith(
+            "variable_name mismatch: expected 'pr'"
+        )
+
+        # Invalid lag order
+        validation_results = validate_noise_model_cache(
+            cache_file, "tas", n_modes=4, lag_order=3
+        )
+        assert validation_results[0] is False
+        assert validation_results[1] is None
+        assert validation_results[2]["found"]["variable_name"] == "tas"
+        assert validation_results[2]["found"]["n_modes"] == 4
+        assert validation_results[2]["found"]["lag_order"] == 1
+        assert validation_results[2]["message"].startswith(
+            "lag_order mismatch: expected 3"
+        )
+
+        # Invalid n_modes
+        validation_results = validate_noise_model_cache(
+            cache_file, "tas", n_modes=6, lag_order=3
+        )
+        assert validation_results[0] is False
+        assert validation_results[1] is None
+        assert validation_results[2]["found"]["variable_name"] == "tas"
+        assert validation_results[2]["found"]["n_modes"] == 4
+        assert validation_results[2]["found"]["lag_order"] == 1
+        assert validation_results[2]["message"].startswith(
+            "n_modes mismatch: expected 6"
+        )

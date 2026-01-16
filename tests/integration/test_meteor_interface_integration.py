@@ -38,7 +38,7 @@ def test_meteor_interface_integration(test_data_dir):
     assert ensemble.metadata["year_range"] == "2015-2035"
     assert isinstance(ensemble.variables["pr"], VariableOutput)
     print(ensemble.variables["pr"].timeseries)
-    #assert False
+    # assert False
     # assert ensemble.pr.sizes["lat"] == 5
     # assert ensemble.pr.sizes["ensemble"] == 10
     # assert ensemble.pr.sizes["time"] == 102  # 2000 to 2100 inclusive

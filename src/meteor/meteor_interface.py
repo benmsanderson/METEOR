@@ -465,7 +465,7 @@ class MeteorInterface:
             from_file=False,
             exp_list=None if training_data is None else ["base", "co2x4", "sulxanom"],
             anom_timescales={variable: config["n_modes_pattern"]},
-            cache_dir=os.path.join(self.cache_handler, "pattern_scaling"),
+            cache_dir=os.path.join(self.cache_handler.cache_dir, "pattern_scaling"),
         )
 
     def _train_noise_model(self, variable, config, verbose=True):

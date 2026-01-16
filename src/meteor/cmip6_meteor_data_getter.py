@@ -2,7 +2,6 @@
 Module to get CMIP6 data and convert to format that can be used for METEOR
 """
 
-import hashlib
 import logging
 import os
 
@@ -11,6 +10,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from ciceroscm import input_handler
+
+from .cache_handling import CacheHandler
 
 cmip6_to_meteor_exp_remapper = {
     "base": "piControl",
@@ -251,6 +252,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         exps=None,
         dbe=None,
         cache_dir=None,
+        cache_handler=None,
         enable_cache=False,
         enable_compression=True,
         compression_level=6,
@@ -300,56 +302,22 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
 
         # Set up caching
         self.enable_cache = enable_cache
-        self.enable_compression = enable_compression
-        self.compression_level = max(
-            1, min(9, compression_level)
-        )  # Clamp to valid range 1-9
-        if cache_dir is None:
-            # Try to locate the repository root by looking for setup.py, .git, etc.
-            # This works well for development environments (git clones).
-            # If not found (e.g., pip-installed package), fall back to home directory.
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            repo_root = current_dir
-            found_repo_root = False
-            while repo_root != os.path.dirname(repo_root):  # Stop at filesystem root
-                if any(
-                    os.path.exists(os.path.join(repo_root, marker))
-                    for marker in ["setup.py", ".git", "README.md"]
-                ):
-                    found_repo_root = True
-                    break
-                repo_root = os.path.dirname(repo_root)
-
-            if found_repo_root:
-                # Development: cache in repository root
-                cache_dir = os.path.join(repo_root, ".cache", "cmip6")
-            else:
-                # Pip-installed: cache in user home directory
-                cache_dir = os.path.join(
-                    os.path.expanduser("~"), ".meteor", "cmip6_cache"
-                )
-        self.cache_dir = cache_dir
-
         if self.enable_cache:
-            try:
-                os.makedirs(self.cache_dir, exist_ok=True)
-                logging.info(
-                    "Cache enabled: Storing CMIP6 data at %s",
-                    self.cache_dir,
+            if cache_handler is None:
+                self.cache_handler = CacheHandler(
+                    cache_dir=cache_dir,
+                    purpose="cmip6",
+                    enable_compression=enable_compression,
+                    compression_level=compression_level,
                 )
-            except OSError as e:
-                logging.warning(
-                    "Failed to create cache directory at %s: %s. "
-                    "Disabling cache functionality.",
-                    self.cache_dir,
-                    e,
-                )
-                self.enable_cache = False
+            else:
+                self.cache_handler = cache_handler
+            self.enable_cache = self.cache_handler.cache_functioning
 
-        # Load CMIP6 catalog (with caching to avoid network calls when possible)
-        catalog_cache_file = os.path.join(
-            self.cache_dir, "cmip6-zarr-consolidated-stores.csv"
-        )
+            # Load CMIP6 catalog (with caching to avoid network calls when possible)
+            catalog_cache_file = self.cache_handler.get_cmip6_query_catalogue()
+        else:
+            catalog_cache_file = None
 
         if self.enable_cache and os.path.exists(catalog_cache_file):
             # Use cached catalog
@@ -397,382 +365,6 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             df_all1, flds=self.flds, exps=self.exps
         )
         self.gcs = gcsfs.GCSFileSystem(token="anon")  # nosec
-
-    def _generate_cache_key(self, method_name, *args, **kwargs):
-        """
-        Generate a descriptive cache filename for a method call.
-
-        Parameters
-        ----------
-        method_name : str
-            Name of the method being cached
-        *args : tuple
-            Positional arguments to the method
-        **kwargs : dict
-            Keyword arguments to the method
-
-        Returns
-        -------
-        str
-            Descriptive cache filename (without extension)
-        """
-        if method_name == "get_single_var_mod_data":
-            exp, fld, model = args
-            return f"{model}_{exp}_{fld}_raw"
-        if method_name == "get_single_var_mod_data_yearmean":
-            exp, fld, model = args
-            return f"{model}_{exp}_{fld}_yearly"
-        if method_name == "get_single_var_mod_data_monthly":
-            exp, fld, model = args
-            return f"{model}_{exp}_{fld}_monthly"
-        if method_name == "make_meteor_training_data":
-            exp, model = args[:2]  # pylint: disable=unbalanced-tuple-unpacking
-            monthly = kwargs.get("monthly", False)
-            suffix = "_monthly" if monthly else "_yearly"
-            return f"{model}_{exp}_training{suffix}"
-        if method_name == "make_meteor_training_data_composite":
-            exps, model = args[:2]  # pylint: disable=unbalanced-tuple-unpacking
-            monthly = kwargs.get("monthly", False)
-            exp_str = "_".join(exps)
-            suffix = "_monthly" if monthly else "_yearly"
-            return f"{model}_{exp_str}_composite{suffix}"
-        # Fallback to hash-based naming
-        key_data = {
-            "method": method_name,
-            "args": args,
-            "kwargs": kwargs,
-        }
-        key_str = str(sorted(key_data.items()))
-        return hashlib.md5(
-            key_str.encode()
-        ).hexdigest()  # nosec - Used for cache key generation, not security
-
-    def is_cached(self, method_name, *args, **kwargs):
-        """
-        Check if data is already cached and valid for a given method call.
-
-        Parameters
-        ----------
-        method_name : str
-            Name of the method being checked
-        *args : tuple
-            Positional arguments to the method
-        **kwargs : dict
-            Keyword arguments to the method
-
-        Returns
-        -------
-        bool
-            True if valid cached data exists, False otherwise
-        """
-        if not self.enable_cache:
-            return False
-
-        cache_key = self._generate_cache_key(method_name, *args, **kwargs)
-        cache_file = os.path.join(self.cache_dir, f"{cache_key}.nc")
-
-        # Check if file exists
-        if not os.path.exists(cache_file):
-            return False
-
-        # Validate the cached data
-        try:
-            dataset = xr.open_dataset(cache_file)
-
-            # For methods that expect specific variables, extract variable name from args
-            expected_variable = None
-            if method_name in [
-                "get_single_var_mod_data",
-                "get_single_var_mod_data_yearmean",
-                "get_single_var_mod_data_monthly",
-            ]:
-                if len(args) >= 2:
-                    expected_variable = args[
-                        1
-                    ]  # fld parameter is usually second argument
-            elif method_name == "make_meteor_training_data":
-                # For training data, we expect variables from self.flds
-                # Since we can't easily determine which specific variable to check,
-                # we'll validate that the dataset has at least one data variable
-                # and that each variable in self.flds exists if we're checking a specific scenario
-                pass  # Basic validation below should catch empty datasets
-
-            is_valid = self._validate_cached_data(dataset, expected_variable)
-            dataset.close()
-
-            if not is_valid:
-                # Remove invalid cache file
-                try:
-                    os.remove(cache_file)
-                    logging.debug("Removed invalid cache file: %s", cache_file)
-                except OSError:
-                    pass
-                return False
-
-            return True
-
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            # Cache file is corrupted, remove it
-            try:
-                os.remove(cache_file)
-                logging.debug("Removed corrupted cache file: %s (%s)", cache_file, e)
-            except OSError:
-                pass
-            return False
-
-    def _get_cache_path(self, cache_key):
-        """
-        Get the full path for a cache file.
-
-        Parameters
-        ----------
-        cache_key : str
-            Cache key
-
-        Returns
-        -------
-        str
-            Full path to cache file
-        """
-        return os.path.join(self.cache_dir, f"{cache_key}.nc")
-
-    def _load_from_cache(self, cache_key, expected_type=None, expected_variable=None):
-        """
-        Load data from cache if it exists and is valid.
-
-        Parameters
-        ----------
-        cache_key : str
-            Cache key
-        expected_type : str, optional
-            Expected return type ('Dataset' or 'DataArray'). If None, uses metadata from cache.
-        expected_variable : str, optional
-            Expected variable name to validate presence in cached data.
-
-        Returns
-        -------
-        object or None
-            Cached data if exists and is valid, None otherwise
-        """
-        # pylint: disable=too-many-return-statements
-        if not self.enable_cache:
-            return None
-
-        cache_path = self._get_cache_path(cache_key)
-        if os.path.exists(cache_path):
-            try:
-                logging.info(
-                    "Loading data from cache: %s", os.path.basename(cache_path)
-                )
-                dataset = xr.open_dataset(cache_path)
-
-                # Validate the cached data
-                if not self._validate_cached_data(dataset, expected_variable):
-                    logging.warning(
-                        "Cached data at %s failed validation. Removing and re-downloading.",
-                        cache_path,
-                    )
-                    try:
-                        os.remove(cache_path)
-                    except OSError:
-                        pass
-                    return None
-
-                # Determine return type based on expected_type or metadata
-                if expected_type == "DataArray":
-                    # Force return as DataArray
-                    if len(dataset.data_vars) == 1:
-                        var_name = list(dataset.data_vars)[0]
-                        return dataset[var_name]
-                    # Multiple variables, can't convert to DataArray safely
-                    return None
-                if expected_type == "Dataset":
-                    # Force return as Dataset
-                    return dataset
-                # Use metadata to determine type (backward compatibility)
-                original_type = dataset.attrs.get("original_type")
-                if original_type == "DataArray" and len(dataset.data_vars) == 1:
-                    var_name = list(dataset.data_vars)[0]
-                    return dataset[var_name]
-                # Default to Dataset (safer for zarr data)
-                return dataset
-            except (OSError, ValueError, KeyError):
-                # Cache file corrupted, remove it
-                logging.warning(
-                    "Cached data at %s is corrupted. Removing and re-downloading.",
-                    cache_path,
-                )
-                try:
-                    os.remove(cache_path)
-                except OSError:
-                    pass
-        return None
-
-    def _validate_cached_data(  # pylint: disable=too-many-return-statements
-        self, dataset, expected_variable=None
-    ):
-        """
-        Validate that cached data is not corrupted and contains expected content.
-
-        Parameters
-        ----------
-        dataset : xr.Dataset
-            Dataset to validate
-        expected_variable : str, optional
-            Expected variable name
-
-        Returns
-        -------
-        bool
-            True if data is valid, False otherwise
-        """
-        try:
-            # Check 1: Dataset should have data variables
-            if len(dataset.data_vars) == 0:
-                logging.debug("Validation failed: No data variables in cached dataset")
-                return False
-
-            # Check 2: If we expect a specific variable, it should be present
-            if expected_variable and expected_variable not in dataset.data_vars:
-                logging.debug(
-                    "Validation failed: Expected variable '%s' not found in cached dataset",
-                    expected_variable,
-                )
-                return False
-
-            # Check 3: Data variables should have reasonable dimensions
-            for var_name, var_data in dataset.data_vars.items():
-                if len(var_data.dims) == 0:
-                    logging.debug(
-                        "Validation failed: Variable '%s' has no dimensions", var_name
-                    )
-                    return False
-
-                # Check that dimensions have reasonable sizes (not empty)
-                for dim in var_data.dims:
-                    if dim in dataset.sizes and dataset.sizes[dim] == 0:
-                        logging.debug(
-                            "Validation failed: Dimension '%s' has size 0", dim
-                        )
-                        return False
-
-            # Check 4: Essential coordinate variables should exist
-            # Most climate data should have time coordinate
-            if "time" in dataset.sizes and "time" not in dataset.coords:
-                logging.debug(
-                    "Validation failed: 'time' dimension exists but no time coordinate"
-                )
-                return False
-
-            return True
-
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logging.debug("Validation failed with exception: %s", e)
-            return False
-
-    def _save_to_cache(self, cache_key, data):
-        """
-        Save data to cache.
-
-        Parameters
-        ----------
-        cache_key : str
-            Cache key
-        data : xr.Dataset or xr.DataArray
-            Data to cache
-        """
-        if not self.enable_cache:
-            return
-
-        cache_path = self._get_cache_path(cache_key)
-        try:
-            # Convert DataArray to Dataset if needed and mark the original type
-            if isinstance(data, xr.DataArray):
-                # Use the variable name if available, otherwise use 'data'
-                var_name = data.name if data.name else "data"
-                data_to_save = data.to_dataset(name=var_name)
-                # Mark that this was originally a DataArray
-                data_to_save.attrs["original_type"] = "DataArray"
-            else:
-                data_to_save = data
-                # Mark that this was originally a Dataset
-                data_to_save.attrs["original_type"] = "Dataset"
-
-            # Add metadata about when this was cached
-            data_to_save.attrs["cached_by_meteor"] = (
-                "true"  # Use string instead of boolean
-            )
-            data_to_save.attrs["cache_timestamp"] = pd.Timestamp.now().isoformat()
-
-            # Clean up problematic variables before saving
-            # Drop time_bnds if it exists as it often has conflicting fill values
-            # and is not needed for METEOR analysis
-            variables_to_drop = []
-            if "time_bnds" in data_to_save.variables:
-                variables_to_drop.append("time_bnds")
-
-            if variables_to_drop:
-                data_to_save = data_to_save.drop_vars(variables_to_drop)
-                logging.debug(
-                    "Dropped variables %s before caching to avoid encoding conflicts",
-                    variables_to_drop,
-                )
-
-            # Set up compression options
-            if self.enable_compression:
-                # Use zlib compression with user-specified level and shuffling for better compression ratios
-                encoding = {}
-                for var_name in data_to_save.data_vars:
-                    encoding[var_name] = {
-                        "zlib": True,
-                        "complevel": self.compression_level,
-                        "shuffle": True,
-                        "fletcher32": False,  # Skip checksum for speed
-                    }
-                # Also compress coordinate variables if they exist
-                for coord_name in data_to_save.coords:
-                    if coord_name not in encoding:
-                        encoding[coord_name] = {
-                            "zlib": True,
-                            "complevel": self.compression_level,
-                            "shuffle": True,
-                            "fletcher32": False,
-                        }
-
-                data_to_save.to_netcdf(cache_path, encoding=encoding)
-                logging.debug(
-                    "Saved compressed cache file (level %s) to %s",
-                    self.compression_level,
-                    cache_path,
-                )
-            else:
-                data_to_save.to_netcdf(cache_path)
-                logging.debug("Saved uncompressed cache file to %s", cache_path)
-        except (OSError, ValueError) as e:
-            # Failed to cache, but don't raise error
-            logging.warning(
-                "Failed to save data to cache at %s: %s. "
-                "Continuing without caching.",
-                cache_path,
-                e,
-            )
-
-    def clear_cache(self):
-        """
-        Clear all cached data for this data getter.
-        """
-        if not self.enable_cache or not os.path.exists(self.cache_dir):
-            return
-
-        for filename in os.listdir(self.cache_dir):
-            if (
-                filename.endswith(".nc")
-                or filename == "cmip6-zarr-consolidated-stores.csv"
-            ):
-                try:
-                    os.remove(os.path.join(self.cache_dir, filename))
-                except OSError:
-                    pass
 
     def _set_fld_exps_dbe(self, flds, exps, dbe):
         """
@@ -877,10 +469,9 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         """
         # Try to load from cache first if caching is enabled
         if self.enable_cache:
-            cache_key = self._generate_cache_key(
+            cached_data = self.cache_handler.load_cmip6_cached_data(
                 "get_single_var_mod_data", exp, fld, model
             )
-            cached_data = self._load_from_cache(cache_key, expected_variable=fld)
             if cached_data is not None:
                 return cached_data
 
@@ -946,11 +537,12 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         """
         # Try to load from cache first if caching is enabled
         if self.enable_cache:
-            cache_key = self._generate_cache_key(
-                "get_single_var_mod_data_yearmean", exp, fld, model
-            )
-            cached_data = self._load_from_cache(
-                cache_key, expected_type="DataArray", expected_variable=fld
+            cached_data = self.cache_handler.load_cmip6_cached_data(
+                "get_single_var_mod_data_yearmean",
+                exp,
+                fld,
+                model,
+                expected_type="DataArray",
             )
             if cached_data is not None:
                 logging.info("✓ Using cached yearly data for %s/%s/%s", model, exp, fld)
@@ -978,7 +570,9 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
 
         # Cache the yearly data to avoid recomputing
         if self.enable_cache:
-            self._save_to_cache(cache_key, var_yearly)
+            self.cache_handler.save_cmip6_to_cache(
+                var_yearly, "get_single_var_mod_data_yearmean", exp, fld, model
+            )
 
         return var_yearly
 
@@ -1002,11 +596,12 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         """
         # Try to load from cache first if caching is enabled
         if self.enable_cache:
-            cache_key = self._generate_cache_key(
-                "get_single_var_mod_data_monthly", exp, fld, model
-            )
-            cached_data = self._load_from_cache(
-                cache_key, expected_type="DataArray", expected_variable=fld
+            cached_data = self.cache_handler.load_cmip6_cached_data(
+                "get_single_var_mod_data_monthly",
+                exp,
+                fld,
+                model,
+                expected_type="DataArray",
             )
             if cached_data is not None:
                 logging.info(
@@ -1043,7 +638,9 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
 
         # Save to cache if caching is enabled
         if self.enable_cache:
-            self._save_to_cache(cache_key, var_monthly)
+            self.cache_handler.save_cmip6_to_cache(
+                var_monthly, "get_single_var_mod_data_monthly", exp, fld, model
+            )
 
         return var_monthly
 
@@ -1071,13 +668,15 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         """
         # Try to load from cache first if caching is enabled
         if self.enable_cache:
-            cache_key = self._generate_cache_key(
-                "make_meteor_training_data", exp, model, exp_mapper, monthly=monthly
+            cached_data = self.cache_handler.load_cmip6_cached_data(
+                "make_meteor_training_data",
+                exp,
+                model,
+                exp_mapper,
+                monthly=monthly,
             )
-            cached_data = self._load_from_cache(cache_key)
             if cached_data is not None:
                 return cached_data
-
         # Original logic
         if not exp_mapper:
             exp_mapper = cmip6_to_meteor_exp_remapper
@@ -1148,14 +747,13 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         """
         # Try to load from cache first if caching is enabled
         if self.enable_cache:
-            cache_key = self._generate_cache_key(
+            cached_data = self.cache_handler.load_cmip6_cached_data(
                 "make_meteor_training_data_composite",
                 exps,
                 model,
                 overlap,
                 monthly=monthly,
             )
-            cached_data = self._load_from_cache(cache_key)
             if cached_data is not None:
                 return cached_data
 

@@ -266,6 +266,7 @@ class MeteorInterface:
             flds=self.variables,
             dbe=data_getter_kwargs.get("dbe", default_dbe),
             enable_cache=True,
+            cache_dir=self.cache_dir,
         )
 
         # Storage for trained models

@@ -200,6 +200,7 @@ class MeteorNoiseGenerator:
         # Calculate or use provided global temperature
         if custom_global_temp is not None:
             # Validate custom temperature array
+            print("Hello")
             if len(custom_global_temp) != len(time):
                 raise ValueError(
                     f"custom_global_temp length ({len(custom_global_temp)}) "
@@ -224,10 +225,10 @@ class MeteorNoiseGenerator:
                 # Fall back to original method (first 42 years)
                 t_globm = t_globm - t_globm[:500].mean()  # Remove baseline
                 print("   Using first 42 years as baseline")
-
+            print(t_globm)
             # Apply smoothing
             t_glob = (
-                t_globm.rolling(month=60, center=True)
+                t_globm.rolling(month=60, center=True, min_periods=1)
                 .mean()
                 .interpolate_na("month", method="nearest", fill_value="extrapolate")
                 .values
@@ -235,6 +236,8 @@ class MeteorNoiseGenerator:
 
         # Create harmonic features
         X = self._create_harmonic_features(time, t_glob)
+        # print(t_glob)
+        # print(t_globm)
 
         # Save diagnostic outputs if requested
         if save_diagnostics:

@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from meteor import Cmip6MeteorDataGetter, noise_generator
+from meteor import noise_generator
 from meteor.noise_generator import MeteorNoiseGenerator, load_noise_model_from_cache
 
 
@@ -113,36 +113,16 @@ def test_generate_realization_not_fitted():
         generator.generate_realization(np.random.rand(100))
 
 
-def test_fit_basic_functionality():
-    """Test basic fit functionality with minimal data."""
-    generator = MeteorNoiseGenerator(n_modes=2, lag_order=1)
-
-    # Test with minimal parameters - should handle errors gracefully
-    try:
-        # Test that error handling works
-        data = xr.Dataset(
-            {
-                "wrong_var": xr.DataArray(
-                    np.random.rand(60, 5, 5), dims=["month", "lat", "lon"]
-                )
-            }
-        )
-        generator.fit(data, "tas")
-        assert False, "Should have raised an error for missing variable"
-    except (ValueError, KeyError):
-        # Expected behavior - variable not found
-        assert True
-
-
 def test_complex_scenarios():
     """Test complex scenarios to improve coverage."""
     # Create more realistic test data that might work better with VAR fitting
     time = np.arange(120)  # 10 years of monthly data
     lats = np.linspace(-90, 90, 5)
     lons = np.linspace(-180, 180, 6)
+    ens = np.array([1])  # Single ensemble member
 
     # Create realistic temperature data with trends and seasonality
-    temp_data = np.zeros((len(time), len(lats), len(lons)))
+    temp_data = np.zeros((len(time), len(lats), len(lons), len(ens)))
     for i, t in enumerate(time):
         # Add seasonal cycle
         seasonal = 10 * np.sin(2 * np.pi * t / 12.0)
@@ -151,12 +131,12 @@ def test_complex_scenarios():
         # Add spatial variation
         for j, lat in enumerate(lats):
             for k, lon in enumerate(lons):
-                temp_data[i, j, k] = seasonal + trend + 0.1 * lat + 0.05 * lon
+                temp_data[i, j, k, 0] = seasonal + trend + 0.1 * lat + 0.05 * lon
 
     temp_da = xr.DataArray(
         temp_data,
-        coords={"time": time, "lat": lats, "lon": lons},
-        dims=["time", "lat", "lon"],
+        coords={"month": time, "lat": lats, "lon": lons, "ens": ens},
+        dims=["month", "lat", "lon", "ens"],
         name="temperature",
     )
 
@@ -164,8 +144,8 @@ def test_complex_scenarios():
     precip_data = np.abs(np.random.normal(2.0, 0.5, temp_data.shape))
     precip_da = xr.DataArray(
         precip_data,
-        coords={"time": time, "lat": lats, "lon": lons},
-        dims=["time", "lat", "lon"],
+        coords={"time": time, "lat": lats, "lon": lons, "ens": ens},
+        dims=["time", "lat", "lon", "ens"],
         name="precipitation",
     )
 
@@ -175,47 +155,53 @@ def test_complex_scenarios():
     # Test fitting with multiple variables
     training_data = xr.Dataset({"tas": temp_da, "pr": precip_da})
 
-    global_temp = temp_da.mean(["lat", "lon"])
+    # try:
+    generator.fit(training_data, "tas")
+    assert generator.fitted
 
-    try:
-        generator.fit(training_data, global_temp)
-        assert generator.fitted
+    # Test generation with noise_only=True (lines 275-290)
+    test_trajectory = np.linspace(0, 2, 24)  # 2 years
+    noise_realizations = generator.generate_realization(
+        test_trajectory, noise_only=True, n_realizations=3
+    )
 
-        # Test generation with noise_only=True (lines 275-290)
-        test_trajectory = np.linspace(0, 2, 24)  # 2 years
-        noise_realizations = generator.generate_realization(
-            test_trajectory, noise_only=True, n_realizations=3
-        )
+    assert len(noise_realizations) == 3
+    for realization in noise_realizations:
+        assert isinstance(realization, xr.DataArray)
+        assert realization.dims == ("month", "lat", "lon")
+        assert realization.sizes["month"] == 24
+        assert realization.sizes["lat"] == len(lats)
+        assert realization.sizes["lon"] == len(lons)
+    # Test generation with noise_only=False (lines 295-310)
 
-        assert len(noise_realizations) == 3
-        for realization in noise_realizations:
-            assert isinstance(realization, xr.Dataset)
-            assert "tas" in realization.data_vars
-            assert "pr" in realization.data_vars
+    # Test generation with specific random seed (line 276-277)
+    seeded_realization = generator.generate_realization(
+        test_trajectory, random_seed=42, n_realizations=1
+    )
 
-        # Test generation with specific random seed (line 276-277)
-        seeded_realization = generator.generate_realization(
-            test_trajectory, random_seed=42, n_realizations=1
-        )
+    # Same seed should give same results
+    seeded_realization2 = generator.generate_realization(
+        test_trajectory, random_seed=42, n_realizations=1
+    )
 
-        # Same seed should give same results
-        seeded_realization2 = generator.generate_realization(
-            test_trajectory, random_seed=42, n_realizations=1
-        )
+    assert seeded_realization.shape == (24, len(lats), len(lons))
+    assert seeded_realization2.shape == (24, len(lats), len(lons))
+    np.testing.assert_array_equal(seeded_realization, seeded_realization2)
 
-        assert len(seeded_realization) == 1
-        assert len(seeded_realization2) == 1
+    # Test without noise_only (different code path)
+    full_realizations = generator.generate_realization(
+        test_trajectory, noise_only=False, n_realizations=2
+    )
 
-        # Test without noise_only (different code path)
-        full_realizations = generator.generate_realization(
-            test_trajectory, noise_only=False, n_realizations=2
-        )
+    assert len(full_realizations) == 2
+    assert full_realizations[0].dims == ("month", "lat", "lon")
+    assert full_realizations[0].sizes["month"] == 24
+    assert full_realizations[0].sizes["lat"] == len(lats)
+    assert full_realizations[0].sizes["lon"] == len(lons)
 
-        assert len(full_realizations) == 2
-
-    except Exception as e:
-        # Some edge cases may fail in fitting, which is acceptable
-        print(f"Fitting failed with: {e}")
+    # except Exception as e:
+    #     # Some edge cases may fail in fitting, which is acceptable
+    #     print(f"Fitting failed with: {e}")
 
 
 def test_meteor_noise_generator_error_conditions():
@@ -223,63 +209,52 @@ def test_meteor_noise_generator_error_conditions():
     generator = noise_generator.MeteorNoiseGenerator()
 
     # Test generation before fitting (line 273)
-    try:
+    with pytest.raises(
+        ValueError, match="Model must be fitted before generating realizations"
+    ):
         generator.generate_realization(np.array([1, 2, 3]))
-        assert False, "Should raise ValueError"
-    except ValueError as e:
-        assert "must be fitted" in str(e).lower()
-
-    # Test with invalid data types
-    try:
-        invalid_data = "not_xarray_data"
-        global_temp = np.array([1, 2, 3])
-        generator.fit(invalid_data, global_temp)
-    except (AttributeError, TypeError):
-        # Expected to fail with invalid data types
-        pass
 
 
 def test_meteor_noise_generator_feature_creation():
     """Test feature creation methods for coverage."""
 
-    generator = noise_generator.MeteorNoiseGenerator()
+    generator = noise_generator.MeteorNoiseGenerator(n_modes=3)
 
     # Create simple test data to enable feature testing
     time = np.arange(24)
     global_temp = np.linspace(0, 2, 24)
 
     # Test harmonic feature creation (internal method coverage)
-    try:
-        # This tests internal _create_harmonic_features method
-        # We need to fit first to enable internal methods
-        simple_data = xr.DataArray(
-            np.random.rand(24, 2, 2),
-            coords={"time": time, "lat": [0, 1], "lon": [0, 1]},
-            dims=["time", "lat", "lon"],
-        )
-        simple_ds = xr.Dataset({"tas": simple_data})
 
-        generator.fit(simple_ds, global_temp)
+    # This tests internal _create_harmonic_features method
+    # We need to fit first to enable internal methods
+    simple_data = xr.DataArray(
+        np.random.rand(24, 2, 2, 1),
+        coords={"month": time, "lat": [0, 1], "lon": [0, 1], "ens": [1]},
+        dims=["month", "lat", "lon", "ens"],
+    )
+    simple_ds = xr.Dataset({"tas": simple_data})
 
-        if generator.fitted:
-            # Test with different trajectory lengths
-            short_trajectory = np.array([0.5, 1.0])
-            long_trajectory = np.linspace(0, 3, 36)
+    generator.fit(
+        simple_ds, "tas", custom_global_temp=global_temp, save_diagnostics=True
+    )
 
-            # These should work with different lengths
-            short_real = generator.generate_realization(
-                short_trajectory, n_realizations=1
-            )
-            long_real = generator.generate_realization(
-                long_trajectory, n_realizations=1
-            )
+    assert generator.diagnostic_X_features is not None
+    assert generator.diagnostic_t_glob is not None
+    assert generator.diagnostic_time is not None
+    assert generator.diagnostic_seasonal_coef is not None
+    assert generator.diagnostic_seasonal_intercept is not None
+    assert generator.diagnostic_Y_data is not None
 
-            assert len(short_real) == 1
-            assert len(long_real) == 1
+    short_trajectory = np.array([0.5, 1.0])
+    long_trajectory = np.linspace(0, 3, 36)
 
-    except Exception:
-        # Complex fitting may fail, which is acceptable for coverage testing
-        pass
+    # These should work with different lengths
+    short_real = generator.generate_realization(short_trajectory, n_realizations=1)
+    long_real = generator.generate_realization(long_trajectory, n_realizations=1)
+
+    assert len(short_real) == 2
+    assert len(long_real) == 36
 
 
 def test_advanced_noise_generation():
@@ -291,7 +266,7 @@ def test_advanced_noise_generation():
     lons = np.linspace(-90, 90, 4)
 
     # Create temperature data with clear seasonal cycle
-    temp_data = np.zeros((len(time), len(lats), len(lons)))
+    temp_data = np.zeros((len(time), len(lats), len(lons), 1))
     for i, t in enumerate(time):
         seasonal = 5 * np.sin(2 * np.pi * t / 12.0)  # Seasonal cycle
         trend = 0.01 * t  # Small warming trend
@@ -300,47 +275,45 @@ def test_advanced_noise_generation():
 
     temp_da = xr.DataArray(
         temp_data,
-        coords={"time": time, "lat": lats, "lon": lons},
-        dims=["time", "lat", "lon"],
+        coords={"month": time, "lat": lats, "lon": lons, "ens": [1]},
+        dims=["month", "lat", "lon", "ens"],
         name="tas",
     )
-
-    global_temp = temp_da.mean(["lat", "lon"])
     training_data = xr.Dataset({"tas": temp_da})
 
     generator = noise_generator.MeteorNoiseGenerator()
 
-    try:
-        # Test the fitting process
-        generator.fit(training_data, global_temp)
+    # try:
+    # Test the fitting process
+    generator.fit(training_data, "tas")
 
-        if generator.fitted:
-            # Test noise-only generation (lines 285-300)
-            test_trajectory = np.linspace(0, 1, 12)  # 1 year
+    # if generator.fitted:
+    # Test noise-only generation (lines 285-300)
+    test_trajectory = np.linspace(0, 1, 12)  # 1 year
 
-            # Test noise_only=True path - this should hit lines 285-300
-            noise_only_realizations = generator.generate_realization(
-                test_trajectory, noise_only=True, n_realizations=2
-            )
+    # Test noise_only=True path - this should hit lines 285-300
+    noise_only_realizations = generator.generate_realization(
+        test_trajectory, noise_only=True, n_realizations=2
+    )
 
-            assert len(noise_only_realizations) == 2
+    assert len(noise_only_realizations) == 2
 
-            # Test different generation parameters
-            # Test with longer trajectory to hit more complex paths
-            long_trajectory = np.linspace(0, 2, 48)  # 4 years
+    # Test different generation parameters
+    # Test with longer trajectory to hit more complex paths
+    long_trajectory = np.linspace(0, 2, 48)  # 4 years
 
-            long_realizations = generator.generate_realization(
-                long_trajectory, noise_only=False, n_realizations=1
-            )
+    long_realizations = generator.generate_realization(
+        long_trajectory, noise_only=False, n_realizations=1
+    )
 
-            assert len(long_realizations) == 1
+    assert len(long_realizations) == 48
 
-            # Test the synthetic PC generation (lines 390-412)
-            # This should be covered by the internal generation process
+    # Test the synthetic PC generation (lines 390-412)
+    # This should be covered by the internal generation process
 
-    except Exception as e:
-        # Complex VAR fitting may fail, which is acceptable
-        print(f"Advanced fitting failed: {e}")
+    # except Exception as e:
+    #     # Complex VAR fitting may fail, which is acceptable
+    #     print(f"Advanced fitting failed: {e}")
 
 
 def test_baseline_handling():
@@ -362,43 +335,11 @@ def test_baseline_handling():
     generator = MeteorNoiseGenerator(n_modes=2, lag_order=1)
 
     # Test with numeric baseline
-    try:
-        generator.fit(data, "tas", picontrol_baseline=15.0)
-    except Exception:
-        # May fail due to insufficient data, but tests the code path
-        pass
-
-    # Test with None baseline
-    try:
-        generator.fit(data, "tas", picontrol_baseline=None)
-    except Exception:
-        # May fail due to insufficient data, but tests the code path
-        pass
-
+    generator.fit(data, "tas", picontrol_baseline=15.0)
+    generator.fit(data, "tas", picontrol_baseline=None)
     # Test with array-like baseline (tests lines 170-177)
     baseline_array = np.array([14.5, 15.0, 14.8])
-    try:
-        generator.fit(data, "tas", picontrol_baseline=baseline_array)
-        # This should trigger the array baseline handling code path
-    except Exception:
-        # May fail due to insufficient data, but tests the code path
-        pass
-
-
-def test_standalone_functions():
-    """Test standalone functions for training models."""
-    # This will test the import paths and basic structure
-    # without requiring full CMIP6 data
-    from meteor.noise_generator import train_noise_model_from_cmip6
-
-    # Test that the function exists and can be called
-    assert callable(train_noise_model_from_cmip6)
-
-    # Test that we can import and instantiate the data getter
-    assert Cmip6MeteorDataGetter is not None
-
-    # Note: We don't run the actual method as it requires CMIP6 data
-    # But this tests the import paths and method existence
+    generator.fit(data, "tas", picontrol_baseline=baseline_array)
 
 
 def test_custom_global_temp_validation_error():
@@ -470,33 +411,26 @@ def test_noise_only_generation():
     data = data.expand_dims({"ens": [1]})
 
     generator = MeteorNoiseGenerator(n_modes=2, lag_order=1)
+    generator.fit(data, "tas")
 
-    try:
-        # Fit the model
-        generator.fit(data, "tas", use_picontrol_baseline=False)
+    # Test noise-only generation (tests lines 275-295)
+    global_temp = np.linspace(0, 2, 60)  # 5 years
+    noise_only_real = generator.generate_realization(
+        global_temp, noise_only=True, n_realizations=1
+    )
 
-        # Test noise-only generation (tests lines 275-295)
-        global_temp = np.linspace(0, 2, 60)  # 5 years
-        noise_only_real = generator.generate_realization(
-            global_temp, noise_only=True, n_realizations=1
-        )
+    # Should generate something with seasonal patterns but reduced temperature trend
+    assert len(noise_only_real) == 60
+    assert noise_only_real.dims == ("month", "lat", "lon")
 
-        # Should generate something with seasonal patterns but reduced temperature trend
-        assert len(noise_only_real) == 1
-        assert noise_only_real[0].dims == ("month", "lat", "lon")
+    # Compare with full generation
+    full_real = generator.generate_realization(
+        global_temp, noise_only=False, n_realizations=1
+    )
 
-        # Compare with full generation
-        full_real = generator.generate_realization(
-            global_temp, noise_only=False, n_realizations=1
-        )
-
-        assert len(full_real) == 1
-        # Both should have same dimensions but different temperature characteristics
-        assert full_real[0].dims == noise_only_real[0].dims
-
-    except Exception as e:
-        # Some edge cases may fail in fitting, which is acceptable for coverage
-        print(f"Noise-only test failed with: {e}")
+    assert len(full_real) == 60
+    # Both should have same dimensions but different temperature characteristics
+    assert full_real.dims == noise_only_real.dims
 
 
 def test_generate_realization_unfitted_error():

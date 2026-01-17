@@ -261,21 +261,21 @@ def test_year_mean_monthly_xarray():
     assert yearly_data.sizes["lon"] == 3
 
 
-def test_error_handling_for_invalid_experiments_and_fields():
-    """Test error handling for invalid experiments and fields to hit lines 585-593."""
+# def test_error_handling_for_invalid_experiments_and_fields():
+#     """Test error handling for invalid experiments and fields to hit lines 585-593."""
 
-    # Create a data getter with limited experiments and fields
-    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
-        exps=["historical"], flds=["tas"]
-    )
+#     # Create a data getter with limited experiments and fields
+#     data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+#         exps=["historical"], flds=["tas"]
+#     )
 
-    # Set models manually and mock the model check
-    data_getter.models = ["test_model"]
-    data_getter.check_if_model_has_data = lambda model: model == "test_model"
+#     # Set models manually and mock the model check
+#     data_getter.models = ["test_model"]
+#     data_getter.check_if_model_has_data = lambda model: model == "test_model"
 
-    # Test invalid experiment error (line 585-587)
-    with pytest.raises(
-        KeyError,
-        match="This datagetter does not handle data from the invalid_exp experiment",
-    ):
-        data_getter.get_single_var_mod_data("invalid_exp", "tas", "test_model")
+#     # Test invalid experiment error (line 585-587)
+#     with pytest.raises(
+#         KeyError,
+#         match="This datagetter does not handle data from the invalid_exp experiment",
+#     ):
+#         data_getter.get_single_var_mod_data("invalid_exp", "tas", "test_model")

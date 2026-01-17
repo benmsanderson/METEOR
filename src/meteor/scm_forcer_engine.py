@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 from ciceroscm import concentrations_emissions_handler, input_handler
 
+from .scm_input_lib import load_emissions_concentrations_from_name
+
 
 def aerosol_priority_mapping(
     comps, bc_oc_to_co2=True
@@ -176,18 +178,7 @@ class ScmEngineForPatternScaling:
         """
         if cfg is None:
             ih_temp = input_handler.InputHandler({})
-            em_set = ih_temp.read_emissions(
-                os.path.join(
-                    os.path.dirname(__file__), "default_scm_data", "ssp245_em_RCMIP.txt"
-                )
-            )
-            conc_set = input_handler.read_inputfile(
-                os.path.join(
-                    os.path.dirname(__file__),
-                    "default_scm_data",
-                    "ssp245_conc_RCMIP.txt",
-                )
-            )
+            em_set, conc_set = load_emissions_concentrations_from_name("ssp245")
             self.cfg = ScmEngineConfigurations(
                 gaspam_data=input_handler.read_components(
                     os.path.join(

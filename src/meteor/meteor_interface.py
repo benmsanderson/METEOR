@@ -8,9 +8,7 @@ pattern scaling and noise generation capabilities.
 import os
 
 import numpy as np
-import pandas as pd
 import xarray as xr
-from ciceroscm import input_handler
 
 from .cache_handling import CacheHandler
 from .cmip6_meteor_data_getter import Cmip6MeteorDataGetter
@@ -24,6 +22,12 @@ from .geo_data_utils import (
 from .impacts import DegreeDaysCalculator
 from .meteor import MeteorPatternScaling
 from .noise_generator import train_noise_model_from_cmip6, validate_noise_model_cache
+from .scm_input_lib import (
+    load_emissions_concentrations,
+    load_emissions_concentrations_from_name,
+    load_ssp_config,
+    parse_scenario_input,
+)
 from .variable_transforms import get_variable_transform_config
 
 
@@ -51,116 +55,6 @@ def _get_default_config(variable):
         config["transform"] = False
 
     return config
-
-
-def _parse_scenario_input(scenario):
-    """
-    Parse scenario input and return emissions/concentrations info.
-
-    Parameters
-    ----------
-    scenario : str or dict
-        Scenario specification
-
-    Returns
-    -------
-    dict
-        Dictionary with keys:
-        - 'type': 'ssp' or 'custom'
-        - 'name': scenario name
-        - 'emissions': emissions file path or DataFrame (if custom)
-        - 'concentrations': concentrations file path or DataFrame (if custom)
-    """
-    if isinstance(scenario, str):
-        # Standard SSP scenario
-        return {
-            "type": "ssp",
-            "name": scenario,
-            "emissions": None,
-            "concentrations": None,
-        }
-    elif isinstance(scenario, dict):
-        # Custom scenario
-        if "emissions" not in scenario:
-            raise ValueError("Custom scenario dict must include 'emissions' key")
-
-        # Get emissions (path or DataFrame)
-        emissions = scenario["emissions"]
-
-        # Get concentrations (path, DataFrame, or use base_scenario)
-        if "concentrations" in scenario:
-            concentrations = scenario["concentrations"]
-        else:
-            # Use base_scenario concentrations (default: ssp245)
-            base_scenario = scenario.get("base_scenario", "ssp245")
-            cscm_data_dir = os.path.join(os.path.dirname(__file__), "default_scm_data")
-            concentrations = os.path.join(
-                cscm_data_dir, f"{base_scenario}_conc_RCMIP.txt"
-            )
-
-        # Get scenario name for labeling
-        scenario_name = scenario.get("name", "custom")
-
-        return {
-            "type": "custom",
-            "name": scenario_name,
-            "emissions": emissions,
-            "concentrations": concentrations,
-        }
-    else:
-        raise TypeError(f"scenario must be str or dict, got {type(scenario)}")
-
-
-def _load_emissions_concentrations(emissions_spec, concentrations_spec, verbose=False):
-    """
-    Load emissions and concentrations from files or DataFrames.
-
-    Parameters
-    ----------
-    emissions_spec : str or pd.DataFrame
-        Path to emissions file or DataFrame
-    concentrations_spec : str or pd.DataFrame
-        Path to concentrations file or DataFrame
-    verbose : bool
-        Print loading messages
-
-    Returns
-    -------
-    tuple
-        (emissions_data, concentrations_data) as DataFrames
-    """
-    # Load emissions
-    if isinstance(emissions_spec, pd.DataFrame):
-        em_data = emissions_spec
-        if verbose:
-            print("      → Using provided emissions DataFrame")
-    elif isinstance(emissions_spec, str):
-        ih = input_handler.InputHandler({})
-        em_data = ih.read_emissions(emissions_spec)
-        if verbose:
-            print(f"      → Loaded emissions from {os.path.basename(emissions_spec)}")
-    else:
-        raise TypeError(
-            f"emissions must be str path or DataFrame, got {type(emissions_spec)}"
-        )
-
-    # Load concentrations
-    if isinstance(concentrations_spec, pd.DataFrame):
-        conc_data = concentrations_spec
-        if verbose:
-            print("      → Using provided concentrations DataFrame")
-    elif isinstance(concentrations_spec, str):
-        conc_data = input_handler.read_inputfile(concentrations_spec)
-        if verbose:
-            print(
-                f"      → Loaded concentrations from {os.path.basename(concentrations_spec)}"
-            )
-    else:
-        raise TypeError(
-            f"concentrations must be str path or DataFrame, got {type(concentrations_spec)}"
-        )
-
-    return em_data, conc_data
 
 
 class MeteorInterface:
@@ -454,7 +348,7 @@ class MeteorInterface:
             training_data = self.data_getter.prepare_pattern_scaling_training_data(
                 self.model, "ssp245"
             )
-            ssp_config = self.data_getter.load_ssp_config("ssp245")
+            ssp_config = load_ssp_config("ssp245")
 
         # Create pattern scaling model
         self.pattern_models[variable] = MeteorPatternScaling(
@@ -513,15 +407,9 @@ class MeteorInterface:
             # ✅ Generate pattern scaling prediction for custom_global_temp
             # This ensures noise model training uses same temperature trajectory as generation
 
-            cscm_data_dir = os.path.join(os.path.dirname(__file__), "default_scm_data")
-            conc_file = os.path.join(
-                cscm_data_dir, f"{training_scenario}_conc_RCMIP.txt"
+            em_data, conc_data = load_emissions_concentrations_from_name(
+                training_scenario
             )
-            em_file = os.path.join(cscm_data_dir, f"{training_scenario}_em_RCMIP.txt")
-
-            ih = input_handler.InputHandler({})
-            conc_data = input_handler.read_inputfile(conc_file)
-            em_data = ih.read_emissions(em_file)
 
             # Generate pattern prediction
             pattern_model = self.pattern_models[variable]
@@ -683,7 +571,7 @@ class MeteorInterface:
             n_realizations = 1
 
         # Parse scenario to get name for display
-        scenario_info = _parse_scenario_input(scenario)
+        scenario_info = parse_scenario_input(scenario)
         scenario_name = scenario_info["name"]
 
         # Check all variables are trained
@@ -806,7 +694,7 @@ class MeteorInterface:
             (monthly_prediction_sliced, monthly_warming_sliced, em_data, conc_data)
         """
         # Parse scenario input
-        scenario_info = _parse_scenario_input(scenario)
+        scenario_info = parse_scenario_input(scenario)
         scenario_name = scenario_info["name"]
 
         if verbose:
@@ -822,16 +710,10 @@ class MeteorInterface:
         # Load forcing data
         if scenario_info["type"] == "ssp":
             # Standard SSP scenario
-            cscm_data_dir = os.path.join(os.path.dirname(__file__), "default_scm_data")
-            conc_file = os.path.join(cscm_data_dir, f"{scenario_name}_conc_RCMIP.txt")
-            em_file = os.path.join(cscm_data_dir, f"{scenario_name}_em_RCMIP.txt")
-
-            ih = input_handler.InputHandler({})
-            conc_data = input_handler.read_inputfile(conc_file)
-            em_data = ih.read_emissions(em_file)
+            em_data, conc_data = load_emissions_concentrations_from_name(scenario_name)
         else:
             # Custom scenario
-            em_data, conc_data = _load_emissions_concentrations(
+            em_data, conc_data = load_emissions_concentrations(
                 scenario_info["emissions"],
                 scenario_info["concentrations"],
                 verbose=verbose,
@@ -978,7 +860,7 @@ class MeteorInterface:
             with shape (n_realizations, n_months)
         """
         # Parse scenario to get the actual name (handle both string and dict)
-        scenario_info = _parse_scenario_input(scenario)
+        scenario_info = parse_scenario_input(scenario)
         scenario_name = scenario_info["name"]
 
         # For custom scenarios, use ssp245 as the training scenario

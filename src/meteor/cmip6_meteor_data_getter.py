@@ -9,7 +9,6 @@ import gcsfs
 import numpy as np
 import pandas as pd
 import xarray as xr
-from ciceroscm import input_handler
 
 from .cache_handling import CacheHandler
 
@@ -883,83 +882,6 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             f"   ✅ Training data prepared for experiments: {list(training_data.keys())}"
         )
         return training_data
-
-    # TODO: Move out of class and possibly into new module for SCM data handling
-    def load_ssp_config(self, scenario="ssp245", nystart=1750, nyend=2100):
-        """
-        Load CICERO-SCM forcing data and create configuration for pattern scaling.
-
-        Loads concentration and emission data for a specified SSP scenario
-        from the default METEOR data directory and creates a configuration
-        dictionary for use with METEOR pattern scaling models.
-
-        Parameters
-        ----------
-        scenario : str, optional
-            SSP scenario name. Default is "ssp245".
-            Common options: "ssp126", "ssp245", "ssp370", "ssp585"
-        nystart : int, optional
-            Start year for the simulation. Default is 1750.
-        nyend : int, optional
-            End year for the simulation. Default is 2100.
-
-        Returns
-        -------
-        dict
-            Configuration dictionary with keys:
-            - emstart: Emission start year (1850)
-            - nystart: Simulation start year
-            - nyend: Simulation end year
-            - conc_run: Whether to run with concentrations (False)
-            - concentrations_data: Loaded concentration data
-            - emissions_data: Loaded emission data
-
-        Examples
-        --------
-        >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
-        >>> config = data_getter.load_ssp_config("ssp245")
-        >>> print(config.keys())
-        dict_keys(['emstart', 'nystart', 'nyend', 'conc_run', 'concentrations_data', 'emissions_data'])
-        """
-        print(f"📥 Loading CICERO-SCM forcing data for {scenario}...")
-
-        # Find the repository root to locate default_scm_data
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        scm_data_dir = os.path.join(current_dir, "default_scm_data")
-
-        # Load concentration data
-        conc_file = os.path.join(scm_data_dir, f"{scenario}_conc_RCMIP.txt")
-        if not os.path.exists(conc_file):
-            raise FileNotFoundError(
-                f"Concentration file not found: {conc_file}\n"
-                f"Available scenarios should be in: {scm_data_dir}"
-            )
-        scen_conc = input_handler.read_inputfile(conc_file)
-
-        # Load emission data
-        em_file = os.path.join(scm_data_dir, f"{scenario}_em_RCMIP.txt")
-        if not os.path.exists(em_file):
-            raise FileNotFoundError(
-                f"Emission file not found: {em_file}\n"
-                f"Available scenarios should be in: {scm_data_dir}"
-            )
-        ih_temp = input_handler.InputHandler({})
-        scen_em = ih_temp.read_emissions(em_file)
-
-        ssp_config = {
-            "emstart": 1850,
-            "nystart": nystart,
-            "nyend": nyend,
-            "conc_run": False,
-            "concentrations_data": scen_conc,
-            "emissions_data": scen_em,
-        }
-
-        print(f"   ✅ Loaded {len(scen_conc)} concentration records")
-        print(f"   ✅ Loaded {len(scen_em)} emission records")
-        print(f"   ✅ Config: {nystart}-{nyend}, emissions start: 1850")
-
-        return ssp_config
 
     def validate_pattern_scaling_cache(self, cache_file, model_name, scenario="aer"):
         """

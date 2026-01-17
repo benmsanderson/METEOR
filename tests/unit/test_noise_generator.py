@@ -155,7 +155,6 @@ def test_complex_scenarios():
     # Test fitting with multiple variables
     training_data = xr.Dataset({"tas": temp_da, "pr": precip_da})
 
-    # try:
     generator.fit(training_data, "tas")
     assert generator.fitted
 
@@ -283,7 +282,6 @@ def test_advanced_noise_generation():
 
     generator = noise_generator.MeteorNoiseGenerator()
 
-    # try:
     # Test the fitting process
     generator.fit(training_data, "tas")
 

@@ -100,21 +100,13 @@ def test_scm_forcer_engine_edge_cases():
     sefps = scm_forcer_engine.ScmEngineForPatternScaling(None)
 
     # Test with single scenario
-    try:
-        single_scaling = sefps.run_to_get_scaling(["base"])
-        assert len(single_scaling) == 1
-        assert np.allclose(single_scaling[0], [0.0])
-    except Exception:
-        # May not support single scenario
-        pass
+    single_scaling = sefps.run_to_get_scaling(["base"])
+    assert len(single_scaling) == 1
+    assert np.allclose(single_scaling[0], [0.0])
 
     # Test with repeated scenarios
-    try:
-        repeated_scaling = sefps.run_to_get_scaling(["base", "base", "co2x2"])
-        assert len(repeated_scaling) == 3
-    except Exception:
-        # May not support repeated scenarios
-        pass
+    repeated_scaling = sefps.run_to_get_scaling(["base", "base", "co2x2"])
+    assert len(repeated_scaling) == 3
 
 
 def test_scm_forcer_engine_numerical_stability():
@@ -148,10 +140,6 @@ def test_scm_engine_per_forcer_results():
     sefps = scm_forcer_engine.ScmEngineForPatternScaling(None)
 
     # Test that per-forcer results method exists and runs
-    try:
-        per_forcer_results = sefps.run_and_return_per_forcer_results(["base", "co2x2"])
-        # Should return some result structure
-        assert per_forcer_results is not None
-    except Exception:
-        # Method may not be fully implemented or require specific setup
-        pass
+    per_forcer_results = sefps.run_and_return_per_forcer_results(["base", "co2x2"])
+    # Should return some result structure
+    assert per_forcer_results is not None

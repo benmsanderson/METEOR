@@ -1,7 +1,7 @@
 """Tests for the main METEOR package initialization."""
 
 
-def test_version_attribute(self):
+def test_version_attribute():
     """Test that version attribute exists."""
     import meteor
 
@@ -10,7 +10,7 @@ def test_version_attribute(self):
     assert len(meteor.__version__) > 0
 
 
-def test_submodules_available(self):
+def test_submodules_available():
     """Test that submodules are accessible."""
     import meteor
 

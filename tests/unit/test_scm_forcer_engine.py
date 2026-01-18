@@ -1,10 +1,55 @@
 import numpy as np
+import pandas as pd
 
 from meteor import scm_forcer_engine
 from meteor.scm_forcer_engine import (
+    ScmEngineConfigurations,
     ScmEngineForPatternScaling,
     aerosol_priority_mapping,
 )
+
+
+def test_scm_engine_configurations():
+    sec = ScmEngineConfigurations(
+        gaspam_data=pd.DataFrame({"A": [1, 2], "B": [3, 4]}),
+        concentrations_data=pd.DataFrame(
+            {"CO2": np.ones(151) * 370}, index=np.arange(1950, 2101)
+        ),
+        emissions_data=pd.DataFrame(
+            {"CO2": np.ones(151) * 35}, index=np.arange(1950, 2101)
+        ),
+    )
+    assert sec.emstart == 2000
+    assert sec.nystart == 1950
+    assert sec.idtm == 24
+    assert sec.conc_run
+    assert all((sec.gaspam_data["A"] - [1, 2]) == 0)
+    assert sec.nat_ch4_data.shape == (151, 1)
+    assert all((sec.nat_ch4_data["CH4"]) == 242.09)
+    assert all(sec.nat_n2o_data["N2O"] == 11.7027)
+    sec = ScmEngineConfigurations(
+        gaspam_data=pd.DataFrame({"A": [1, 2], "B": [3, 4]}),
+        concentrations_data=pd.DataFrame(
+            {"CO2": np.ones(151) * 370}, index=np.arange(1950, 2101)
+        ),
+        emissions_data=pd.DataFrame(
+            {"CO2": np.ones(151) * 35}, index=np.arange(1950, 2101)
+        ),
+        nat_ch4_data=pd.DataFrame(
+            {"CH4": np.ones(151) * 230}, index=np.arange(1950, 2101)
+        ),
+        nat_n2o_data=pd.DataFrame(
+            {"N2O": np.ones(151) * 12}, index=np.arange(1950, 2101)
+        ),
+    )
+    assert sec.emstart == 2000
+    assert sec.nystart == 1950
+    assert sec.idtm == 24
+    assert sec.conc_run
+    assert all((sec.gaspam_data["A"] - [1, 2]) == 0)
+    assert sec.nat_ch4_data.shape == (151, 1)
+    assert all((sec.nat_ch4_data["CH4"]) == 230)
+    assert all(sec.nat_n2o_data["N2O"] == 12)
 
 
 def test_forcer_engine():

@@ -394,7 +394,7 @@ class MeteorInterface:
         )
 
         if is_valid:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print("      ✓ Using cached noise model")
             self.noise_models[variable] = cached_model
         else:
@@ -564,7 +564,7 @@ class MeteorInterface:
         """
         # Handle climatology-only mode
         if not include_noise:
-            if verbose and n_realizations > 1:
+            if verbose and n_realizations > 1:  # pragma: no cover
                 print(
                     "Note: include_noise=False, forcing n_realizations=1 (climatology only)"
                 )
@@ -596,7 +596,7 @@ class MeteorInterface:
 
             # Generate timeseries if requested
             if timeseries:
-                if verbose:
+                if verbose:  # pragma: no cover
                     print(f"   → Time series: {len(timeseries)} aggregations")
                 var_output.timeseries = self._generate_timeseries(
                     variable,
@@ -612,7 +612,7 @@ class MeteorInterface:
 
             # Generate gridded if requested
             if gridded:
-                if verbose:
+                if verbose:  # pragma: no cover
                     print("   → Gridded outputs...")
                 var_output.gridded = self._generate_gridded(
                     variable,
@@ -627,7 +627,7 @@ class MeteorInterface:
 
             # Apply impacts if requested
             if impacts and variable in impacts:
-                if verbose:
+                if verbose:  # pragma: no cover
                     print("   → Computing impact metrics...")
                 var_output.impacts = self._apply_impacts(
                     var_output,
@@ -703,7 +703,7 @@ class MeteorInterface:
                     f"      → Computing pattern scaling for {variable}, {scenario_name}..."
                 )
             else:
-                print(
+                print(  # pragma: no cover
                     f"      → Computing pattern scaling for {variable}, custom scenario '{scenario_name}'..."
                 )
 
@@ -749,7 +749,7 @@ class MeteorInterface:
             # Extend data to 2100 if needed (hold last value constant)
             # This allows the SCM to run to its default nyend=2100
             if data_end < 2100:
-                if verbose:
+                if verbose:  # pragma: no cover
                     print(
                         f"      → Emissions data ends at {data_end}, extending to 2100 (holding final values)"
                     )
@@ -794,7 +794,7 @@ class MeteorInterface:
         if scenario_info["type"] == "custom" and actual_data_end is not None:
             # Clip to actual data availability
             effective_end_year = min(end_year, actual_data_end)
-            if effective_end_year < end_year and verbose:
+            if effective_end_year < end_year and verbose:  # pragma: no cover
                 print(
                     f"      → Clipping output to {start_year}-{effective_end_year} (data availability)"
                 )
@@ -914,7 +914,7 @@ class MeteorInterface:
                 random_seed=None,  # Can expose this as parameter if needed
             )
         else:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print("      → Climatology only (no stochastic variability)")
 
         # Generate outputs for each aggregation
@@ -1129,10 +1129,10 @@ class MeteorInterface:
 
         # Generate stochastic PCs (or skip if climatology only)
         if include_noise:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(f"      → Generating {n_realizations} gridded realizations")
         else:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print("      → Generating gridded climatology (no noise)")
             n_realizations = 1  # Force to 1 for climatology
 
@@ -1146,7 +1146,7 @@ class MeteorInterface:
 
         # Annual means
         if "annual" in gridded_spec:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(
                     f"      → Extracting annual means for {len(gridded_spec['annual'])} years"
                 )
@@ -1188,7 +1188,7 @@ class MeteorInterface:
                             realization=[0]
                         )
                 else:
-                    if verbose:
+                    if verbose:  # pragma: no cover
                         print(
                             f"        ⚠️  Year {year} outside range {start_year}-{end_year}"
                         )
@@ -1196,7 +1196,7 @@ class MeteorInterface:
 
         # Monthly fields
         if "monthly" in gridded_spec:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(
                     f"      → Extracting monthly fields for {len(gridded_spec['monthly'])} years"
                 )
@@ -1234,7 +1234,7 @@ class MeteorInterface:
 
                     monthly_fields[year] = year_months
                 else:
-                    if verbose:
+                    if verbose:  # pragma: no cover
                         print(
                             f"        ⚠️  Year {year} outside range {start_year}-{end_year}"
                         )
@@ -1242,7 +1242,7 @@ class MeteorInterface:
 
         # Climatologies (multi-year means)
         if "climatology" in gridded_spec:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(
                     f"      → Computing {len(gridded_spec['climatology'])} climatological means"
                 )
@@ -1286,12 +1286,12 @@ class MeteorInterface:
                                 clim_realizations[0].expand_dims(realization=[0])
                             )
                     else:
-                        if verbose:
+                        if verbose:  # pragma: no cover
                             print(
                                 f"        ⚠️  Period {clim_start}-{clim_end} outside range"
                             )
                 else:
-                    if verbose:
+                    if verbose:  # pragma: no cover
                         print(f"        ⚠️  Invalid climatology period: {period}")
             results["climatology"] = climatology_fields
 
@@ -1412,11 +1412,11 @@ class MeteorInterface:
                     impacts["hdd"][key] = np.array(hdd_results)
                     impacts["cdd"][key] = np.array(cdd_results)
 
-                    if verbose:
+                    if verbose:  # pragma: no cover
                         print(f"         • HDD for {key}")
                         print(f"         • CDD for {key}")
             except Exception as e:
-                if verbose:
+                if verbose:  # pragma: no cover
                     print(f"      ⚠️  Error calculating degree days: {e}")
 
         return impacts

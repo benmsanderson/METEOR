@@ -1,8 +1,10 @@
 import os
+import tempfile
 from functools import partial
 
 import numpy as np
 import pytest
+import xarray as xr
 from ciceroscm import input_handler
 
 from meteor import Cmip6MeteorDataGetter, MeteorPatternScaling, geo_data_utils
@@ -54,27 +56,48 @@ def test_pattern_from_cmip6(test_data_dir):
         enable_cache=True,
         cache_dir=os.path.join(test_data_dir, "light_mock_cache"),
     )
-    canesm_basic_pattern = MeteorPatternScaling(
-        "cmip6-CanESM5-basic",
-        {"tas": 2, "pr": 2},
-        partial(datagetter.make_meteor_training_data, model="CanESM5"),
-        from_file=False,
-        exp_list=["base", "co2x4"],
-    )
-    assert canesm_basic_pattern.name == "cmip6-CanESM5-basic"
-    assert "base" in canesm_basic_pattern.pattern_dict
-    assert "tas" in canesm_basic_pattern.pattern_dict["co2x4"]
-    assert "outp" in canesm_basic_pattern.pattern_dict["co2x4"]["pr"]
-    conc_data = input_handler.read_inputfile(
-        os.path.join(test_data_dir, "rcp85_conc_RCMIP.txt")
-    )
-    ih = input_handler.InputHandler({})
-    em_data = ih.read_emissions(os.path.join(test_data_dir, "rcp85_em_RCMIP.txt"))
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_pattern_cache = os.path.join(temp_dir, "pattern_cache")
+        canesm_basic_pattern = MeteorPatternScaling(
+            "cmip6-CanESM5-basic",
+            {"tas": 2, "pr": 2},
+            partial(datagetter.make_meteor_training_data, model="CanESM5"),
+            from_file=False,
+            exp_list=["base", "co2x4"],
+            cache_dir=temp_pattern_cache,
+        )
+        assert canesm_basic_pattern.name == "cmip6-CanESM5-basic"
+        assert "base" in canesm_basic_pattern.pattern_dict
+        assert "tas" in canesm_basic_pattern.pattern_dict["co2x4"]
+        assert "outp" in canesm_basic_pattern.pattern_dict["co2x4"]["pr"]
+        conc_data = input_handler.read_inputfile(
+            os.path.join(test_data_dir, "rcp85_conc_RCMIP.txt")
+        )
+        ih = input_handler.InputHandler({})
+        em_data = ih.read_emissions(os.path.join(test_data_dir, "rcp85_em_RCMIP.txt"))
 
-    patterns = canesm_basic_pattern.predict_from_combined_experiment(
-        em_data, conc_data, ["pr", "tas"]
-    )
-    assert set(patterns.keys()) == set(["pr", "tas"])
+        patterns = canesm_basic_pattern.predict_from_combined_experiment(
+            em_data, conc_data, ["pr", "tas"]
+        )
+        assert set(patterns.keys()) == set(["pr", "tas"])
+
+        canesm_basic_pattern_loaded = MeteorPatternScaling(
+            "cmip6-CanESM5-basic",
+            {"tas": 2, "pr": 2},
+            partial(datagetter.make_meteor_training_data, model="CanESM5"),
+            from_file=True,
+            exp_list=["base", "co2x4"],
+            cache_dir=temp_pattern_cache,
+        )
+        assert canesm_basic_pattern_loaded.name == "cmip6-CanESM5-basic"
+        assert "base" in canesm_basic_pattern_loaded.pattern_dict
+        assert "tas" in canesm_basic_pattern_loaded.pattern_dict["co2x4"]
+        assert "outp" in canesm_basic_pattern_loaded.pattern_dict["co2x4"]["pr"]
+
+        np.testing.assert_equal(
+            canesm_basic_pattern.pattern_dict["co2x4"]["tas"]["outp"],
+            canesm_basic_pattern_loaded.pattern_dict["co2x4"]["tas"]["outp"],
+        )
 
 
 def test_sulfate_from_residual_functionality(test_data_dir):
@@ -199,6 +222,32 @@ def test_sulfate_from_residual_functionality(test_data_dir):
         em_data, conc_data, ["tas"], return_patterns_per_mode=True
     )
     assert np.all(patterns["tas"].shape == (1, 351, 3, 3))
+
+    with pytest.raises(
+        ValueError, match="annual_prediction must be an xarray DataArray"
+    ):
+        canesm_anomsulf_pattern.to_monthly("Hello")
+    with pytest.raises(
+        ValueError, match="annual_prediction must have a 'time' dimension"
+    ):
+        canesm_anomsulf_pattern.to_monthly(
+            xr.DataArray(data=np.ones((2, 2)), dims=("lat", "lon"))
+        )
+
+    monthly_pred = canesm_anomsulf_pattern.to_monthly(
+        xr.DataArray(
+            data=np.ones((10, 3, 3)),
+            dims=("time", "lat", "lon"),
+            attrs={"description": "Test data"},
+        )
+    )
+    assert monthly_pred.shape == (120, 3, 3)
+    print(monthly_pred.attrs["description"])
+    assert (
+        monthly_pred.attrs["description"]
+        == "Test data (converted from annual to monthly by repeating values)"
+    )
+    assert monthly_pred.attrs["converted_to_monthly"]
 
 
 def test_return_separate_per_mode_patterns(test_data_dir):

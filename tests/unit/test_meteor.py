@@ -8,6 +8,7 @@ import xarray as xr
 
 from meteor.meteor import (
     Meteor,
+    MeteorPatternScaling,
     calculate_residual_and_do_crude_nan_cut,
     read_training_data,
 )
@@ -425,3 +426,28 @@ def test_unfitted_ensemble_generator_error():
     # Attempt to use without fitting should raise RuntimeError (tests lines 70-75)
     with pytest.raises(RuntimeError, match="Model is not fitted"):
         generator.add_realisation()
+
+
+def test_error_handling_in_meteor_pattern_scaling_init():
+    """Test error handling in Meteor initialization."""
+
+    # Test with sending no patternflds
+    with pytest.raises(
+        ValueError, match="patternflds is required when training a new model"
+    ):
+        MeteorPatternScaling("miss_patternflds")
+
+    # Test with missing get_training_file_from_exp
+    with pytest.raises(
+        ValueError,
+        match="get_training_file_from_exp is required when training a new model ",
+    ):
+        MeteorPatternScaling("miss_get_training", patternflds=["tas"])
+
+    # Test with missing exp_list
+    with pytest.raises(
+        ValueError, match="exp_list is required when training a new model "
+    ):
+        MeteorPatternScaling(
+            "miss_exp_list", patternflds=["pr"], get_training_file_from_exp="Hello"
+        )

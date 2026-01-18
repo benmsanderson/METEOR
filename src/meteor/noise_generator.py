@@ -91,6 +91,21 @@ class MeteorNoiseGenerator:
         self.diagnostic_seasonal_intercept = None
         self.diagnostic_Y_data = None
 
+    def _fix_coords_to_np(self):
+        """Ensure coordinates are NumPy arrays for serialization."""
+        if hasattr(self.coords["lat"], "values"):
+            self.coords["lat"] = self.coords["lat"].values
+        if hasattr(self.coords["lon"], "values"):
+            self.coords["lon"] = self.coords["lon"].values
+        if not isinstance(self.coords["lat"], np.ndarray):
+            raise ValueError(
+                "Latitude coordinates must be NumPy arrays or xarray.DataArray"
+            )
+        if not isinstance(self.coords["lon"], np.ndarray):
+            raise ValueError(
+                "Longitude coordinates must be NumPy arrays or xarray.DataArray"
+            )
+
     def _create_harmonic_features(self, time, t_glob):
         """
         Create harmonic features for seasonal cycle modeling.
@@ -305,6 +320,7 @@ class MeteorNoiseGenerator:
             "lon": ds.coords["lon"],
             "month": ds.coords["month"],
         }
+        self._fix_coords_to_np()
 
         # Store variable name for future reference
         self.variable_name = variable_name
@@ -587,10 +603,7 @@ class MeteorNoiseGenerator:
     # TODO check if we can use the weights calculator from geo_data_utils.py
     def _compute_spatial_weights(self):
         """Compute area-weighted spatial averaging weights (cosine of latitude)."""
-        lats = self.coords["lat"]
-        if hasattr(lats, "values"):
-            lats = lats.values
-        return np.cos(np.deg2rad(lats))
+        return np.cos(np.deg2rad(self.coords["lat"]))
 
     def _find_nearest_gridpoint(self, target_lat, target_lon):
         """
@@ -610,16 +623,14 @@ class MeteorNoiseGenerator:
         """
         lats = self.coords["lat"]
         lons = self.coords["lon"]
-        if hasattr(lats, "values"):
-            lats = lats.values
-        if hasattr(lons, "values"):
-            lons = lons.values
 
         # Normalize longitude to 0-360 range
         target_lon = target_lon % 360
         lons_normalized = lons % 360
 
         # Find nearest latitude
+        print(lats)
+        print(target_lat)
         lat_idx = np.argmin(np.abs(lats - target_lat))
 
         # Find nearest longitude
@@ -1000,16 +1011,10 @@ class MeteorNoiseGenerator:
             raise ValueError(f"AR6 region '{region}' not found")
 
         # Create mask on this grid
-        lons = (
-            self.coords["lon"].values
-            if hasattr(self.coords["lon"], "values")
-            else self.coords["lon"]
-        )
-        lats = (
-            self.coords["lat"].values
-            if hasattr(self.coords["lat"], "values")
-            else self.coords["lat"]
-        )
+        lons = self.coords["lon"]
+
+        lats = self.coords["lat"]
+
         lon_2d, lat_2d = np.meshgrid(lons, lats)
         mask_3d = ar6_regions.mask(lon_2d, lat_2d)
         region_mask = mask_3d == region_number
@@ -1067,7 +1072,7 @@ class MeteorNoiseGenerator:
         self.varx_results = model_data["varx_results"]
         self.coords = model_data["coords"]
         self.fitted = model_data["fitted"]
-
+        self._fix_coords_to_np()
         # Load variable_name if available (for backward compatibility)
         self.variable_name = model_data.get("variable_name", None)
 

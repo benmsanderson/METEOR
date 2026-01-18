@@ -79,9 +79,21 @@ def test_meteor_noise_generator_custom_global_temp_validation():
         generator.fit(data, "tas", custom_global_temp=custom_temp)
 
 
-def test_meteor_noise_generator_save_load():
+def test_meteor_noise_generator_save_load_errors():
     """Test save and load functionality."""
     generator = MeteorNoiseGenerator()
+    generator.coords = {"lat": np.array([0, 1]), "lon": "Hello"}
+    with pytest.raises(
+        ValueError,
+        match="Longitude coordinates must be NumPy arrays or xarray.DataArray",
+    ):
+        generator._fix_coords_to_np()
+    generator.coords = {"lat": "Hello", "lon": np.array([10, 20])}
+    with pytest.raises(
+        ValueError,
+        match="Latitude coordinates must be NumPy arrays or xarray.DataArray",
+    ):
+        generator._fix_coords_to_np()
 
     # Test loading non-existent file
     with pytest.raises(FileNotFoundError):
@@ -160,6 +172,11 @@ def test_complex_scenarios():
 
     # Test generation with noise_only=True (lines 275-290)
     test_trajectory = np.linspace(0, 2, 24)  # 2 years
+
+    with pytest.raises(ValueError, match="AR6 region 'XYZ' not found"):
+        generator.generate_regional_mean_realizations(
+            test_trajectory, n_realizations=1, region="XYZ"
+        )
     noise_realizations = generator.generate_realization(
         test_trajectory, noise_only=True, n_realizations=3
     )

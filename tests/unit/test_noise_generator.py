@@ -198,9 +198,25 @@ def test_complex_scenarios():
     assert full_realizations[0].sizes["lat"] == len(lats)
     assert full_realizations[0].sizes["lon"] == len(lons)
 
+    stoch_real = generator.generate_stochastic_pcs(
+        test_trajectory, n_realizations=1, random_seed=47
+    )
+    assert stoch_real.shape == (len(test_trajectory), generator.n_modes)
+    stoch_real2 = generator.generate_stochastic_pcs(
+        test_trajectory, n_realizations=1, random_seed=47
+    )
+    np.testing.assert_array_equal(stoch_real, stoch_real2)
+    stoch_real3 = generator.generate_stochastic_pcs(
+        test_trajectory, n_realizations=1, random_seed=48
+    )
+    assert not np.array_equal(stoch_real, stoch_real3)
     # except Exception as e:
     #     # Some edge cases may fail in fitting, which is acceptable
     #     print(f"Fitting failed with: {e}")
+    point_real = generator.generate_regional_mean_realizations(
+        test_trajectory, lat=60, lon=30, n_realizations=1
+    )
+    assert point_real.shape == (len(test_trajectory),)
 
 
 def test_meteor_noise_generator_error_conditions():

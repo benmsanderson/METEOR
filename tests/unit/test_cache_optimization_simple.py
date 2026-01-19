@@ -13,7 +13,7 @@ import tempfile
 import numpy as np
 import xarray as xr
 
-from meteor.cmip6_meteor_data_getter import Cmip6MeteorDataGetter
+from meteor.cache_handling import CacheHandler
 
 
 class TestCacheOptimizationFunctional:
@@ -24,11 +24,9 @@ class TestCacheOptimizationFunctional:
         self.temp_cache_dir = tempfile.mkdtemp()
 
         # Create a minimal data getter for testing
-        self.data_getter = Cmip6MeteorDataGetter(
-            exps=["piControl"],
-            flds=["tas"],
+        self.cache_handler = CacheHandler(
             cache_dir=self.temp_cache_dir,
-            enable_cache=True,  # Enable cache for testing
+            purpose="cmip6",
         )
 
     def teardown_method(self):
@@ -42,7 +40,7 @@ class TestCacheOptimizationFunctional:
 
         # Create a corrupted cache file (empty dataset)
         cache_file = os.path.join(
-            self.temp_cache_dir, "CanESM5_piControl_tas_monthly.nc"
+            self.temp_cache_dir, "cmip6", "CanESM5_piControl_tas_monthly.nc"
         )
         corrupted_data = xr.Dataset()  # Empty dataset - realistic corruption scenario
         corrupted_data.to_netcdf(cache_file)
@@ -51,7 +49,7 @@ class TestCacheOptimizationFunctional:
         assert os.path.exists(cache_file)
 
         # The key test: does the data getter detect corruption and clean it up?
-        is_cached = self.data_getter.is_cached(
+        is_cached = self.cache_handler.check_if_cmip6_cached(
             "get_single_var_mod_data_monthly", "piControl", "tas", "CanESM5"
         )
 
@@ -81,12 +79,12 @@ class TestCacheOptimizationFunctional:
         valid_data.attrs["cached_by_meteor"] = "true"
 
         cache_file = os.path.join(
-            self.temp_cache_dir, "CanESM5_piControl_tas_monthly.nc"
+            self.temp_cache_dir, "cmip6", "CanESM5_piControl_tas_monthly.nc"
         )
         valid_data.to_netcdf(cache_file)
 
         # The key test: does the data getter accept valid files?
-        is_cached = self.data_getter.is_cached(
+        is_cached = self.cache_handler.check_if_cmip6_cached(
             "get_single_var_mod_data_monthly", "piControl", "tas", "CanESM5"
         )
 
@@ -120,7 +118,7 @@ class TestCacheOptimizationFunctional:
         wrong_var_data.to_netcdf(cache_file)
 
         # Should reject file with wrong variable
-        is_cached = self.data_getter.is_cached(
+        is_cached = self.cache_handler.check_if_cmip6_cached(
             "get_single_var_mod_data_monthly", "piControl", "tas", "CanESM5"
         )
 
@@ -132,11 +130,9 @@ def test_integrated_cache_workflow():
 
     with tempfile.TemporaryDirectory() as temp_dir:
         # Create data getter with temporary cache
-        data_getter = Cmip6MeteorDataGetter(
-            exps=["piControl"],
-            flds=["tas"],
+        cache_handler = CacheHandler(
+            purpose="cmip6",
             cache_dir=temp_dir,
-            enable_cache=True,  # Enable cache for testing
         )
 
         # Create a realistic mock cache file
@@ -157,17 +153,17 @@ def test_integrated_cache_workflow():
         mock_monthly_data.attrs["original_type"] = "DataArray"
         mock_monthly_data.attrs["cached_by_meteor"] = "true"
 
-        cache_file = os.path.join(temp_dir, "CanESM5_piControl_tas_monthly.nc")
+        cache_file = os.path.join(temp_dir, "cmip6", "CanESM5_piControl_tas_monthly.nc")
         mock_monthly_data.to_netcdf(cache_file)
 
         # Test cache detection
-        is_cached = data_getter.is_cached(
+        is_cached = cache_handler.check_if_cmip6_cached(
             "get_single_var_mod_data_monthly", "piControl", "tas", "CanESM5"
         )
         assert is_cached
 
         # Test cache loading
-        cached_data = data_getter._load_from_cache(
+        cached_data = cache_handler._load_from_cmip6_cache(
             "CanESM5_piControl_tas_monthly",
             expected_type="DataArray",
             expected_variable="tas",
@@ -177,6 +173,8 @@ def test_integrated_cache_workflow():
         assert cached_data.name == "tas"
 
         # Verify optimization: only one cache file exists (monthly only)
-        cache_files = [f for f in os.listdir(temp_dir) if f.endswith(".nc")]
+        cache_files = [
+            f for f in os.listdir(os.path.join(temp_dir, "cmip6")) if f.endswith(".nc")
+        ]
         assert len(cache_files) == 1
         assert "monthly" in cache_files[0]

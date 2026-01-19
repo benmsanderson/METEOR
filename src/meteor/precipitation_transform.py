@@ -233,7 +233,7 @@ def fit_distribution_parameters_3d(spatial_data, distribution="gamma"):
                 shape_params[i] = 1.0
                 scale_params[i] = 0.01
 
-            if (i + 1) % 5000 == 0:
+            if (i + 1) % 5000 == 0:  # pragma no cover
                 print(f"  Processed {i + 1}/{n_spatial} grid points...")
 
         params = {

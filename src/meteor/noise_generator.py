@@ -17,6 +17,7 @@ import pickle  # nosec - Used for trusted model serialization only
 import warnings
 
 import numpy as np
+import regionmask
 import xarray as xr
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LinearRegression
@@ -89,6 +90,21 @@ class MeteorNoiseGenerator:
         self.diagnostic_seasonal_coef = None
         self.diagnostic_seasonal_intercept = None
         self.diagnostic_Y_data = None
+
+    def _fix_coords_to_np(self):
+        """Ensure coordinates are NumPy arrays for serialization."""
+        if hasattr(self.coords["lat"], "values"):
+            self.coords["lat"] = self.coords["lat"].values
+        if hasattr(self.coords["lon"], "values"):
+            self.coords["lon"] = self.coords["lon"].values
+        if not isinstance(self.coords["lat"], np.ndarray):
+            raise ValueError(
+                "Latitude coordinates must be NumPy arrays or xarray.DataArray"
+            )
+        if not isinstance(self.coords["lon"], np.ndarray):
+            raise ValueError(
+                "Longitude coordinates must be NumPy arrays or xarray.DataArray"
+            )
 
     def _create_harmonic_features(self, time, t_glob):
         """
@@ -199,6 +215,7 @@ class MeteorNoiseGenerator:
         # Calculate or use provided global temperature
         if custom_global_temp is not None:
             # Validate custom temperature array
+            print("Hello")
             if len(custom_global_temp) != len(time):
                 raise ValueError(
                     f"custom_global_temp length ({len(custom_global_temp)}) "
@@ -223,10 +240,10 @@ class MeteorNoiseGenerator:
                 # Fall back to original method (first 42 years)
                 t_globm = t_globm - t_globm[:500].mean()  # Remove baseline
                 print("   Using first 42 years as baseline")
-
+            print(t_globm)
             # Apply smoothing
             t_glob = (
-                t_globm.rolling(month=60, center=True)
+                t_globm.rolling(month=60, center=True, min_periods=1)
                 .mean()
                 .interpolate_na("month", method="nearest", fill_value="extrapolate")
                 .values
@@ -234,6 +251,8 @@ class MeteorNoiseGenerator:
 
         # Create harmonic features
         X = self._create_harmonic_features(time, t_glob)
+        # print(t_glob)
+        # print(t_globm)
 
         # Save diagnostic outputs if requested
         if save_diagnostics:
@@ -301,6 +320,7 @@ class MeteorNoiseGenerator:
             "lon": ds.coords["lon"],
             "month": ds.coords["month"],
         }
+        self._fix_coords_to_np()
 
         # Store variable name for future reference
         self.variable_name = variable_name
@@ -580,12 +600,10 @@ class MeteorNoiseGenerator:
 
         return synthetic_pcs
 
+    # TODO check if we can use the weights calculator from geo_data_utils.py
     def _compute_spatial_weights(self):
         """Compute area-weighted spatial averaging weights (cosine of latitude)."""
-        lats = self.coords["lat"]
-        if hasattr(lats, "values"):
-            lats = lats.values
-        return np.cos(np.deg2rad(lats))
+        return np.cos(np.deg2rad(self.coords["lat"]))
 
     def _find_nearest_gridpoint(self, target_lat, target_lon):
         """
@@ -605,16 +623,14 @@ class MeteorNoiseGenerator:
         """
         lats = self.coords["lat"]
         lons = self.coords["lon"]
-        if hasattr(lats, "values"):
-            lats = lats.values
-        if hasattr(lons, "values"):
-            lons = lons.values
 
         # Normalize longitude to 0-360 range
         target_lon = target_lon % 360
         lons_normalized = lons % 360
 
         # Find nearest latitude
+        print(lats)
+        print(target_lat)
         lat_idx = np.argmin(np.abs(lats - target_lat))
 
         # Find nearest longitude
@@ -660,6 +676,8 @@ class MeteorNoiseGenerator:
         self._regional_eof_projections[point_id] = eof_point_values
         return eof_point_values
 
+    # TODO region masking and averaging from geo_data_utils.py could be reused here?
+
     def _get_regional_eof_projection(self, region, region_mask=None):
         """
         Get or compute the spatial mean projection of each EOF for a region.
@@ -689,70 +707,9 @@ class MeteorNoiseGenerator:
 
         # Get EOFs reshaped to spatial grid (n_modes, n_lat, n_lon)
         eof_components = self.pca.components_.reshape(self.n_modes, n_lat, n_lon)
-
-        # Compute area weights
-        weights = self._compute_spatial_weights()
-        weight_grid = weights[:, np.newaxis]  # (n_lat, 1) for broadcasting
-
-        # Apply regional mask if needed
-        if region == "global" and region_mask is None:
-            # Global mean: average over all gridpoints
-            # Total weight is sum(lat_weights) * n_lon since weights broadcast across longitude
-            total_weight = np.sum(weights) * n_lon
-            eof_projections = np.array(
-                [
-                    np.sum(eof_components[i] * weight_grid) / total_weight
-                    for i in range(self.n_modes)
-                ]
-            )
-        else:
-            # Regional mean: use mask
-            if region_mask is None:
-                # Use AR6 regions (requires regionmask)
-                try:
-                    import regionmask
-
-                    ar6_regions = regionmask.defined_regions.ar6.all
-
-                    # Find region number
-                    region_number = None
-                    for r in ar6_regions:
-                        if r.abbrev == region:
-                            region_number = r.number
-                            break
-
-                    if region_number is None:
-                        raise ValueError(f"AR6 region '{region}' not found")
-
-                    # Create mask on this grid
-                    lons = (
-                        self.coords["lon"].values
-                        if hasattr(self.coords["lon"], "values")
-                        else self.coords["lon"]
-                    )
-                    lats = (
-                        self.coords["lat"].values
-                        if hasattr(self.coords["lat"], "values")
-                        else self.coords["lat"]
-                    )
-                    lon_2d, lat_2d = np.meshgrid(lons, lats)
-                    mask_3d = ar6_regions.mask(lon_2d, lat_2d)
-                    region_mask = mask_3d == region_number
-
-                except ImportError as exc:
-                    raise ImportError(
-                        "regionmask is required for AR6 regions. "
-                        "Install with: pip install regionmask"
-                    ) from exc
-
-            # Compute weighted mean over region
-            eof_projections = np.zeros(self.n_modes)
-            for i in range(self.n_modes):
-                masked_eof = np.where(region_mask, eof_components[i], np.nan)
-                masked_weights = np.where(region_mask, weight_grid, 0)
-                eof_projections[i] = np.nansum(masked_eof * masked_weights) / np.sum(
-                    masked_weights
-                )
+        eof_projections = self._weighted_mean_over_region(
+            eof_components, None, None, region_mask, region
+        )
 
         # Cache and return
         self._regional_eof_projections[region_id] = eof_projections
@@ -892,59 +849,13 @@ class MeteorNoiseGenerator:
         n_lon = len(self.coords["lon"])
         seasonal_cycle_grid = seasonal_cycle_full.reshape(n_time, n_lat, n_lon)
 
-        if lat is not None and lon is not None:
-            # Point extraction - just get values at the gridpoint
-            lat_idx, lon_idx = self._find_nearest_gridpoint(lat, lon)
-            seasonal_mean = seasonal_cycle_grid[:, lat_idx, lon_idx]
-        elif region == "global" and region_mask is None:
-            # Global mean
-            weights = self._compute_spatial_weights()
-            weight_grid = weights[:, np.newaxis]
-            # Total weight is sum(lat_weights) * n_lon since weights broadcast across longitude
-            total_weight = np.sum(weights) * n_lon
-            seasonal_mean = np.array(
-                [
-                    np.sum(seasonal_cycle_grid[t] * weight_grid) / total_weight
-                    for t in range(n_time)
-                ]
-            )
-        else:
-            # Regional mean
-            weights = self._compute_spatial_weights()
-            weight_grid = weights[:, np.newaxis]
+        if lat is None and lon is None and region != "global" and region_mask is None:
+            # Get mask from AR6 regions
+            region_mask = self._get_ar6_region_mask(region)
 
-            if region_mask is None:
-                # Get mask from AR6 regions
-                import regionmask
-
-                ar6_regions = regionmask.defined_regions.ar6.all
-                region_number = None
-                for r in ar6_regions:
-                    if r.abbrev == region:
-                        region_number = r.number
-                        break
-                lons = (
-                    self.coords["lon"].values
-                    if hasattr(self.coords["lon"], "values")
-                    else self.coords["lon"]
-                )
-                lats = (
-                    self.coords["lat"].values
-                    if hasattr(self.coords["lat"], "values")
-                    else self.coords["lat"]
-                )
-                lon_2d, lat_2d = np.meshgrid(lons, lats)
-                mask_3d = ar6_regions.mask(lon_2d, lat_2d)
-                region_mask = mask_3d == region_number
-
-            seasonal_mean = np.zeros(n_time)
-            for t in range(n_time):
-                masked_data = np.where(region_mask, seasonal_cycle_grid[t], np.nan)
-                masked_weights = np.where(region_mask, weight_grid, 0)
-                seasonal_mean[t] = np.nansum(masked_data * masked_weights) / np.sum(
-                    masked_weights
-                )
-
+        seasonal_mean = self._weighted_mean_over_region(
+            seasonal_cycle_grid, lat, lon, region_mask, region
+        )
         # Compute base climatology (if provided)
         base_mean = None
         if add_base is not None:
@@ -956,33 +867,9 @@ class MeteorNoiseGenerator:
                 base_mean = add_base
             elif add_base.ndim == 3:
                 # Gridded field - extract point or compute regional mean
-                if lat is not None and lon is not None:
-                    # Point extraction
-                    lat_idx, lon_idx = self._find_nearest_gridpoint(lat, lon)
-                    base_mean = add_base[:, lat_idx, lon_idx]
-                elif region == "global" and region_mask is None:
-                    # Global mean
-                    weights = self._compute_spatial_weights()
-                    weight_grid = weights[:, np.newaxis]
-                    # Total weight is sum(lat_weights) * n_lon since weights broadcast across longitude
-                    total_weight = np.sum(weights) * n_lon
-                    base_mean = np.array(
-                        [
-                            np.sum(add_base[t] * weight_grid) / total_weight
-                            for t in range(n_time)
-                        ]
-                    )
-                else:
-                    # Regional mean
-                    weights = self._compute_spatial_weights()
-                    weight_grid = weights[:, np.newaxis]
-                    base_mean = np.zeros(n_time)
-                    for t in range(n_time):
-                        masked_data = np.where(region_mask, add_base[t], np.nan)
-                        masked_weights = np.where(region_mask, weight_grid, 0)
-                        base_mean[t] = np.nansum(masked_data * masked_weights) / np.sum(
-                            masked_weights
-                        )
+                base_mean = self._weighted_mean_over_region(
+                    add_base, lat, lon, region_mask, region
+                )
 
         # Generate or use provided stochastic PCs
         if stochastic_pcs is None:
@@ -1051,6 +938,89 @@ class MeteorNoiseGenerator:
                     attrs=attrs,
                 )
 
+    def _weighted_mean_over_region(self, data, lat, lon, region_mask, region):
+        """
+        Compute weighted mean over a region or point extraction.
+
+        Parameters
+        ----------
+        data : np.ndarray
+            Input data with shape (n_time, n_lat, n_lon)
+        lat : float, optional
+            Latitude for point extraction (degrees)
+        lon : float, optional
+            Longitude for point extraction (degrees)
+        region_mask : np.ndarray, optional
+            Custom 2D boolean mask (n_lat, n_lon) for region
+        Returns
+        -------
+        np.ndarray
+            Weighted mean time series with shape (n_time,)
+        """
+        # Point extraction
+        if lat is not None and lon is not None:
+            lat_idx, lon_idx = self._find_nearest_gridpoint(lat, lon)
+            return data[:, lat_idx, lon_idx]
+
+        # Regional or global mean, start by computing area weights
+        weights = self._compute_spatial_weights()
+        weight_grid = weights[:, np.newaxis]
+        if region == "global" and region_mask is None:
+            # Global mean
+            total_weight = np.sum(weights) * data.shape[2]
+            return np.array(
+                [
+                    np.sum(data[t] * weight_grid) / total_weight
+                    for t in range(data.shape[0])
+                ]
+            )
+        # Regional mean
+        mean_values = np.zeros(data.shape[0])
+        for t in range(data.shape[0]):
+            masked_data = np.where(region_mask, data[t], np.nan)
+            masked_weights = np.where(region_mask, weight_grid, 0)
+            mean_values[t] = np.nansum(masked_data * masked_weights) / np.sum(
+                masked_weights
+            )
+        return mean_values
+
+    def _get_ar6_region_mask(self, region):
+        """
+        Get AR6 region mask for the model grid.
+
+        Parameters
+        ----------
+        region : str
+            AR6 region code (e.g., 'NEU', 'WNA')
+
+        Returns
+        -------
+        np.ndarray
+            2D boolean mask (n_lat, n_lon) for the region
+        """
+        ar6_regions = regionmask.defined_regions.ar6.all
+
+        # Find region number
+        region_number = None
+        for r in ar6_regions:
+            if r.abbrev == region:
+                region_number = r.number
+                break
+
+        if region_number is None:
+            raise ValueError(f"AR6 region '{region}' not found")
+
+        # Create mask on this grid
+        lons = self.coords["lon"]
+
+        lats = self.coords["lat"]
+
+        lon_2d, lat_2d = np.meshgrid(lons, lats)
+        mask_3d = ar6_regions.mask(lon_2d, lat_2d)
+        region_mask = mask_3d == region_number
+
+        return region_mask
+
     def save_model(self, filepath):
         """
         Save the fitted noise model to disk.
@@ -1102,7 +1072,7 @@ class MeteorNoiseGenerator:
         self.varx_results = model_data["varx_results"]
         self.coords = model_data["coords"]
         self.fitted = model_data["fitted"]
-
+        self._fix_coords_to_np()
         # Load variable_name if available (for backward compatibility)
         self.variable_name = model_data.get("variable_name", None)
 
@@ -1117,6 +1087,7 @@ def train_noise_model_from_cmip6(
     n_modes=10,
     lag_order=2,
     cache_dir=None,
+    cache_handler=None,
     custom_global_temp=None,
     use_picontrol_baseline=True,
     save_diagnostics=False,
@@ -1208,6 +1179,7 @@ def train_noise_model_from_cmip6(
     noise_gen = MeteorNoiseGenerator(
         n_modes=n_modes, lag_order=lag_order, use_exog=use_exog
     )
+    print(n_modes, lag_order)
     noise_gen.fit(
         monthly_data,
         variable_name,
@@ -1215,7 +1187,6 @@ def train_noise_model_from_cmip6(
         picontrol_baseline=picontrol_baseline,
         save_diagnostics=save_diagnostics,
     )
-
     # Cache if requested
     if cache_dir is not None:
         os.makedirs(cache_dir, exist_ok=True)
@@ -1366,47 +1337,162 @@ def load_noise_model_from_cache(cache_dir, model_name, variable_name):
     return noise_gen
 
 
-def train_noise_model_from_composite(
-    data_getter,
-    experiments,
-    model_name,
+def validate_noise_model_cache(
+    cache_file,
     variable_name,
-    n_modes=10,
+    n_modes=40,
     lag_order=2,
-    cache_dir=None,
 ):
     """
-    Train a noise model from composite experimental data.
+    Validate a cached noise model file.
+
+    Checks if the cached pickle file exists, can be loaded, and contains
+    the expected configuration (n_modes, lag_order, variable_name) and
+    required attributes (pca, varx_results).
 
     Parameters
     ----------
-    data_getter : Cmip6MeteorDataGetter
-        Data getter instance
-    experiments : list
-        List of experiments to use for training (e.g., ["historical", "ssp245"])
-    model_name : str
-        Name of the climate model
+    cache_file : str
+        Path to the cached noise model file
     variable_name : str
-        Variable to model (e.g., 'tas', 'pr')
-    n_modes : int, default 10
-        Number of PCA modes
-    lag_order : int, default 2
-        VARX lag order
-    cache_dir : str, optional
-        Directory to cache the trained model
+        Expected variable name (e.g., 'tas', 'pr')
+    n_modes : int, optional
+        Expected number of PCA modes. Default is 40.
+    lag_order : int, optional
+        Expected temporal lag order. Default is 2.
 
     Returns
     -------
-    MeteorNoiseGenerator
-        Fitted noise generator
+    tuple
+        (is_valid, cached_model, info_dict) where:
+        - is_valid: bool indicating if cache is valid
+        - cached_model: loaded MeteorNoiseGenerator if valid, None otherwise
+        - info_dict: dict with 'message', 'expected', 'found' information
+
+    Examples
+    --------
+    >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
+    >>> cache_file = data_getter.get_noise_model_cache_path("CESM2", "tas")
+    >>> is_valid, model, info = data_getter.validate_noise_model_cache(
+    ...     cache_file, "tas", n_modes=40, lag_order=2
+    ... )
+    >>> if is_valid:
+    ...     print(f"✅ {info['message']}")
     """
-    # Use the new function for consistency
-    return train_noise_model_from_cmip6(
-        data_getter,
-        experiments,
-        model_name,
-        variable_name,
-        n_modes=n_modes,
-        lag_order=lag_order,
-        cache_dir=cache_dir,
-    )
+    info = {
+        "expected": {
+            "variable_name": variable_name,
+            "n_modes": n_modes,
+            "lag_order": lag_order,
+        },
+        "found": {},
+        "message": "",
+    }
+
+    # Check if file exists
+    if not os.path.exists(cache_file):
+        info["message"] = f"Cache file not found: {cache_file}"
+        return False, None, info
+
+    # Try to load and validate
+    try:
+        noise_model = MeteorNoiseGenerator(n_modes=n_modes, lag_order=lag_order)
+        noise_model.load_model(cache_file)
+
+        # Extract found information
+        info["found"]["n_modes"] = getattr(noise_model, "n_modes", None)
+        info["found"]["lag_order"] = getattr(noise_model, "lag_order", None)
+        info["found"]["variable_name"] = getattr(noise_model, "variable_name", None)
+
+        # Validate n_modes
+        if not hasattr(noise_model, "n_modes") or noise_model.n_modes != n_modes:
+            info["message"] = (
+                f"n_modes mismatch: expected {n_modes}, "
+                f"found {info['found']['n_modes']}"
+            )
+            return False, None, info
+
+        # Validate lag_order
+        if not hasattr(noise_model, "lag_order") or noise_model.lag_order != lag_order:
+            info["message"] = (
+                f"lag_order mismatch: expected {lag_order}, "
+                f"found {info['found']['lag_order']}"
+            )
+            return False, None, info
+
+        # Validate variable_name
+        if (
+            not hasattr(noise_model, "variable_name")
+            or noise_model.variable_name != variable_name
+        ):
+            info["message"] = (
+                f"variable_name mismatch: expected '{variable_name}', "
+                f"found '{info['found']['variable_name']}'"
+            )
+            return False, None, info
+
+        # Validate required attributes
+        required_attrs = ["pca", "varx_results"]
+        missing_attrs = [
+            attr for attr in required_attrs if not hasattr(noise_model, attr)
+        ]
+        if missing_attrs:
+            info["message"] = f"Missing required attributes: {missing_attrs}"
+            return False, None, info
+
+        # Cache is valid
+        info["message"] = (
+            f"Cache valid: variable={variable_name}, "
+            f"n_modes={n_modes}, lag_order={lag_order}"
+        )
+        return True, noise_model, info
+
+    except Exception as e:
+        info["message"] = f"Error loading cache: {e}"
+        return False, None, info
+
+
+# def train_noise_model_from_composite(
+#     data_getter,
+#     experiments,
+#     model_name,
+#     variable_name,
+#     n_modes=10,
+#     lag_order=2,
+#     cache_dir=None,
+# ):
+#     """
+#     Train a noise model from composite experimental data.
+
+#     Parameters
+#     ----------
+#     data_getter : Cmip6MeteorDataGetter
+#         Data getter instance
+#     experiments : list
+#         List of experiments to use for training (e.g., ["historical", "ssp245"])
+#     model_name : str
+#         Name of the climate model
+#     variable_name : str
+#         Variable to model (e.g., 'tas', 'pr')
+#     n_modes : int, default 10
+#         Number of PCA modes
+#     lag_order : int, default 2
+#         VARX lag order
+#     cache_dir : str, optional
+#         Directory to cache the trained model
+
+#     Returns
+#     -------
+#     MeteorNoiseGenerator
+#         Fitted noise generator
+#     """
+#     # Use the new function for consistency
+#     return train_noise_model_from_cmip6(
+#         data_getter,
+#         experiments,
+#         model_name,
+#         variable_name,
+#         n_modes=n_modes,
+#         lag_order=lag_order,
+#         cache_dir=cache_dir,
+#     )

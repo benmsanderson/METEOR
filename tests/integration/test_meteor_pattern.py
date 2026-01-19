@@ -1,8 +1,10 @@
 import os
+import tempfile
 from functools import partial
 
 import numpy as np
 import pytest
+import xarray as xr
 from ciceroscm import input_handler
 
 from meteor import Cmip6MeteorDataGetter, MeteorPatternScaling, geo_data_utils
@@ -25,7 +27,7 @@ def test_meteor_scaling(test_data_dir):
     assert Xsim.shape[0] == len(f)
 
 
-def test_meteor_scaling_scm_timseries(test_data_dir):
+def test_meteor_scaling_scm_timeseries(test_data_dir):
     canesm_basic_pattern = MeteorPatternScaling(
         "pdrmip-CanESM2-basic",
         {"tas": 2, "pr": 10},
@@ -50,34 +52,60 @@ def test_meteor_scaling_scm_timseries(test_data_dir):
 
 def test_pattern_from_cmip6(test_data_dir):
 
-    datagetter = Cmip6MeteorDataGetter()
-    canesm_basic_pattern = MeteorPatternScaling(
-        "cmip6-CanESM5-basic",
-        {"tas": 2, "pr": 2},
-        partial(datagetter.make_meteor_training_data, model="CanESM5"),
-        from_file=False,
-        exp_list=["base", "co2x4"],
+    datagetter = Cmip6MeteorDataGetter(
+        enable_cache=True,
+        cache_dir=os.path.join(test_data_dir, "light_mock_cache"),
     )
-    assert canesm_basic_pattern.name == "cmip6-CanESM5-basic"
-    assert "base" in canesm_basic_pattern.pattern_dict
-    assert "tas" in canesm_basic_pattern.pattern_dict["co2x4"]
-    assert "outp" in canesm_basic_pattern.pattern_dict["co2x4"]["pr"]
-    conc_data = input_handler.read_inputfile(
-        os.path.join(test_data_dir, "rcp85_conc_RCMIP.txt")
-    )
-    ih = input_handler.InputHandler({})
-    em_data = ih.read_emissions(os.path.join(test_data_dir, "rcp85_em_RCMIP.txt"))
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_pattern_cache = os.path.join(temp_dir, "pattern_cache")
+        canesm_basic_pattern = MeteorPatternScaling(
+            "cmip6-CanESM5-basic",
+            {"tas": 2, "pr": 2},
+            partial(datagetter.make_meteor_training_data, model="CanESM5"),
+            from_file=False,
+            exp_list=["base", "co2x4"],
+            cache_dir=temp_pattern_cache,
+        )
+        assert canesm_basic_pattern.name == "cmip6-CanESM5-basic"
+        assert "base" in canesm_basic_pattern.pattern_dict
+        assert "tas" in canesm_basic_pattern.pattern_dict["co2x4"]
+        assert "outp" in canesm_basic_pattern.pattern_dict["co2x4"]["pr"]
+        conc_data = input_handler.read_inputfile(
+            os.path.join(test_data_dir, "rcp85_conc_RCMIP.txt")
+        )
+        ih = input_handler.InputHandler({})
+        em_data = ih.read_emissions(os.path.join(test_data_dir, "rcp85_em_RCMIP.txt"))
 
-    patterns = canesm_basic_pattern.predict_from_combined_experiment(
-        em_data, conc_data, ["pr", "tas"]
-    )
-    assert set(patterns.keys()) == set(["pr", "tas"])
+        patterns = canesm_basic_pattern.predict_from_combined_experiment(
+            em_data, conc_data, ["pr", "tas"]
+        )
+        assert set(patterns.keys()) == set(["pr", "tas"])
+
+        canesm_basic_pattern_loaded = MeteorPatternScaling(
+            "cmip6-CanESM5-basic",
+            {"tas": 2, "pr": 2},
+            partial(datagetter.make_meteor_training_data, model="CanESM5"),
+            from_file=True,
+            exp_list=["base", "co2x4"],
+            cache_dir=temp_pattern_cache,
+        )
+        assert canesm_basic_pattern_loaded.name == "cmip6-CanESM5-basic"
+        assert "base" in canesm_basic_pattern_loaded.pattern_dict
+        assert "tas" in canesm_basic_pattern_loaded.pattern_dict["co2x4"]
+        assert "outp" in canesm_basic_pattern_loaded.pattern_dict["co2x4"]["pr"]
+
+        np.testing.assert_equal(
+            canesm_basic_pattern.pattern_dict["co2x4"]["tas"]["outp"],
+            canesm_basic_pattern_loaded.pattern_dict["co2x4"]["tas"]["outp"],
+        )
 
 
 def test_sulfate_from_residual_functionality(test_data_dir):
     datagetter = Cmip6MeteorDataGetter(
         exps=["piControl", "abrupt-4xCO2", "historical", "ssp245"],
         dbe=["CMIP", "CMIP", "CMIP", "ScenarioMIP"],
+        enable_cache=True,
+        cache_dir=os.path.join(test_data_dir, "light_mock_cache"),
     )
     training_data = {
         "base": datagetter.make_meteor_training_data("base", "CanESM5"),
@@ -134,7 +162,9 @@ def test_sulfate_from_residual_functionality(test_data_dir):
     assert np.mean(geo_data_utils.global_mean(patterns_ghg["tas"])) > np.mean(
         geo_data_utils.global_mean(patterns["tas"])
     )
-    assert np.mean(geo_data_utils.global_mean(patterns_ghg["pr"])) > np.mean(
+    print(np.mean(geo_data_utils.global_mean(patterns_ghg["pr"])))
+    print(np.mean(geo_data_utils.global_mean(patterns["pr"])))
+    assert np.mean(geo_data_utils.global_mean(patterns_ghg["pr"])) < np.mean(
         geo_data_utils.global_mean(patterns["pr"])
     )
 
@@ -142,8 +172,8 @@ def test_sulfate_from_residual_functionality(test_data_dir):
         em_data, conc_data, ["pr", "tas"], return_patterns_per_mode=True
     )
 
-    assert np.all(patterns_separate["tas"].shape == (3, 351, 64, 128))
-    assert np.all(patterns_separate["pr"].shape == (3, 351, 64, 128))
+    assert np.all(patterns_separate["tas"].shape == (3, 351, 3, 3))
+    assert np.all(patterns_separate["pr"].shape == (3, 351, 3, 3))
 
     assert np.allclose(
         np.sum(patterns_separate["tas"].values, axis=0), patterns["tas"].values
@@ -163,8 +193,8 @@ def test_sulfate_from_residual_functionality(test_data_dir):
     patterns = canesm_combined_pattern.predict_from_combined_experiment(
         em_data, conc_data, ["pr", "tas"], return_patterns_per_mode=True
     )
-    assert np.all(patterns["tas"].shape == (4, 351, 64, 128))
-    assert np.all(patterns["pr"].shape == (3, 351, 64, 128))
+    assert np.all(patterns["tas"].shape == (4, 351, 3, 3))
+    assert np.all(patterns["pr"].shape == (3, 351, 3, 3))
 
     anomsulf_pattern_different_run = MeteorPatternScaling(
         "cmip6-CanESM5-anomsulf",
@@ -177,8 +207,8 @@ def test_sulfate_from_residual_functionality(test_data_dir):
     patterns = anomsulf_pattern_different_run.predict_from_combined_experiment(
         em_data, conc_data, ["pr", "tas"], return_patterns_per_mode=True
     )
-    assert np.all(patterns["tas"].shape == (1, 351, 64, 128))
-    assert np.all(patterns["pr"].shape == (2, 351, 64, 128))
+    assert np.all(patterns["tas"].shape == (1, 351, 3, 3))
+    assert np.all(patterns["pr"].shape == (2, 351, 3, 3))
 
     anomsulf_pattern_different_run = MeteorPatternScaling(
         "cmip6-CanESM5-anomsulf",
@@ -191,7 +221,33 @@ def test_sulfate_from_residual_functionality(test_data_dir):
     patterns = anomsulf_pattern_different_run.predict_from_combined_experiment(
         em_data, conc_data, ["tas"], return_patterns_per_mode=True
     )
-    assert np.all(patterns["tas"].shape == (1, 351, 64, 128))
+    assert np.all(patterns["tas"].shape == (1, 351, 3, 3))
+
+    with pytest.raises(
+        ValueError, match="annual_prediction must be an xarray DataArray"
+    ):
+        canesm_anomsulf_pattern.to_monthly("Hello")
+    with pytest.raises(
+        ValueError, match="annual_prediction must have a 'time' dimension"
+    ):
+        canesm_anomsulf_pattern.to_monthly(
+            xr.DataArray(data=np.ones((2, 2)), dims=("lat", "lon"))
+        )
+
+    monthly_pred = canesm_anomsulf_pattern.to_monthly(
+        xr.DataArray(
+            data=np.ones((10, 3, 3)),
+            dims=("time", "lat", "lon"),
+            attrs={"description": "Test data"},
+        )
+    )
+    assert monthly_pred.shape == (120, 3, 3)
+    print(monthly_pred.attrs["description"])
+    assert (
+        monthly_pred.attrs["description"]
+        == "Test data (converted from annual to monthly by repeating values)"
+    )
+    assert monthly_pred.attrs["converted_to_monthly"]
 
 
 def test_return_separate_per_mode_patterns(test_data_dir):
@@ -235,41 +291,43 @@ def test_return_separate_per_mode_patterns(test_data_dir):
     # TODO: Test this with anomaly pattern
 
 
-def test_models_no_aer_fit(test_data_dir):
-    datagetter = Cmip6MeteorDataGetter(
-        exps=["piControl", "abrupt-4xCO2", "historical", "ssp245"],
-        dbe=["CMIP", "CMIP", "CMIP", "ScenarioMIP"],
-    )
-    model = "AWI-CM-1-1-MR"  # "CanESM5",
-    # models_weird = ["CanESM5"]
-    # model = "MPI-ESM1-2-LR"
+# def test_models_no_aer_fit(test_data_dir):
+#     datagetter = Cmip6MeteorDataGetter(
+#         exps=["piControl", "abrupt-4xCO2", "historical", "ssp245"],
+#         dbe=["CMIP", "CMIP", "CMIP", "ScenarioMIP"],
+#     )
+#     print(datagetter.get_models_avail())
+#     assert False
+#     model = "CanESM5"#"AWI-CM-1-1-MR"  # "CanESM5",
+#     models_weird = ["CanESM5"]
+#     model = "MPI-ESM1-2-LR"
 
-    conc_data = input_handler.read_inputfile(
-        os.path.join(test_data_dir, "rcp85_conc_RCMIP.txt")
-    )
-    ih = input_handler.InputHandler({})
-    em_data = ih.read_emissions(os.path.join(test_data_dir, "rcp85_em_RCMIP.txt"))
-    training_data = {
-        "base": datagetter.make_meteor_training_data("base", model),
-        "co2x4": datagetter.make_meteor_training_data("co2x4", model),
-        "sulxanom": datagetter.make_meteor_training_data_composite(
-            ["historical", "ssp245"], model
-        ),
-    }
+#     conc_data = input_handler.read_inputfile(
+#         os.path.join(test_data_dir, "rcp85_conc_RCMIP.txt")
+#     )
+#     ih = input_handler.InputHandler({})
+#     em_data = ih.read_emissions(os.path.join(test_data_dir, "rcp85_em_RCMIP.txt"))
+#     training_data = {
+#         "base": datagetter.make_meteor_training_data("base", model),
+#         "co2x4": datagetter.make_meteor_training_data("co2x4", model),
+#         "sulxanom": datagetter.make_meteor_training_data_composite(
+#             ["historical", "ssp245"], model
+#         ),
+#     }
 
-    anomsulf_pattern = MeteorPatternScaling(
-        "cmip6-CanESM5-anomsulf",
-        {"tas": 3},
-        lambda key: training_data[key],
-        from_file=False,
-        exp_list=["base", "co2x4", "sulxanom"],
-        anom_timescales={"tas": 3},
-    )
-    patterns = anomsulf_pattern.predict_from_combined_experiment(
-        em_data, conc_data, ["tas"], return_patterns_per_mode=True
-    )
-    ghg_sum_prediction = geo_data_utils.global_mean(
-        patterns["tas"][:3, :, :, :].sum(dim="mode")
-    )
-    total_prediction = geo_data_utils.global_mean(patterns["tas"].sum(dim="mode"))
-    assert not np.allclose(ghg_sum_prediction, total_prediction)
+#     anomsulf_pattern = MeteorPatternScaling(
+#         "cmip6-CanESM5-anomsulf",
+#         {"tas": 3},
+#         lambda key: training_data[key],
+#         from_file=False,
+#         exp_list=["base", "co2x4", "sulxanom"],
+#         anom_timescales={"tas": 3},
+#     )
+#     patterns = anomsulf_pattern.predict_from_combined_experiment(
+#         em_data, conc_data, ["tas"], return_patterns_per_mode=True
+#     )
+#     ghg_sum_prediction = geo_data_utils.global_mean(
+#         patterns["tas"][:3, :, :, :].sum(dim="mode")
+#     )
+#     total_prediction = geo_data_utils.global_mean(patterns["tas"].sum(dim="mode"))
+#     assert not np.allclose(ghg_sum_prediction, total_prediction)

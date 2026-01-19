@@ -282,6 +282,9 @@ class MeteorPatternScaling:
         """
         self.name = name
 
+        # TODO check if we would rather have a full cache handler object,
+        # or even make one if nothing is sent
+        # For now, we just accept a cache handler object
         # Try to load from cache if cache_dir is provided
         if cache_dir is not None:
             cache_path = os.path.join(cache_dir, f"{name}_pattern_scaling.pkl")

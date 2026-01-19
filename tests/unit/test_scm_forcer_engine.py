@@ -1,10 +1,55 @@
 import numpy as np
+import pandas as pd
 
 from meteor import scm_forcer_engine
 from meteor.scm_forcer_engine import (
+    ScmEngineConfigurations,
     ScmEngineForPatternScaling,
     aerosol_priority_mapping,
 )
+
+
+def test_scm_engine_configurations():
+    sec = ScmEngineConfigurations(
+        gaspam_data=pd.DataFrame({"A": [1, 2], "B": [3, 4]}),
+        concentrations_data=pd.DataFrame(
+            {"CO2": np.ones(151) * 370}, index=np.arange(1950, 2101)
+        ),
+        emissions_data=pd.DataFrame(
+            {"CO2": np.ones(151) * 35}, index=np.arange(1950, 2101)
+        ),
+    )
+    assert sec.emstart == 2000
+    assert sec.nystart == 1950
+    assert sec.idtm == 24
+    assert sec.conc_run
+    assert all((sec.gaspam_data["A"] - [1, 2]) == 0)
+    assert sec.nat_ch4_data.shape == (151, 1)
+    assert all((sec.nat_ch4_data["CH4"]) == 242.09)
+    assert all(sec.nat_n2o_data["N2O"] == 11.7027)
+    sec = ScmEngineConfigurations(
+        gaspam_data=pd.DataFrame({"A": [1, 2], "B": [3, 4]}),
+        concentrations_data=pd.DataFrame(
+            {"CO2": np.ones(151) * 370}, index=np.arange(1950, 2101)
+        ),
+        emissions_data=pd.DataFrame(
+            {"CO2": np.ones(151) * 35}, index=np.arange(1950, 2101)
+        ),
+        nat_ch4_data=pd.DataFrame(
+            {"CH4": np.ones(151) * 230}, index=np.arange(1950, 2101)
+        ),
+        nat_n2o_data=pd.DataFrame(
+            {"N2O": np.ones(151) * 12}, index=np.arange(1950, 2101)
+        ),
+    )
+    assert sec.emstart == 2000
+    assert sec.nystart == 1950
+    assert sec.idtm == 24
+    assert sec.conc_run
+    assert all((sec.gaspam_data["A"] - [1, 2]) == 0)
+    assert sec.nat_ch4_data.shape == (151, 1)
+    assert all((sec.nat_ch4_data["CH4"]) == 230)
+    assert all(sec.nat_n2o_data["N2O"] == 12)
 
 
 def test_forcer_engine():
@@ -100,21 +145,13 @@ def test_scm_forcer_engine_edge_cases():
     sefps = scm_forcer_engine.ScmEngineForPatternScaling(None)
 
     # Test with single scenario
-    try:
-        single_scaling = sefps.run_to_get_scaling(["base"])
-        assert len(single_scaling) == 1
-        assert np.allclose(single_scaling[0], [0.0])
-    except Exception:
-        # May not support single scenario
-        pass
+    single_scaling = sefps.run_to_get_scaling(["base"])
+    assert len(single_scaling) == 1
+    assert np.allclose(single_scaling[0], [0.0])
 
     # Test with repeated scenarios
-    try:
-        repeated_scaling = sefps.run_to_get_scaling(["base", "base", "co2x2"])
-        assert len(repeated_scaling) == 3
-    except Exception:
-        # May not support repeated scenarios
-        pass
+    repeated_scaling = sefps.run_to_get_scaling(["base", "base", "co2x2"])
+    assert len(repeated_scaling) == 3
 
 
 def test_scm_forcer_engine_numerical_stability():
@@ -148,10 +185,6 @@ def test_scm_engine_per_forcer_results():
     sefps = scm_forcer_engine.ScmEngineForPatternScaling(None)
 
     # Test that per-forcer results method exists and runs
-    try:
-        per_forcer_results = sefps.run_and_return_per_forcer_results(["base", "co2x2"])
-        # Should return some result structure
-        assert per_forcer_results is not None
-    except Exception:
-        # Method may not be fully implemented or require specific setup
-        pass
+    per_forcer_results = sefps.run_and_return_per_forcer_results(["base", "co2x2"])
+    # Should return some result structure
+    assert per_forcer_results is not None

@@ -401,18 +401,11 @@ class MeteorPatternScaling:
             )
         exp = anom_exps[0]
         exp_index = self.exp_list.index(exp)
-        if ssp_input is None:
-            ssp_input = {
-                "emstart": 1850,
-                "nystart": 1750,
-                "nyend": 2100,
-                "conc_run": False,
-            }
-        elif "nystart" not in ssp_input:
-            ssp_input["nystart"] = 1750
+        # ScmEngineForPatternScaling will handle validation and defaults
         sefps = scm_forcer_engine.ScmEngineForPatternScaling(ssp_input)
-        start_index = ssp_input["emstart"] - ssp_input["nystart"]
-        em_len = ssp_input["nyend"] - ssp_input["emstart"] + 1
+        # Use the validated config from the SCM engine
+        start_index = sefps.cfg.emstart - sefps.cfg.nystart
+        em_len = sefps.cfg.nyend - sefps.cfg.emstart + 1
         forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
         forcing_of_residual = xr.DataArray(
             data=forcing_series[exp][start_index:].copy(),
@@ -420,7 +413,7 @@ class MeteorPatternScaling:
         )
         forcing_series[exp] = None
         predicted_without = self._predict_combined_experiment_from_forcer_series(
-            forcing_series, self.patternflds.keys(), ssp_input["nystart"]
+            forcing_series, self.patternflds.keys(), sefps.cfg.nystart
         )  # [100:, :, :]
         for fld in self.patternflds:
             if self.anom_timescales[fld] == 0:

@@ -12,6 +12,7 @@ import pandas as pd
 import xarray as xr
 from ciceroscm import input_handler
 
+from . import cache_utils
 from .cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 from .ensemble_output import EnsembleOutput, VariableOutput
 from .geo_data_utils import (
@@ -319,13 +320,13 @@ class MeteorInterface:
         cache_dir = os.path.join(self.cache_dir, "pattern_scaling")
         os.makedirs(cache_dir, exist_ok=True)
 
-        cache_file = self.data_getter.get_pattern_scaling_cache_path(
+        cache_file = cache_utils.get_pattern_scaling_cache_path(
             self.model, cache_dir, variable=variable
         )
 
         # Check cache
-        is_valid, cached_model, info = self.data_getter.validate_pattern_scaling_cache(
-            cache_file, self.model, variable=variable
+        is_valid, cached_model, info = cache_utils.validate_pattern_scaling_cache(
+            cache_file, self.model, expected_fields=[variable]
         )
 
         if is_valid and verbose:
@@ -378,12 +379,12 @@ class MeteorInterface:
         cache_dir = os.path.join(self.cache_dir, "noise_models")
         os.makedirs(cache_dir, exist_ok=True)
 
-        cache_file = self.data_getter.get_noise_model_cache_path(
+        cache_file = cache_utils.get_noise_model_cache_path(
             self.model, variable, cache_dir
         )
 
         # Check cache
-        is_valid, cached_model, info = self.data_getter.validate_noise_model_cache(
+        is_valid, cached_model, info = cache_utils.validate_noise_model_cache(
             cache_file,
             variable,
             n_modes=config["n_modes_noise"],

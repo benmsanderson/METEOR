@@ -371,19 +371,11 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                     except OSError as e:
                         logging.warning("Failed to cache CMIP6 catalog: %s", e)
             except Exception as e:
-                # If download fails and we have cache enabled, check if there's an old catalog
-                if self.enable_cache and os.path.exists(catalog_cache_file):
-                    logging.warning(
-                        "Failed to download CMIP6 catalog (%s), using cached version.",
-                        e,
-                    )
-                    df = pd.read_csv(catalog_cache_file, low_memory=False)
-                else:
-                    # No cache available and download failed
-                    raise RuntimeError(
-                        f"Failed to load CMIP6 catalog from Google Cloud Storage "
-                        f"and no cached version available: {e}"
-                    ) from e
+                # No cache available and download failed
+                raise RuntimeError(
+                    f"Failed to load CMIP6 catalog from Google Cloud Storage "
+                    f"and no cached version available: {e}"
+                ) from e
         df_all1 = []
         for i, exp in enumerate(self.exps):
             df_ta1 = []

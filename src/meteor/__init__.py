@@ -19,7 +19,6 @@ from .meteor_interface import MeteorInterface  # noqa: F401
 from .noise_generator import (  # noqa: F401
     MeteorNoiseGenerator,
     train_noise_model_from_cmip6,
-    train_noise_model_from_composite,
 )
 from .precipitation_transform import (  # noqa: F401
     apply_distribution_transform,

@@ -8,10 +8,9 @@ pattern scaling and noise generation capabilities.
 import os
 
 import numpy as np
-import pandas as pd
 import xarray as xr
-from ciceroscm import input_handler
 
+from .cache_handling import CacheHandler
 from .cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 from .ensemble_output import EnsembleOutput, VariableOutput
 from .geo_data_utils import (
@@ -20,9 +19,42 @@ from .geo_data_utils import (
     global_mean,
     regional_mean,
 )
+from .impacts import DegreeDaysCalculator
 from .meteor import MeteorPatternScaling
-from .noise_generator import train_noise_model_from_cmip6
+from .noise_generator import train_noise_model_from_cmip6, validate_noise_model_cache
+from .scm_input_lib import (
+    load_emissions_concentrations,
+    load_emissions_concentrations_from_name,
+    load_ssp_config,
+    parse_scenario_input,
+)
 from .variable_transforms import get_variable_transform_config
+
+
+def _get_default_config(variable):
+    """Get smart default configuration for a variable."""
+    config = {
+        "n_modes_pattern": 3,
+        "n_modes_noise": 40,
+        "lag_order": 2,
+        "use_picontrol_baseline": True,
+        "training_scenario": "ssp245",  # ✅ Add default training scenario
+    }
+
+    # Variable-specific defaults
+    if variable == "tas":
+        config["use_exog"] = "all"
+        config["transform"] = False
+    elif variable == "pr":
+        config["use_exog"] = "none"
+        config["transform"] = True
+        config["transform_type"] = "gamma"
+    else:
+        # Generic defaults for other variables
+        config["use_exog"] = "temp_only"
+        config["transform"] = False
+
+    return config
 
 
 class MeteorInterface:
@@ -113,7 +145,10 @@ class MeteorInterface:
             self.variables = list(variables)
 
         self.model = model
-        self.cache_dir = cache_dir or "./cache"
+        self.cache_handler = CacheHandler(
+            purpose="general",
+            cache_dir=cache_dir,
+        )
 
         # Initialize data getter
         data_getter_kwargs = data_getter_kwargs or {}
@@ -128,6 +163,7 @@ class MeteorInterface:
             flds=self.variables,
             dbe=data_getter_kwargs.get("dbe", default_dbe),
             enable_cache=True,
+            cache_handler=self.cache_handler,
         )
 
         # Storage for trained models
@@ -143,6 +179,7 @@ class MeteorInterface:
         self._training_config = {}
         self._is_trained = {var: False for var in self.variables}
 
+    # TODO: This is a weird factory method type of thing, needed?
     @classmethod
     def from_cmip6(cls, model, variable=None, variables=None, cache_dir=None, **kwargs):
         """
@@ -230,7 +267,7 @@ class MeteorInterface:
 
             # Get configuration with hybrid precedence
             if auto:
-                config = self._get_default_config(variable)
+                config = _get_default_config(variable)
                 # Override with method parameter if different from default
                 if training_scenario != "ssp245":
                     config["training_scenario"] = training_scenario
@@ -242,7 +279,6 @@ class MeteorInterface:
                 # Apply method parameter as default if not in config
                 if "training_scenario" not in config:
                     config["training_scenario"] = training_scenario
-
             self._training_config[variable] = config
 
             # Train pattern scaling
@@ -275,31 +311,6 @@ class MeteorInterface:
             print("✅ All variables trained successfully")
             print("=" * 60)
 
-    def _get_default_config(self, variable):
-        """Get smart default configuration for a variable."""
-        config = {
-            "n_modes_pattern": 3,
-            "n_modes_noise": 40,
-            "lag_order": 2,
-            "use_picontrol_baseline": True,
-            "training_scenario": "ssp245",  # ✅ Add default training scenario
-        }
-
-        # Variable-specific defaults
-        if variable == "tas":
-            config["use_exog"] = "all"
-            config["transform"] = False
-        elif variable == "pr":
-            config["use_exog"] = "none"
-            config["transform"] = True
-            config["transform_type"] = "gamma"
-        else:
-            # Generic defaults for other variables
-            config["use_exog"] = "temp_only"
-            config["transform"] = False
-
-        return config
-
     def _train_pattern_scaling(self, variable, config, verbose=True):
         """
         Train pattern scaling model for a variable.
@@ -316,16 +327,13 @@ class MeteorInterface:
         verbose : bool
             Print training progress messages
         """
-        cache_dir = os.path.join(self.cache_dir, "pattern_scaling")
-        os.makedirs(cache_dir, exist_ok=True)
-
-        cache_file = self.data_getter.get_pattern_scaling_cache_path(
-            self.model, cache_dir, variable=variable
+        cache_file = self.cache_handler.get_pattern_scaling_cache_path(
+            self.model, variable=variable
         )
 
         # Check cache
         is_valid, cached_model, info = self.data_getter.validate_pattern_scaling_cache(
-            cache_file, self.model, variable=variable
+            cache_file, self.model
         )
 
         if is_valid and verbose:
@@ -340,7 +348,7 @@ class MeteorInterface:
             training_data = self.data_getter.prepare_pattern_scaling_training_data(
                 self.model, "ssp245"
             )
-            ssp_config = self.data_getter.load_ssp_config("ssp245")
+            ssp_config = load_ssp_config("ssp245")
 
         # Create pattern scaling model
         self.pattern_models[variable] = MeteorPatternScaling(
@@ -351,7 +359,7 @@ class MeteorInterface:
             from_file=False,
             exp_list=None if training_data is None else ["base", "co2x4", "sulxanom"],
             anom_timescales={variable: config["n_modes_pattern"]},
-            cache_dir=cache_dir,
+            cache_dir=os.path.join(self.cache_handler.cache_dir, "pattern_scaling"),
         )
 
     def _train_noise_model(self, variable, config, verbose=True):
@@ -375,15 +383,10 @@ class MeteorInterface:
         verbose : bool
             Print training progress messages
         """
-        cache_dir = os.path.join(self.cache_dir, "noise_models")
-        os.makedirs(cache_dir, exist_ok=True)
-
-        cache_file = self.data_getter.get_noise_model_cache_path(
-            self.model, variable, cache_dir
-        )
+        cache_file = self.cache_handler.get_noise_model_cache_path(self.model, variable)
 
         # Check cache
-        is_valid, cached_model, info = self.data_getter.validate_noise_model_cache(
+        is_valid, cached_model, info = validate_noise_model_cache(
             cache_file,
             variable,
             n_modes=config["n_modes_noise"],
@@ -391,7 +394,7 @@ class MeteorInterface:
         )
 
         if is_valid:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print("      ✓ Using cached noise model")
             self.noise_models[variable] = cached_model
         else:
@@ -404,15 +407,9 @@ class MeteorInterface:
             # ✅ Generate pattern scaling prediction for custom_global_temp
             # This ensures noise model training uses same temperature trajectory as generation
 
-            cscm_data_dir = os.path.join(os.path.dirname(__file__), "default_scm_data")
-            conc_file = os.path.join(
-                cscm_data_dir, f"{training_scenario}_conc_RCMIP.txt"
+            em_data, conc_data = load_emissions_concentrations_from_name(
+                training_scenario
             )
-            em_file = os.path.join(cscm_data_dir, f"{training_scenario}_em_RCMIP.txt")
-
-            ih = input_handler.InputHandler({})
-            conc_data = input_handler.read_inputfile(conc_file)
-            em_data = ih.read_emissions(em_file)
 
             # Generate pattern prediction
             pattern_model = self.pattern_models[variable]
@@ -448,9 +445,10 @@ class MeteorInterface:
                 lag_order=config["lag_order"],
                 use_exog=config["use_exog"],
                 custom_global_temp=monthly_warming_trimmed,  # ✅ Pass pattern prediction
-                cache_dir=cache_dir,
+                cache_dir=self.cache_handler.cache_dir,
             )
 
+    # TODO: Unused arguments, drop?
     def _fit_transform(self, variable, transform_config, config, verbose=True):
         """
         Prepare variable-specific transform configuration.
@@ -566,14 +564,14 @@ class MeteorInterface:
         """
         # Handle climatology-only mode
         if not include_noise:
-            if verbose and n_realizations > 1:
+            if verbose and n_realizations > 1:  # pragma: no cover
                 print(
                     "Note: include_noise=False, forcing n_realizations=1 (climatology only)"
                 )
             n_realizations = 1
 
         # Parse scenario to get name for display
-        scenario_info = self._parse_scenario_input(scenario)
+        scenario_info = parse_scenario_input(scenario)
         scenario_name = scenario_info["name"]
 
         # Check all variables are trained
@@ -598,7 +596,7 @@ class MeteorInterface:
 
             # Generate timeseries if requested
             if timeseries:
-                if verbose:
+                if verbose:  # pragma: no cover
                     print(f"   → Time series: {len(timeseries)} aggregations")
                 var_output.timeseries = self._generate_timeseries(
                     variable,
@@ -614,7 +612,7 @@ class MeteorInterface:
 
             # Generate gridded if requested
             if gridded:
-                if verbose:
+                if verbose:  # pragma: no cover
                     print("   → Gridded outputs...")
                 var_output.gridded = self._generate_gridded(
                     variable,
@@ -629,7 +627,7 @@ class MeteorInterface:
 
             # Apply impacts if requested
             if impacts and variable in impacts:
-                if verbose:
+                if verbose:  # pragma: no cover
                     print("   → Computing impact metrics...")
                 var_output.impacts = self._apply_impacts(
                     var_output,
@@ -667,120 +665,6 @@ class MeteorInterface:
 
         return ensemble
 
-    def _parse_scenario_input(self, scenario):
-        """
-        Parse scenario input and return emissions/concentrations info.
-
-        Parameters
-        ----------
-        scenario : str or dict
-            Scenario specification
-
-        Returns
-        -------
-        dict
-            Dictionary with keys:
-            - 'type': 'ssp' or 'custom'
-            - 'name': scenario name
-            - 'emissions': emissions file path or DataFrame (if custom)
-            - 'concentrations': concentrations file path or DataFrame (if custom)
-        """
-        if isinstance(scenario, str):
-            # Standard SSP scenario
-            return {
-                "type": "ssp",
-                "name": scenario,
-                "emissions": None,
-                "concentrations": None,
-            }
-        elif isinstance(scenario, dict):
-            # Custom scenario
-            if "emissions" not in scenario:
-                raise ValueError("Custom scenario dict must include 'emissions' key")
-
-            # Get emissions (path or DataFrame)
-            emissions = scenario["emissions"]
-
-            # Get concentrations (path, DataFrame, or use base_scenario)
-            if "concentrations" in scenario:
-                concentrations = scenario["concentrations"]
-            else:
-                # Use base_scenario concentrations (default: ssp245)
-                base_scenario = scenario.get("base_scenario", "ssp245")
-                cscm_data_dir = os.path.join(
-                    os.path.dirname(__file__), "default_scm_data"
-                )
-                concentrations = os.path.join(
-                    cscm_data_dir, f"{base_scenario}_conc_RCMIP.txt"
-                )
-
-            # Get scenario name for labeling
-            scenario_name = scenario.get("name", "custom")
-
-            return {
-                "type": "custom",
-                "name": scenario_name,
-                "emissions": emissions,
-                "concentrations": concentrations,
-            }
-        else:
-            raise TypeError(f"scenario must be str or dict, got {type(scenario)}")
-
-    def _load_emissions_concentrations(
-        self, emissions_spec, concentrations_spec, verbose=False
-    ):
-        """
-        Load emissions and concentrations from files or DataFrames.
-
-        Parameters
-        ----------
-        emissions_spec : str or pd.DataFrame
-            Path to emissions file or DataFrame
-        concentrations_spec : str or pd.DataFrame
-            Path to concentrations file or DataFrame
-        verbose : bool
-            Print loading messages
-
-        Returns
-        -------
-        tuple
-            (emissions_data, concentrations_data) as DataFrames
-        """
-        # Load emissions
-        if isinstance(emissions_spec, pd.DataFrame):
-            em_data = emissions_spec
-            if verbose:
-                print("      → Using provided emissions DataFrame")
-        elif isinstance(emissions_spec, str):
-            ih = input_handler.InputHandler({})
-            em_data = ih.read_emissions(emissions_spec)
-            if verbose:
-                print(
-                    f"      → Loaded emissions from {os.path.basename(emissions_spec)}"
-                )
-        else:
-            raise TypeError(
-                f"emissions must be str path or DataFrame, got {type(emissions_spec)}"
-            )
-
-        # Load concentrations
-        if isinstance(concentrations_spec, pd.DataFrame):
-            conc_data = concentrations_spec
-            if verbose:
-                print("      → Using provided concentrations DataFrame")
-        elif isinstance(concentrations_spec, str):
-            conc_data = input_handler.read_inputfile(concentrations_spec)
-            if verbose:
-                print(
-                    f"      → Loaded concentrations from {os.path.basename(concentrations_spec)}"
-                )
-        else:
-            raise TypeError(
-                f"concentrations must be str path or DataFrame, got {type(concentrations_spec)}"
-            )
-
-        return em_data, conc_data
-
     def _get_or_compute_pattern_scaling(
         self, variable, scenario, start_year, end_year, verbose=True
     ):
@@ -810,7 +694,7 @@ class MeteorInterface:
             (monthly_prediction_sliced, monthly_warming_sliced, em_data, conc_data)
         """
         # Parse scenario input
-        scenario_info = self._parse_scenario_input(scenario)
+        scenario_info = parse_scenario_input(scenario)
         scenario_name = scenario_info["name"]
 
         if verbose:
@@ -819,23 +703,17 @@ class MeteorInterface:
                     f"      → Computing pattern scaling for {variable}, {scenario_name}..."
                 )
             else:
-                print(
+                print(  # pragma: no cover
                     f"      → Computing pattern scaling for {variable}, custom scenario '{scenario_name}'..."
                 )
 
         # Load forcing data
         if scenario_info["type"] == "ssp":
             # Standard SSP scenario
-            cscm_data_dir = os.path.join(os.path.dirname(__file__), "default_scm_data")
-            conc_file = os.path.join(cscm_data_dir, f"{scenario_name}_conc_RCMIP.txt")
-            em_file = os.path.join(cscm_data_dir, f"{scenario_name}_em_RCMIP.txt")
-
-            ih = input_handler.InputHandler({})
-            conc_data = input_handler.read_inputfile(conc_file)
-            em_data = ih.read_emissions(em_file)
+            em_data, conc_data = load_emissions_concentrations_from_name(scenario_name)
         else:
             # Custom scenario
-            em_data, conc_data = self._load_emissions_concentrations(
+            em_data, conc_data = load_emissions_concentrations(
                 scenario_info["emissions"],
                 scenario_info["concentrations"],
                 verbose=verbose,
@@ -871,7 +749,7 @@ class MeteorInterface:
             # Extend data to 2100 if needed (hold last value constant)
             # This allows the SCM to run to its default nyend=2100
             if data_end < 2100:
-                if verbose:
+                if verbose:  # pragma: no cover
                     print(
                         f"      → Emissions data ends at {data_end}, extending to 2100 (holding final values)"
                     )
@@ -916,7 +794,7 @@ class MeteorInterface:
         if scenario_info["type"] == "custom" and actual_data_end is not None:
             # Clip to actual data availability
             effective_end_year = min(end_year, actual_data_end)
-            if effective_end_year < end_year and verbose:
+            if effective_end_year < end_year and verbose:  # pragma: no cover
                 print(
                     f"      → Clipping output to {start_year}-{effective_end_year} (data availability)"
                 )
@@ -982,7 +860,7 @@ class MeteorInterface:
             with shape (n_realizations, n_months)
         """
         # Parse scenario to get the actual name (handle both string and dict)
-        scenario_info = self._parse_scenario_input(scenario)
+        scenario_info = parse_scenario_input(scenario)
         scenario_name = scenario_info["name"]
 
         # For custom scenarios, use ssp245 as the training scenario
@@ -1036,7 +914,7 @@ class MeteorInterface:
                 random_seed=None,  # Can expose this as parameter if needed
             )
         else:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print("      → Climatology only (no stochastic variability)")
 
         # Generate outputs for each aggregation
@@ -1239,8 +1117,6 @@ class MeteorInterface:
             Dictionary with keys 'annual', 'monthly', 'climatology' containing
             xarray DataArrays with gridded fields
         """
-        import xarray as xr
-
         # Get pattern scaling results (from cache or compute)
         monthly_prediction, monthly_warming, em_data, conc_data = (
             self._get_or_compute_pattern_scaling(
@@ -1253,10 +1129,10 @@ class MeteorInterface:
 
         # Generate stochastic PCs (or skip if climatology only)
         if include_noise:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(f"      → Generating {n_realizations} gridded realizations")
         else:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print("      → Generating gridded climatology (no noise)")
             n_realizations = 1  # Force to 1 for climatology
 
@@ -1270,7 +1146,7 @@ class MeteorInterface:
 
         # Annual means
         if "annual" in gridded_spec:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(
                     f"      → Extracting annual means for {len(gridded_spec['annual'])} years"
                 )
@@ -1312,7 +1188,7 @@ class MeteorInterface:
                             realization=[0]
                         )
                 else:
-                    if verbose:
+                    if verbose:  # pragma: no cover
                         print(
                             f"        ⚠️  Year {year} outside range {start_year}-{end_year}"
                         )
@@ -1320,7 +1196,7 @@ class MeteorInterface:
 
         # Monthly fields
         if "monthly" in gridded_spec:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(
                     f"      → Extracting monthly fields for {len(gridded_spec['monthly'])} years"
                 )
@@ -1358,7 +1234,7 @@ class MeteorInterface:
 
                     monthly_fields[year] = year_months
                 else:
-                    if verbose:
+                    if verbose:  # pragma: no cover
                         print(
                             f"        ⚠️  Year {year} outside range {start_year}-{end_year}"
                         )
@@ -1366,7 +1242,7 @@ class MeteorInterface:
 
         # Climatologies (multi-year means)
         if "climatology" in gridded_spec:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(
                     f"      → Computing {len(gridded_spec['climatology'])} climatological means"
                 )
@@ -1410,12 +1286,12 @@ class MeteorInterface:
                                 clim_realizations[0].expand_dims(realization=[0])
                             )
                     else:
-                        if verbose:
+                        if verbose:  # pragma: no cover
                             print(
                                 f"        ⚠️  Period {clim_start}-{clim_end} outside range"
                             )
                 else:
-                    if verbose:
+                    if verbose:  # pragma: no cover
                         print(f"        ⚠️  Invalid climatology period: {period}")
             results["climatology"] = climatology_fields
 
@@ -1455,9 +1331,6 @@ class MeteorInterface:
         # Check if degree days are requested
         if "degree_days" in impact_configs:
             try:
-                from meteor import global_mean
-                from meteor.impacts import DegreeDaysCalculator
-
                 dd_config = impact_configs["degree_days"]
 
                 # Determine base temperature - use hdd_base if provided, otherwise cdd_base
@@ -1491,7 +1364,6 @@ class MeteorInterface:
                         baseline_k = float(global_mean(picontrol_data).mean())
                     elif key.startswith("regional:custom:"):
                         # Custom region - need to calculate baseline from bbox
-                        from meteor import create_region_mask
 
                         region_name = key.split(":")[2]
                         if custom_regions and region_name in custom_regions:
@@ -1504,13 +1376,9 @@ class MeteorInterface:
                                 f"Custom region '{region_name}' not found in custom_regions"
                             )
                     elif key.startswith("regional:"):
-                        from meteor import regional_mean
-
                         region = key.split(":")[1]
                         baseline_k = float(regional_mean(picontrol_data, region).mean())
                     elif key.startswith("point:"):
-                        from meteor import extract_point
-
                         coords = key.split(":")[1]
                         lat, lon = map(float, coords.split(","))
                         baseline_k = float(
@@ -1544,17 +1412,11 @@ class MeteorInterface:
                     impacts["hdd"][key] = np.array(hdd_results)
                     impacts["cdd"][key] = np.array(cdd_results)
 
-                    if verbose:
+                    if verbose:  # pragma: no cover
                         print(f"         • HDD for {key}")
                         print(f"         • CDD for {key}")
-
-            except ImportError as e:
-                if verbose:
-                    print(
-                        f"      ⚠️  meteor.impacts.DegreeDaysCalculator not available: {e}"
-                    )
             except Exception as e:
-                if verbose:
+                if verbose:  # pragma: no cover
                     print(f"      ⚠️  Error calculating degree days: {e}")
 
         return impacts

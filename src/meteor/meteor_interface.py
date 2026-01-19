@@ -297,12 +297,13 @@ class MeteorInterface:
             cache_file, self.model, expected_fields=[variable]
         )
 
-        if is_valid and verbose:
-            print("      ✓ Using cached pattern scaling model")
+        if is_valid:
+            if verbose:
+                print("      ✓ Using cached pattern scaling model")
             training_data = None
             ssp_config = None
         else:
-            if verbose and not is_valid:
+            if verbose:
                 print(f"      ⚠️  Cache miss: {info.get('message', 'No cache found')}")
 
             # Prepare training data

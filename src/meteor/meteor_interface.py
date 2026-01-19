@@ -52,9 +52,9 @@ class MeteorInterface:
     Examples
     --------
     >>> # Simple single-variable case
-    >>> emulator = MeteorInterface.from_cmip6(
+    >>> emulator = MeteorInterface(
     ...     model='NorESM2-MM',
-    ...     variable='pr',
+    ...     variables='pr',
     ...     cache_dir='./cache'
     ... )
     >>> emulator.train(auto=True)
@@ -67,7 +67,7 @@ class MeteorInterface:
     ... )
     >>>
     >>> # Multi-variable with gridded output
-    >>> emulator = MeteorInterface.from_cmip6(
+    >>> emulator = MeteorInterface(
     ...     model='CESM2',
     ...     variables=['tas', 'pr'],
     ...     cache_dir='./cache'
@@ -143,38 +143,6 @@ class MeteorInterface:
         # Training configuration
         self._training_config = {}
         self._is_trained = {var: False for var in self.variables}
-
-    @classmethod
-    def from_cmip6(cls, model, variable=None, variables=None, cache_dir=None, **kwargs):
-        """
-        Create MeteorInterface from CMIP6 model.
-
-        Parameters
-        ----------
-        model : str
-            CMIP6 model name
-        variable : str, optional
-            Single variable (use this or variables, not both)
-        variables : list of str, optional
-            Multiple variables (use this or variable, not both)
-        cache_dir : str, optional
-            Cache directory path
-        **kwargs
-            Additional arguments for data getter
-
-        Returns
-        -------
-        MeteorInterface
-            Configured emulator instance
-        """
-        if variable is not None and variables is not None:
-            raise ValueError("Specify either 'variable' or 'variables', not both")
-
-        vars_to_use = variables if variables is not None else variable
-        if vars_to_use is None:
-            raise ValueError("Must specify either 'variable' or 'variables'")
-
-        return cls(model, vars_to_use, cache_dir, data_getter_kwargs=kwargs)
 
     def train(
         self, auto=True, training_scenario="ssp245", variable_configs=None, verbose=True

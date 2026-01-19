@@ -24,7 +24,7 @@ Generate 100 realizations of global temperature and precipitation for SSP2-4.5:
 from meteor import MeteorInterface
 
 # Create and train emulator (uses cached models if available)
-emulator = MeteorInterface.from_cmip6(
+emulator = MeteorInterface(
     model='NorESM2-MM',
     variables=['tas', 'pr'],
     cache_dir='./cache'

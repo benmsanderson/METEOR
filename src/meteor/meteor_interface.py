@@ -751,6 +751,107 @@ class MeteorInterface:
 
         return em_data, conc_data
 
+    def _prepare_scm_forcing_data(self, scenario, start_year, end_year, verbose=True):
+        """
+        Prepare emissions and concentrations data for SCM pattern scaling.
+
+        Handles both standard SSP scenarios and custom emissions/concentrations,
+        including data validation, range extension, and clipping warnings.
+
+        Parameters
+        ----------
+        scenario : str or dict
+            Scenario specification (SSP name or custom dict)
+        start_year : int
+            Requested start year
+        end_year : int
+            Requested end year
+        verbose : bool
+            Print status messages
+
+        Returns
+        -------
+        tuple
+            (em_data, conc_data, actual_data_end, effective_start_year, effective_end_year)
+            where actual_data_end is None for SSP scenarios
+        """
+        # Parse scenario input
+        scenario_info = self._parse_scenario_input(scenario)
+        scenario_name = scenario_info["name"]
+
+        # Load forcing data
+        if scenario_info["type"] == "ssp":
+            # Standard SSP scenario
+            cscm_data_dir = os.path.join(os.path.dirname(__file__), "default_scm_data")
+            conc_file = os.path.join(cscm_data_dir, f"{scenario_name}_conc_RCMIP.txt")
+            em_file = os.path.join(cscm_data_dir, f"{scenario_name}_em_RCMIP.txt")
+
+            ih = input_handler.InputHandler({})
+            conc_data = input_handler.read_inputfile(conc_file)
+            em_data = ih.read_emissions(em_file)
+            actual_data_end = None
+            effective_start_year = start_year
+            effective_end_year = end_year
+        else:
+            # Custom scenario
+            em_data, conc_data = self._load_emissions_concentrations(
+                scenario_info["emissions"],
+                scenario_info["concentrations"],
+                verbose=verbose,
+            )
+
+            # Check if emissions data covers requested time range
+            em_start_year = em_data.index[0]
+            em_end_year = em_data.index[-1]
+
+            effective_start_year = start_year
+            effective_end_year = end_year
+
+            if end_year > em_end_year:
+                if verbose:
+                    print(
+                        f"      ⚠️  Warning: Emissions data ends at {em_end_year}, requested {end_year}"
+                    )
+                    print(f"      → Clipping output to {em_start_year}-{em_end_year}")
+                effective_end_year = em_end_year
+
+            if start_year < em_start_year:
+                if verbose:
+                    print(
+                        f"      ⚠️  Warning: Emissions data starts at {em_start_year}, requested {start_year}"
+                    )
+                    print(f"      → Clipping output to {em_start_year}-{em_end_year}")
+                effective_start_year = em_start_year
+
+            # Extend data to 2100 if needed (SCM default nyend)
+            data_end = min(em_data.index[-1], conc_data.index[-1])
+
+            if data_end < 2100:
+                if verbose:
+                    print(
+                        f"      → Emissions data ends at {data_end}, extending to 2100 (holding final values)"
+                    )
+
+                # Extend by repeating last year's values
+                years_to_add = list(range(data_end + 1, 2101))
+                for year in years_to_add:
+                    em_data.loc[year] = em_data.loc[data_end]
+                    conc_data.loc[year] = conc_data.loc[data_end]
+
+                # Sort index to maintain chronological order
+                em_data = em_data.sort_index()
+                conc_data = conc_data.sort_index()
+
+            actual_data_end = data_end
+
+        return (
+            em_data,
+            conc_data,
+            actual_data_end,
+            effective_start_year,
+            effective_end_year,
+        )
+
     def _get_or_compute_pattern_scaling(
         self, variable, scenario, start_year, end_year, verbose=True
     ):
@@ -765,8 +866,8 @@ class MeteorInterface:
         ----------
         variable : str
             Climate variable ('tas', 'pr')
-        scenario : str
-            Scenario name ('ssp245', 'ssp585', etc.)
+        scenario : str or dict
+            Scenario specification (SSP name or custom dict)
         start_year : int
             Start year for slicing
         end_year : int
@@ -779,7 +880,6 @@ class MeteorInterface:
         tuple
             (monthly_prediction_sliced, monthly_warming_sliced, em_data, conc_data)
         """
-        # Parse scenario input
         scenario_info = self._parse_scenario_input(scenario)
         scenario_name = scenario_info["name"]
 
@@ -793,73 +893,10 @@ class MeteorInterface:
                     f"      → Computing pattern scaling for {variable}, custom scenario '{scenario_name}'..."
                 )
 
-        # Load forcing data
-        if scenario_info["type"] == "ssp":
-            # Standard SSP scenario
-            cscm_data_dir = os.path.join(os.path.dirname(__file__), "default_scm_data")
-            conc_file = os.path.join(cscm_data_dir, f"{scenario_name}_conc_RCMIP.txt")
-            em_file = os.path.join(cscm_data_dir, f"{scenario_name}_em_RCMIP.txt")
-
-            ih = input_handler.InputHandler({})
-            conc_data = input_handler.read_inputfile(conc_file)
-            em_data = ih.read_emissions(em_file)
-        else:
-            # Custom scenario
-            em_data, conc_data = self._load_emissions_concentrations(
-                scenario_info["emissions"],
-                scenario_info["concentrations"],
-                verbose=verbose,
-            )
-
-            # Check if emissions data covers requested time range
-            em_start_year = em_data.index[0]
-            em_end_year = em_data.index[-1]
-
-            if end_year > em_end_year:
-                if verbose:
-                    print(
-                        f"      ⚠️  Warning: Emissions data ends at {em_end_year}, requested {end_year}"
-                    )
-                    print(f"      → Clipping output to {em_start_year}-{em_end_year}")
-                # Update end_year to match data availability
-                end_year = em_end_year
-
-            if start_year < em_start_year:
-                if verbose:
-                    print(
-                        f"      ⚠️  Warning: Emissions data starts at {em_start_year}, requested {start_year}"
-                    )
-                    print(f"      → Clipping output to {em_start_year}-{em_end_year}")
-                start_year = em_start_year
-
-        # Handle custom emissions data range
-        # The pattern model SCM runs to 2100 by default, so we need to extend data if needed
-        if scenario_info["type"] == "custom":
-            # data_start = max(em_data.index[0], conc_data.index[0])
-            data_end = min(em_data.index[-1], conc_data.index[-1])
-
-            # Extend data to 2100 if needed (hold last value constant)
-            # This allows the SCM to run to its default nyend=2100
-            if data_end < 2100:
-                if verbose:
-                    print(
-                        f"      → Emissions data ends at {data_end}, extending to 2100 (holding final values)"
-                    )
-
-                # Extend emissions - create new rows by repeating last year's values
-                years_to_add = list(range(data_end + 1, 2101))
-                for year in years_to_add:
-                    em_data.loc[year] = em_data.loc[data_end]
-                    conc_data.loc[year] = conc_data.loc[data_end]
-
-                # Sort index to maintain chronological order
-                em_data = em_data.sort_index()
-                conc_data = conc_data.sort_index()
-
-            # Store the actual data end year for later clipping
-            actual_data_end = data_end
-        else:
-            actual_data_end = None
+        # Prepare emissions and concentrations data
+        em_data, conc_data, actual_data_end, eff_start_year, eff_end_year = (
+            self._prepare_scm_forcing_data(scenario, start_year, end_year, verbose)
+        )
 
         # Generate FULL pattern scaling prediction (annual)
         pattern_model = self.pattern_models[variable]
@@ -882,21 +919,14 @@ class MeteorInterface:
         # Compute global mean for noise model
         full_monthly_warming = global_mean(full_monthly_prediction).values
 
-        # Slice to requested time range (or actual data range for custom scenarios)
-        if scenario_info["type"] == "custom" and actual_data_end is not None:
-            # Clip to actual data availability
-            effective_end_year = min(end_year, actual_data_end)
-            if effective_end_year < end_year and verbose:
-                print(
-                    f"      → Clipping output to {start_year}-{effective_end_year} (data availability)"
-                )
-        else:
-            effective_end_year = end_year
+        # Slice to requested time range (using effective years from data preparation)
+        if actual_data_end is not None and eff_end_year < end_year and verbose:
+            print(
+                f"      → Clipping output to {eff_start_year}-{eff_end_year} (data availability)"
+            )
 
-        start_month_idx = (start_year - base_year) * 12
-        end_month_idx = (
-            effective_end_year - base_year + 1
-        ) * 12  # +1 to include end_year
+        start_month_idx = (eff_start_year - base_year) * 12
+        end_month_idx = (eff_end_year - base_year + 1) * 12  # +1 to include end_year
 
         monthly_prediction_sliced = full_monthly_prediction.isel(
             month=slice(start_month_idx, end_month_idx)

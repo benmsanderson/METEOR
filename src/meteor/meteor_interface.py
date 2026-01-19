@@ -58,7 +58,7 @@ class MeteorInterface:
     ...     cache_dir='./cache'
     ... )
     >>> emulator.train(auto=True)
-    >>> ensemble = emulator.generate(
+    >>> ensemble = emulator.generate_ensemble_outputs(
     ...     scenario='ssp245',
     ...     start_year=2020,
     ...     end_year=2100,
@@ -73,7 +73,7 @@ class MeteorInterface:
     ...     cache_dir='./cache'
     ... )
     >>> emulator.train(auto=True)
-    >>> ensemble = emulator.generate(
+    >>> ensemble = emulator.generate_ensemble_outputs(
     ...     scenario='ssp245',
     ...     start_year=2020,
     ...     end_year=2100,
@@ -83,7 +83,7 @@ class MeteorInterface:
     ... )
     >>>
     >>> # Custom emissions scenario
-    >>> ensemble = emulator.generate(
+    >>> ensemble = emulator.generate_ensemble_outputs(
     ...     scenario={'emissions': 'path/to/custom_emissions.txt'},
     ...     start_year=2020,
     ...     end_year=2100,
@@ -449,7 +449,7 @@ class MeteorInterface:
             "fitted_params_3d": None,  # Will be fitted if gridded output requested
         }
 
-    def generate(
+    def generate_ensemble_outputs(
         self,
         scenario,
         start_year,
@@ -514,7 +514,7 @@ class MeteorInterface:
         Examples
         --------
         >>> # Generate ensemble with noise
-        >>> ensemble = emulator.generate(
+        >>> ensemble = emulator.generate_ensemble_outputs(
         ...     scenario='ssp245',
         ...     start_year=2020,
         ...     end_year=2100,
@@ -525,7 +525,7 @@ class MeteorInterface:
         ... )
         >>>
         >>> # Generate climatology only (no noise)
-        >>> climatology = emulator.generate(
+        >>> climatology = emulator.generate_ensemble_outputs(
         ...     scenario='ssp245',
         ...     start_year=2020,
         ...     end_year=2100,
@@ -636,6 +636,28 @@ class MeteorInterface:
             print("=" * 60)
 
         return ensemble
+
+    def generate(self, *args, **kwargs):
+        """
+        Generate ensemble outputs for all variables.
+
+        .. deprecated::
+            Use :meth:`generate_ensemble_outputs` instead.
+            This method will be removed in a future version.
+
+        See Also
+        --------
+        generate_ensemble_outputs : Replacement method with same signature
+        """
+        import warnings
+
+        warnings.warn(
+            "generate() is deprecated and will be removed in a future version. "
+            "Use generate_ensemble_outputs() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.generate_ensemble_outputs(*args, **kwargs)
 
     def _parse_scenario_input(self, scenario):
         """

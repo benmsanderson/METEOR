@@ -73,7 +73,7 @@ class EnsembleOutput:
 
     Examples
     --------
-    >>> ensemble = emulator.generate(...)
+    >>> ensemble = emulator.generate_ensemble_outputs(...)
     >>>
     >>> # Access time series
     >>> tas_global = ensemble['tas'].timeseries['global']

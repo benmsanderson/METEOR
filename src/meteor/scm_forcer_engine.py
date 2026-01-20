@@ -12,8 +12,6 @@ import numpy as np
 import pandas as pd
 from ciceroscm import concentrations_emissions_handler, input_handler
 
-from .scm_input_lib import load_emissions_concentrations_from_name
-
 
 def aerosol_priority_mapping(
     comps, bc_oc_to_co2=True

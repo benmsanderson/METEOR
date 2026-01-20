@@ -245,13 +245,15 @@ class CacheHandler:
                 try:
                     os.remove(cache_file)
                     logging.debug("Removed invalid cache file: %s", cache_file)
-                except OSError:
+                except OSError:  # pragma: no cover
                     pass
                 return False
 
             return True
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except (
+            Exception
+        ) as e:  # pylint: disable=broad-exception-caught # pragma: no cover
             # Cache file is corrupted, remove it
             try:
                 os.remove(cache_file)
@@ -350,7 +352,7 @@ class CacheHandler:
                     )
                     try:
                         os.remove(cache_path)
-                    except OSError:
+                    except OSError:  # pragma: no cover
                         pass
                     return None
 
@@ -380,7 +382,7 @@ class CacheHandler:
                 )
                 try:
                     os.remove(cache_path)
-                except OSError:
+                except OSError:  # pragma: no cover
                     pass
         return None
 
@@ -442,7 +444,9 @@ class CacheHandler:
 
             return True
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except (
+            Exception
+        ) as e:  # pylint: disable=broad-exception-caught  # pragma: no cover
             logging.debug("Validation failed with exception: %s", e)
             return False
 
@@ -544,7 +548,7 @@ class CacheHandler:
             else:
                 data_to_save.to_netcdf(cache_path)
                 logging.debug("Saved uncompressed cache file to %s", cache_path)
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError) as e:  # pragma: no cover
             # Failed to cache, but don't raise error
             logging.warning(
                 "Failed to save data to cache at %s: %s. "

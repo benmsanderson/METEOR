@@ -1383,9 +1383,12 @@ class MeteorInterface:
                     if verbose:  # pragma: no cover
                         print(f"         • HDD for {key}")
                         print(f"         • CDD for {key}")
-            except Exception as e:
+
+            except ImportError as e:
                 if verbose:  # pragma: no cover
-                    print(f"      ⚠️  Error calculating degree days: {e}")
+                    print(
+                        f"      ⚠️  meteor.impacts.DegreeDaysCalculator not available: {e}"
+                    )
 
         return impacts
 

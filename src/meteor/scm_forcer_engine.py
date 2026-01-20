@@ -236,10 +236,10 @@ class ScmEngineForPatternScaling:
         """
         # Set defaults for temporal parameters
         defaults = {
-            "emstart": 1850,
-            "nystart": 1750,
+            "emstart": 2000,
+            "nystart": 1950,
             "nyend": 2100,
-            "conc_run": False,
+            "conc_run": True,
         }
 
         for key, default in defaults.items():

@@ -717,7 +717,7 @@ class MeteorNoiseGenerator:
 
         # Get EOFs reshaped to spatial grid (n_modes, n_lat, n_lon)
         eof_components = self.pca.components_.reshape(self.n_modes, n_lat, n_lon)
-        if region_mask is None and region != 'global':
+        if region_mask is None and region != "global":
             region_mask = self._get_ar6_region_mask(region)
 
         eof_projections = self._weighted_mean_over_region(

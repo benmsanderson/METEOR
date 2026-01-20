@@ -230,8 +230,8 @@ class MeteorNoiseGenerator:
             if len(time) < rolling_window:
                 raise ValueError(
                     f"Time series too short for noise model fitting. "
-                    f"Need at least {rolling_window} months ({rolling_window/12:.1f} years), "
-                    f"but got {len(time)} months ({len(time)/12:.1f} years). "
+                    f"Need at least {rolling_window} months ({rolling_window / 12:.1f} years), "
+                    f"but got {len(time)} months ({len(time) / 12:.1f} years). "
                     f"Consider using a longer training period or reducing the smoothing window."
                 )
 

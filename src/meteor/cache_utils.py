@@ -56,9 +56,7 @@ def get_pattern_scaling_cache_path(
             cache_dir,
             f"cmip6-{model_name}-{scenario}-{variable}_pattern_scaling.pkl",
         )
-    return os.path.join(
-        cache_dir, f"cmip6-{model_name}-{scenario}_pattern_scaling.pkl"
-    )
+    return os.path.join(cache_dir, f"cmip6-{model_name}-{scenario}_pattern_scaling.pkl")
 
 
 def validate_pattern_scaling_cache(

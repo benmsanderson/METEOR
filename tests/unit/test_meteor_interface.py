@@ -35,7 +35,7 @@ def test_get_default_config():
         interface = MeteorInterface(
             model="TestModel", variables=["tas"], cache_dir="/tmp/test"
         )
-        
+
     tas_config = interface._get_default_config("tas")
     assert tas_config["n_modes_pattern"] == 3
     assert tas_config["n_modes_noise"] == 40
@@ -541,4 +541,3 @@ def test_generate_before_training_clear_error():
         # Error message should mention which variable
         assert "not trained" in str(exc_info.value).lower()
         assert "train()" in str(exc_info.value).lower()
-

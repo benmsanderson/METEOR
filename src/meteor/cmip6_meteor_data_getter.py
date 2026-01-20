@@ -1361,7 +1361,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         """
         Get the standardized cache file path for a pattern scaling model.
 
-        .. deprecated:: 
+        .. deprecated::
             Use :func:`meteor.cache_utils.get_pattern_scaling_cache_path` instead.
             This method will be removed in a future version.
 
@@ -1399,7 +1399,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         """
         Validate a cached pattern scaling model file.
 
-        .. deprecated:: 
+        .. deprecated::
             Use :func:`meteor.cache_utils.validate_pattern_scaling_cache` instead.
             This method will be removed in a future version.
 
@@ -1435,7 +1435,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         """
         Get the standardized cache file path for a noise model.
 
-        .. deprecated:: 
+        .. deprecated::
             Use :func:`meteor.cache_utils.get_noise_model_cache_path` instead.
             This method will be removed in a future version.
 
@@ -1475,7 +1475,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         """
         Validate a cached noise model file.
 
-        .. deprecated:: 
+        .. deprecated::
             Use :func:`meteor.cache_utils.validate_noise_model_cache` instead.
             This method will be removed in a future version.
 

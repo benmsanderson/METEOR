@@ -176,10 +176,10 @@ class ScmEngineForPatternScaling:
         """
         if cfg is None:
             cfg = {}
-        
+
         # Validate and set defaults for all config parameters
         cfg = self._validate_and_set_defaults(cfg)
-        
+
         # Load default data files if not provided
         if "concentrations_data" not in cfg:
             cfg["concentrations_data"] = input_handler.read_inputfile(
@@ -198,7 +198,7 @@ class ScmEngineForPatternScaling:
                     "ssp245_em_RCMIP.txt",
                 )
             )
-        
+
         # Create the configuration object
         self.cfg = ScmEngineConfigurations(
             gaspam_data=input_handler.read_components(
@@ -212,21 +212,21 @@ class ScmEngineForPatternScaling:
         )
 
         self.input_h = input_handler.InputHandler(asdict(self.cfg))
-    
+
     def _validate_and_set_defaults(self, cfg):
         """
         Validate config and set sensible defaults for temporal parameters.
-        
+
         Parameters
         ----------
         cfg : dict
             Configuration dictionary
-        
+
         Returns
         -------
         dict
             Validated configuration with defaults set
-        
+
         Raises
         ------
         ValueError
@@ -239,30 +239,30 @@ class ScmEngineForPatternScaling:
             "nyend": 2100,
             "conc_run": False,
         }
-        
+
         for key, default in defaults.items():
             if key not in cfg:
                 cfg[key] = default
-        
+
         # Sanity checks for temporal consistency
         if cfg["nystart"] > cfg["emstart"]:
             raise ValueError(
                 f"nystart ({cfg['nystart']}) must be <= emstart ({cfg['emstart']}). "
                 "The simulation start year (nystart) should not be after the emission start year."
             )
-        
+
         if cfg["emstart"] > cfg["nyend"]:
             raise ValueError(
                 f"emstart ({cfg['emstart']}) must be <= nyend ({cfg['nyend']}). "
                 "The emission start year should not be after the simulation end year."
             )
-        
+
         if cfg["nystart"] > cfg["nyend"]:
             raise ValueError(
                 f"nystart ({cfg['nystart']}) must be <= nyend ({cfg['nyend']}). "
                 "The simulation start year should not be after the end year."
             )
-        
+
         return cfg
 
     def run_to_get_scaling(self, exps):

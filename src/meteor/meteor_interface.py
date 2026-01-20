@@ -1575,9 +1575,6 @@ class MeteorInterface:
                     print(
                         f"      ⚠️  meteor.impacts.DegreeDaysCalculator not available: {e}"
                     )
-            except Exception as e:
-                if verbose:
-                    print(f"      ⚠️  Error calculating degree days: {e}")
 
         return impacts
 

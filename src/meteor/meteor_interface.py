@@ -83,13 +83,13 @@ class MeteorInterface:
     Examples
     --------
     >>> # Simple single-variable case
-    >>> emulator = MeteorInterface.from_cmip6(
+    >>> emulator = MeteorInterface(
     ...     model='NorESM2-MM',
-    ...     variable='pr',
+    ...     variables='pr',
     ...     cache_dir='./cache'
     ... )
     >>> emulator.train(auto=True)
-    >>> ensemble = emulator.generate(
+    >>> ensemble = emulator.generate_ensemble_outputs(
     ...     scenario='ssp245',
     ...     start_year=2020,
     ...     end_year=2100,
@@ -98,13 +98,13 @@ class MeteorInterface:
     ... )
     >>>
     >>> # Multi-variable with gridded output
-    >>> emulator = MeteorInterface.from_cmip6(
+    >>> emulator = MeteorInterface(
     ...     model='CESM2',
     ...     variables=['tas', 'pr'],
     ...     cache_dir='./cache'
     ... )
     >>> emulator.train(auto=True)
-    >>> ensemble = emulator.generate(
+    >>> ensemble = emulator.generate_ensemble_outputs(
     ...     scenario='ssp245',
     ...     start_year=2020,
     ...     end_year=2100,
@@ -114,7 +114,7 @@ class MeteorInterface:
     ... )
     >>>
     >>> # Custom emissions scenario
-    >>> ensemble = emulator.generate(
+    >>> ensemble = emulator.generate_ensemble_outputs(
     ...     scenario={'emissions': 'path/to/custom_emissions.txt'},
     ...     start_year=2020,
     ...     end_year=2100,
@@ -178,39 +178,6 @@ class MeteorInterface:
         # Training configuration
         self._training_config = {}
         self._is_trained = {var: False for var in self.variables}
-
-    # TODO: This is a weird factory method type of thing, needed?
-    @classmethod
-    def from_cmip6(cls, model, variable=None, variables=None, cache_dir=None, **kwargs):
-        """
-        Create MeteorInterface from CMIP6 model.
-
-        Parameters
-        ----------
-        model : str
-            CMIP6 model name
-        variable : str, optional
-            Single variable (use this or variables, not both)
-        variables : list of str, optional
-            Multiple variables (use this or variable, not both)
-        cache_dir : str, optional
-            Cache directory path
-        **kwargs
-            Additional arguments for data getter
-
-        Returns
-        -------
-        MeteorInterface
-            Configured emulator instance
-        """
-        if variable is not None and variables is not None:
-            raise ValueError("Specify either 'variable' or 'variables', not both")
-
-        vars_to_use = variables if variables is not None else variable
-        if vars_to_use is None:
-            raise ValueError("Must specify either 'variable' or 'variables'")
-
-        return cls(model, vars_to_use, cache_dir, data_getter_kwargs=kwargs)
 
     def train(
         self, auto=True, training_scenario="ssp245", variable_configs=None, verbose=True
@@ -336,12 +303,13 @@ class MeteorInterface:
             cache_file, self.model
         )
 
-        if is_valid and verbose:
-            print("      ✓ Using cached pattern scaling model")
+        if is_valid:
+            if verbose:  # pragma: no cover
+                print("      ✓ Using cached pattern scaling model")
             training_data = None
             ssp_config = None
         else:
-            if verbose and not is_valid:
+            if verbose:  # pragma: no cover
                 print(f"      ⚠️  Cache miss: {info.get('message', 'No cache found')}")
 
             # Prepare training data
@@ -477,7 +445,7 @@ class MeteorInterface:
             "fitted_params_3d": None,  # Will be fitted if gridded output requested
         }
 
-    def generate(
+    def generate_ensemble_outputs(
         self,
         scenario,
         start_year,
@@ -542,7 +510,7 @@ class MeteorInterface:
         Examples
         --------
         >>> # Generate ensemble with noise
-        >>> ensemble = emulator.generate(
+        >>> ensemble = emulator.generate_ensemble_outputs(
         ...     scenario='ssp245',
         ...     start_year=2020,
         ...     end_year=2100,
@@ -553,7 +521,7 @@ class MeteorInterface:
         ... )
         >>>
         >>> # Generate climatology only (no noise)
-        >>> climatology = emulator.generate(
+        >>> climatology = emulator.generate_ensemble_outputs(
         ...     scenario='ssp245',
         ...     start_year=2020,
         ...     end_year=2100,

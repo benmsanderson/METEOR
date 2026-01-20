@@ -215,16 +215,26 @@ class MeteorNoiseGenerator:
         # Calculate or use provided global temperature
         if custom_global_temp is not None:
             # Validate custom temperature array
-            print("Hello")
             if len(custom_global_temp) != len(time):
                 raise ValueError(
                     f"custom_global_temp length ({len(custom_global_temp)}) "
                     f"must match data time dimension ({len(time)})"
                 )
             t_glob = np.array(custom_global_temp)
+
         else:
             # Calculate latitude-weighted global mean temperature
             t_globm = global_mean(ds[variable_name].mean(dim=["ens"]))
+
+            # Check if timeseries is long enough for rolling smoothing
+            rolling_window = 60  # 5 years
+            if len(time) < rolling_window:
+                raise ValueError(
+                    f"Time series too short for noise model fitting. "
+                    f"Need at least {rolling_window} months ({rolling_window / 12:.1f} years), "
+                    f"but got {len(time)} months ({len(time) / 12:.1f} years). "
+                    f"Consider using a longer training period or reducing the smoothing window."
+                )
 
             # Apply baseline correction
             if picontrol_baseline is not None:
@@ -240,10 +250,10 @@ class MeteorNoiseGenerator:
                 # Fall back to original method (first 42 years)
                 t_globm = t_globm - t_globm[:500].mean()  # Remove baseline
                 print("   Using first 42 years as baseline")
-            print(t_globm)
+
             # Apply smoothing
             t_glob = (
-                t_globm.rolling(month=60, center=True, min_periods=1)
+                t_globm.rolling(month=rolling_window, center=True, min_periods=1)
                 .mean()
                 .interpolate_na("month", method="nearest", fill_value="extrapolate")
                 .values

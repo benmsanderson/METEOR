@@ -203,35 +203,22 @@ def fit_distribution_parameters_3d(spatial_data, distribution="gamma"):
         params = {"mean": mean_params, "std": std_params}
 
     elif distribution == "gamma":
-        # Fit Gamma distribution at each grid point
+        # Fit Gamma distribution at each grid point by reusing 1D functionality
         shape_params = np.zeros(n_spatial)
         scale_params = np.zeros(n_spatial)
 
         print(f"Fitting Gamma distribution to {n_spatial} grid points...")
         for i in range(n_spatial):
             grid_data = data_reshaped[:, i]
-            # Remove any NaNs
-            grid_data_clean = grid_data[~np.isnan(grid_data)]
-
-            if len(grid_data_clean) > 0 and np.all(grid_data_clean >= 0):
-                # Fit gamma with location fixed at 0
-                try:
-                    shape, loc, scale = stats.gamma.fit(grid_data_clean, floc=0)
-                    shape_params[i] = shape
-                    scale_params[i] = scale
-                except (ValueError, RuntimeError, RuntimeWarning) as e:
-                    # If fit fails due to convergence issues or invalid parameters,
-                    # fall back to method of moments
-                    mean_val = np.mean(grid_data_clean)
-                    var_val = np.var(grid_data_clean)
-                    if var_val > 0:
-                        shape_params[i] = (mean_val**2) / var_val
-                        scale_params[i] = var_val / mean_val
-                    else:
-                        shape_params[i] = 1.0
-                        scale_params[i] = mean_val
-            else:
-                # Default values for invalid data
+            
+            # Use the 1D fitting function for consistency
+            try:
+                grid_params = fit_distribution_parameters_1d(grid_data, distribution="gamma")
+                shape_params[i] = grid_params["shape"]
+                scale_params[i] = grid_params["scale"]
+            except (ValueError, RuntimeError, RuntimeWarning) as e:
+                # If fit fails completely (e.g., all NaNs or invalid data),
+                # use default values
                 shape_params[i] = 1.0
                 scale_params[i] = 0.01
 

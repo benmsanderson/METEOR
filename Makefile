@@ -32,7 +32,7 @@ checks: $(VENV_DIR)  ## run all the checks
 		echo "\n\n=== notebook tests 1 ==="; $(VENV_DIR)/bin/pytest notebooks/METEOR_Interface_Paper_plots.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
 		echo "\n\n=== notebook tests 2 ==="; $(VENV_DIR)/bin/pytest notebooks/GCAM_predict.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
 		echo "\n\n=== notebook tests 3 ==="; $(VENV_DIR)/bin/pytest notebooks/METEOR_Interface_Examples.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
-		echo "\n\n=== notebook tests 4 ==="; $(VENV_DIR)/bin/pytest notebooks/METEOR_Interface_Clean_Demo.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
+		echo "\n\n=== notebook tests 4 ==="; $(VENV_DIR)/bin/pytest notebooks/METEOR_Impacts_Clean_Demo.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
 		echo "\n\n=== tests ==="; $(VENV_DIR)/bin/pytest tests -r a --cov=meteor --cov-report='' \
 			&& $(VENV_DIR)/bin/coverage report --fail-under=90 || echo "--- tests failed ---" >&2; \
 		echo

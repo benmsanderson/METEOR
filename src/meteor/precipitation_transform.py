@@ -74,8 +74,9 @@ def fit_distribution_parameters_1d(timeseries_data, distribution="gamma"):
         # Fit gamma with location fixed at 0
         try:
             shape, loc, scale = stats.gamma.fit(data_clean, floc=0)
-        except Exception:
-            # If fit fails, use method of moments
+        except (ValueError, RuntimeError, RuntimeWarning) as e:
+            # If fit fails due to convergence issues or invalid parameters,
+            # fall back to method of moments
             mean_val = np.mean(data_clean)
             var_val = np.var(data_clean)
             if var_val > 0:
@@ -95,8 +96,8 @@ def fit_distribution_parameters_1d(timeseries_data, distribution="gamma"):
         try:
             shape, loc, scale = stats.weibull_min.fit(data_clean, floc=0)
             params = {"shape": shape, "scale": scale}
-        except Exception:
-            # Fallback to Gamma
+        except (ValueError, RuntimeError, RuntimeWarning) as e:
+            # Fallback to simple gamma-like parameters if Weibull fit fails
             mean_val = np.mean(data_clean)
             params = {"shape": 1.5, "scale": mean_val / 1.5}
 
@@ -112,8 +113,8 @@ def fit_distribution_parameters_1d(timeseries_data, distribution="gamma"):
                 "shape": shape,  # This is sigma (std of log)
                 "scale": scale,  # This is exp(mu) where mu is mean of log
             }
-        except Exception:
-            # Fallback
+        except (ValueError, RuntimeError, RuntimeWarning) as e:
+            # Fallback to moment-based estimation if lognorm fit fails
             log_data = np.log(data_clean)
             params = {"shape": np.std(log_data), "scale": np.exp(np.mean(log_data))}
 
@@ -129,8 +130,8 @@ def fit_distribution_parameters_1d(timeseries_data, distribution="gamma"):
                 "c": c,  # Second shape parameter
                 "scale": scale,
             }
-        except Exception:
-            # Fallback to regular Gamma
+        except (ValueError, RuntimeError, RuntimeWarning) as e:
+            # Fallback to regular Gamma if generalized gamma fit fails
             shape, loc, scale = stats.gamma.fit(data_clean, floc=0)
             params = {"a": shape, "c": 1.0, "scale": scale}
 
@@ -218,8 +219,9 @@ def fit_distribution_parameters_3d(spatial_data, distribution="gamma"):
                     shape, loc, scale = stats.gamma.fit(grid_data_clean, floc=0)
                     shape_params[i] = shape
                     scale_params[i] = scale
-                except Exception:
-                    # If fit fails, use method of moments
+                except (ValueError, RuntimeError, RuntimeWarning) as e:
+                    # If fit fails due to convergence issues or invalid parameters,
+                    # fall back to method of moments
                     mean_val = np.mean(grid_data_clean)
                     var_val = np.var(grid_data_clean)
                     if var_val > 0:

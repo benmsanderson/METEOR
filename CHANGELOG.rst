@@ -88,7 +88,7 @@ The changes listed in this file are categorised as follows:
     - Separate cache validation for pattern scaling and noise models
     - Enhanced cache key generation with compression settings
     - Better error handling for cache operations
-    - Support for composite scenario training data
+    - Support for composite scenario training data 
 - **Updated `ScmEngineForPatternScaling` configuration**
     - New ``ScmEngineConfigurations`` dataclass for managing SCM inputs
     - ``_validate_and_set_defaults()`` method for configuration validation

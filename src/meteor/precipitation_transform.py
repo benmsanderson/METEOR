@@ -74,7 +74,7 @@ def fit_distribution_parameters_1d(timeseries_data, distribution="gamma"):
         # Fit gamma with location fixed at 0
         try:
             shape, loc, scale = stats.gamma.fit(data_clean, floc=0)
-        except Exception:
+        except (ValueError, RuntimeError, RuntimeWarning):
             # If fit fails, use method of moments
             mean_val = np.mean(data_clean)
             var_val = np.var(data_clean)
@@ -95,7 +95,7 @@ def fit_distribution_parameters_1d(timeseries_data, distribution="gamma"):
         try:
             shape, loc, scale = stats.weibull_min.fit(data_clean, floc=0)
             params = {"shape": shape, "scale": scale}
-        except Exception:
+        except (ValueError, RuntimeError, RuntimeWarning):
             # Fallback to Gamma
             mean_val = np.mean(data_clean)
             params = {"shape": 1.5, "scale": mean_val / 1.5}
@@ -112,7 +112,7 @@ def fit_distribution_parameters_1d(timeseries_data, distribution="gamma"):
                 "shape": shape,  # This is sigma (std of log)
                 "scale": scale,  # This is exp(mu) where mu is mean of log
             }
-        except Exception:
+        except (ValueError, RuntimeError, RuntimeWarning):
             # Fallback
             log_data = np.log(data_clean)
             params = {"shape": np.std(log_data), "scale": np.exp(np.mean(log_data))}
@@ -129,7 +129,7 @@ def fit_distribution_parameters_1d(timeseries_data, distribution="gamma"):
                 "c": c,  # Second shape parameter
                 "scale": scale,
             }
-        except Exception:
+        except (ValueError, RuntimeError, RuntimeWarning):
             # Fallback to regular Gamma
             shape, loc, scale = stats.gamma.fit(data_clean, floc=0)
             params = {"a": shape, "c": 1.0, "scale": scale}
@@ -209,27 +209,16 @@ def fit_distribution_parameters_3d(spatial_data, distribution="gamma"):
         print(f"Fitting Gamma distribution to {n_spatial} grid points...")
         for i in range(n_spatial):
             grid_data = data_reshaped[:, i]
-            # Remove any NaNs
-            grid_data_clean = grid_data[~np.isnan(grid_data)]
-
-            if len(grid_data_clean) > 0 and np.all(grid_data_clean >= 0):
-                # Fit gamma with location fixed at 0
-                try:
-                    shape, loc, scale = stats.gamma.fit(grid_data_clean, floc=0)
-                    shape_params[i] = shape
-                    scale_params[i] = scale
-                except Exception:
-                    # If fit fails, use method of moments
-                    mean_val = np.mean(grid_data_clean)
-                    var_val = np.var(grid_data_clean)
-                    if var_val > 0:
-                        shape_params[i] = (mean_val**2) / var_val
-                        scale_params[i] = var_val / mean_val
-                    else:
-                        shape_params[i] = 1.0
-                        scale_params[i] = mean_val
-            else:
-                # Default values for invalid data
+            # Use the 1D fitting function for consistency
+            try:
+                grid_params = fit_distribution_parameters_1d(
+                    grid_data, distribution="gamma"
+                )
+                shape_params[i] = grid_params["shape"]
+                scale_params[i] = grid_params["scale"]
+            except (ValueError, RuntimeError, RuntimeWarning):
+                # If fit fails completely (e.g., all NaNs or invalid data),
+                # use default values
                 shape_params[i] = 1.0
                 scale_params[i] = 0.01
 

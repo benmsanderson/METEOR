@@ -1,6 +1,8 @@
 import os
 import shutil
 
+import pytest
+
 from meteor import cache_handling
 
 
@@ -80,6 +82,16 @@ def test_cache_handler_setup(tmp_path):
     assert not handler_not_working.check_if_cmip6_cached(
         "get_single_var_mod_data_monthly", "piControl", "tas", "TestModel"
     )
+    with pytest.raises(RuntimeError, match="Cache is not functioning."):
+        handler_not_working.load_cmip6_cached_data(
+            "get_single_var_mod_data_monthly", "piControl", "tas", "TestModel"
+        )
+    assert handler_not_working._load_from_cmip6_cache("not_a_cache_key") is None
+    assert (
+        handler_not_working.save_cmip6_to_cache("not_data", "not_method_name") is None
+    )
+    assert handler_not_working.get_pattern_scaling_cache_path("TestModel") is None
+    assert handler_not_working.get_noise_model_cache_path("TestModel", "pr") is None
 
 
 def test_generate_cache_key():
@@ -170,6 +182,11 @@ def test_cache_clearing(tmp_path):
     assert dummy_file2.exists()
     handler.clear_cache()
     assert not dummy_file2.exists()
+
+    handler.save_cmip6_to_cache(
+        None, "get_single_var_mod_data", "piControl", "tas", "TestModel"
+    )
+    assert len(os.listdir(os.path.join(cache_dir, "cmip6"))) == 0
 
 
 def test_cache_path_includes_variable_name():

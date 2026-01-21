@@ -17,7 +17,7 @@ def test_meteor_interface_integration_pr(test_data_dir):
     assert meteor._is_trained["pr"] is True
 
     # Generate ensemble output
-    ensemble = meteor.generate(
+    ensemble = meteor.generate_ensemble_outputs(
         scenario="ssp245",
         start_year=2015,
         end_year=2035,
@@ -85,7 +85,7 @@ def test_meteor_interface_integration_tas(test_data_dir):
     assert meteor._is_trained["tas"] is True
 
     # Generate ensemble output
-    ensemble = meteor.generate(
+    ensemble = meteor.generate_ensemble_outputs(
         scenario="ssp245",
         start_year=2015,
         end_year=2035,

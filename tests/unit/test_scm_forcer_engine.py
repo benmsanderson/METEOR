@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from meteor import scm_forcer_engine
 from meteor.scm_forcer_engine import (
@@ -188,3 +189,20 @@ def test_scm_engine_per_forcer_results():
     per_forcer_results = sefps.run_and_return_per_forcer_results(["base", "co2x2"])
     # Should return some result structure
     assert per_forcer_results is not None
+
+
+def test_validata_and_set_defaults_error_handling():
+    """Test error handling in _validate_and_set_defaults method."""
+    with pytest.raises(
+        ValueError,
+        match=r"nystart \(2015\) must be <= emstart \(2000\). The simulation start year \(nystart\) should not be after the emission start year.",
+    ):
+        scm_forcer_engine._validate_and_set_defaults({"nystart": 2015})
+    with pytest.raises(
+        ValueError, match=r"emstart \(2500\) must be <= nyend \(2100\)."
+    ):
+        scm_forcer_engine._validate_and_set_defaults({"emstart": 2500})
+    with pytest.raises(
+        ValueError, match=r"nystart \(1950\) must be <= emstart \(1940\)"
+    ):
+        scm_forcer_engine._validate_and_set_defaults({"emstart": 1940, "nyend": 1940})

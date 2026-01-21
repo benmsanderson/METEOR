@@ -119,7 +119,7 @@ def get_weights_for_ds(ds, lat_name=None, lon_name=None, weights=None):
         # Get coordinate names if not provided
         if lat_name is None:
             lat_name = get_lat_name(ds)
-        if lon_name is None:
+        if lon_name is None and len(ds.shape) > 1:
             lon_name = get_lon_name(ds)
         # Create weights if not provided
         lat = ds[lat_name]

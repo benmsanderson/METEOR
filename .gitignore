@@ -141,6 +141,12 @@ notebooks/noise_cache/*.pkl
 examples/noise_cache
 
 examples/cache
+
+# Test cache (pickle files should be regenerated, not committed)
+tests/test-data/light_mock_cache/*.pkl
+tests/test-data/light_mock_cache/pattern_scaling/*.pkl
+tests/test-data/light_mock_cache/noise_models/*.pkl
+
 # repository figures
 notebooks/figures/CMIP_recon_patterns
 notebooks/figures/CMIP_recon_SSP534_ts_reg

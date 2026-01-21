@@ -228,29 +228,6 @@ def test_pr_not_converted_to_anomalies(mock_interface):
     assert call_count[0] == 1, "piControl should not be loaded for precipitation"
 
 
-def test_from_cmip6_creates_interface():
-    """Test that from_cmip6 factory method works."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
-        interface = MeteorInterface.from_cmip6(
-            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
-        )
-
-        assert interface.model == "TestModel"
-        assert interface.variables == ["tas"]
-
-
-def test_multiple_variables_supported():
-    """Test that multiple variables can be specified."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
-        interface = MeteorInterface.from_cmip6(
-            model="TestModel", variables=["tas", "pr"], cache_dir="/tmp/test"
-        )
-
-        assert "tas" in interface.variables
-        assert "pr" in interface.variables
-        assert len(interface.variables) == 2
-
-
 def test_train_initializes_state_tracking():
     """Test that MeteorInterface initializes training state tracking."""
     with patch("meteor.meteor_interface.Cmip6MeteorDataGetter") as mock_getter_class:
@@ -363,7 +340,7 @@ def test_model_dictionaries_are_mutable():
 
 
 def test_generate_requires_training():
-    """Test that generate() raises error if not trained."""
+    """Test that generate_ensemble_outputs() raises error if not trained."""
     with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
         interface = MeteorInterface(
             model="TestModel", variables=["tas"], cache_dir="/tmp/test"
@@ -371,13 +348,18 @@ def test_generate_requires_training():
 
         # Try to generate without training
         with pytest.raises(RuntimeError, match="not trained"):
-            interface.generate(
+            interface.generate_ensemble_outputs(
                 scenario="ssp245",
                 start_year=2020,
                 end_year=2050,
                 n_realizations=10,
                 timeseries=["global"],
             )
+        empty_impacts = interface._apply_impacts(
+            np.array([290.0]), "tas", {"unknown_impact": 5}
+        )
+        assert isinstance(empty_impacts, dict)
+        assert len(empty_impacts) == 0
 
 
 def test_generate_with_noise_false_forces_single_realization():
@@ -404,7 +386,7 @@ def test_generate_with_noise_false_forces_single_realization():
         interface._generate_timeseries = capture_args
 
         # Call generate with include_noise=False but n_realizations=100
-        interface.generate(
+        interface.generate_ensemble_outputs(
             scenario="ssp245",
             start_year=2020,
             end_year=2020,
@@ -422,7 +404,7 @@ def test_generate_with_noise_false_forces_single_realization():
 
 
 def test_generate_returns_ensemble_output():
-    """Test that generate() returns EnsembleOutput container."""
+    """Test that generate_ensemble_outputs() returns EnsembleOutput container."""
     with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
         interface = MeteorInterface(
             model="TestModel", variables=["tas"], cache_dir="/tmp/test"
@@ -437,7 +419,7 @@ def test_generate_returns_ensemble_output():
             return_value={"global": xr.DataArray([290.0], dims=["time"])}
         )
 
-        result = interface.generate(
+        result = interface.generate_ensemble_outputs(
             scenario="ssp245",
             start_year=2020,
             end_year=2020,
@@ -453,7 +435,7 @@ def test_generate_returns_ensemble_output():
 
 
 def test_generate_populates_timeseries():
-    """Test that generate() populates timeseries outputs."""
+    """Test that generate_ensemble_outputs() populates timeseries outputs."""
     with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
         interface = MeteorInterface(
             model="TestModel", variables=["tas"], cache_dir="/tmp/test"
@@ -470,7 +452,7 @@ def test_generate_populates_timeseries():
         }
         interface._generate_timeseries = MagicMock(return_value=mock_timeseries)
 
-        result = interface.generate(
+        result = interface.generate_ensemble_outputs(
             scenario="ssp245",
             start_year=2020,
             end_year=2022,
@@ -486,7 +468,7 @@ def test_generate_populates_timeseries():
 
 
 def test_generate_includes_metadata():
-    """Test that generate() includes metadata in output."""
+    """Test that generate_ensemble_outputs() includes metadata in output."""
     with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
         interface = MeteorInterface(
             model="TestModel", variables=["tas"], cache_dir="/tmp/test"
@@ -500,7 +482,7 @@ def test_generate_includes_metadata():
             return_value={"global": xr.DataArray([290.0])}
         )
 
-        result = interface.generate(
+        result = interface.generate_ensemble_outputs(
             scenario="ssp370",
             start_year=2030,
             end_year=2080,
@@ -525,7 +507,7 @@ def test_generate_before_training_clear_error():
 
         # Try to generate without training
         with pytest.raises(RuntimeError) as exc_info:
-            interface.generate(
+            interface.generate_ensemble_outputs(
                 scenario="ssp245",
                 start_year=2020,
                 end_year=2050,
@@ -536,13 +518,3 @@ def test_generate_before_training_clear_error():
         # Error message should mention which variable
         assert "not trained" in str(exc_info.value).lower()
         assert "train()" in str(exc_info.value).lower()
-
-
-def test_from_cmip6_requires_variables():
-    """Test that from_cmip6 requires variable or variables parameter."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
-        # Should raise error if neither variable nor variables specified
-        with pytest.raises(
-            ValueError, match="Must specify either 'variable' or 'variables'"
-        ):
-            MeteorInterface.from_cmip6(model="TestModel", cache_dir="/tmp/test")

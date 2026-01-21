@@ -83,13 +83,13 @@ class MeteorInterface:
     Examples
     --------
     >>> # Simple single-variable case
-    >>> emulator = MeteorInterface.from_cmip6(
+    >>> emulator = MeteorInterface(
     ...     model='NorESM2-MM',
-    ...     variable='pr',
+    ...     variables='pr',
     ...     cache_dir='./cache'
     ... )
     >>> emulator.train(auto=True)
-    >>> ensemble = emulator.generate(
+    >>> ensemble = emulator.generate_ensemble_outputs(
     ...     scenario='ssp245',
     ...     start_year=2020,
     ...     end_year=2100,
@@ -98,13 +98,13 @@ class MeteorInterface:
     ... )
     >>>
     >>> # Multi-variable with gridded output
-    >>> emulator = MeteorInterface.from_cmip6(
+    >>> emulator = MeteorInterface(
     ...     model='CESM2',
     ...     variables=['tas', 'pr'],
     ...     cache_dir='./cache'
     ... )
     >>> emulator.train(auto=True)
-    >>> ensemble = emulator.generate(
+    >>> ensemble = emulator.generate_ensemble_outputs(
     ...     scenario='ssp245',
     ...     start_year=2020,
     ...     end_year=2100,
@@ -114,7 +114,7 @@ class MeteorInterface:
     ... )
     >>>
     >>> # Custom emissions scenario
-    >>> ensemble = emulator.generate(
+    >>> ensemble = emulator.generate_ensemble_outputs(
     ...     scenario={'emissions': 'path/to/custom_emissions.txt'},
     ...     start_year=2020,
     ...     end_year=2100,
@@ -178,39 +178,6 @@ class MeteorInterface:
         # Training configuration
         self._training_config = {}
         self._is_trained = {var: False for var in self.variables}
-
-    # TODO: This is a weird factory method type of thing, needed?
-    @classmethod
-    def from_cmip6(cls, model, variable=None, variables=None, cache_dir=None, **kwargs):
-        """
-        Create MeteorInterface from CMIP6 model.
-
-        Parameters
-        ----------
-        model : str
-            CMIP6 model name
-        variable : str, optional
-            Single variable (use this or variables, not both)
-        variables : list of str, optional
-            Multiple variables (use this or variable, not both)
-        cache_dir : str, optional
-            Cache directory path
-        **kwargs
-            Additional arguments for data getter
-
-        Returns
-        -------
-        MeteorInterface
-            Configured emulator instance
-        """
-        if variable is not None and variables is not None:
-            raise ValueError("Specify either 'variable' or 'variables', not both")
-
-        vars_to_use = variables if variables is not None else variable
-        if vars_to_use is None:
-            raise ValueError("Must specify either 'variable' or 'variables'")
-
-        return cls(model, vars_to_use, cache_dir, data_getter_kwargs=kwargs)
 
     def train(
         self, auto=True, training_scenario="ssp245", variable_configs=None, verbose=True
@@ -336,12 +303,13 @@ class MeteorInterface:
             cache_file, self.model
         )
 
-        if is_valid and verbose:
-            print("      ✓ Using cached pattern scaling model")
+        if is_valid:
+            if verbose:  # pragma: no cover
+                print("      ✓ Using cached pattern scaling model")
             training_data = None
             ssp_config = None
         else:
-            if verbose and not is_valid:
+            if verbose:  # pragma: no cover
                 print(f"      ⚠️  Cache miss: {info.get('message', 'No cache found')}")
 
             # Prepare training data
@@ -477,7 +445,7 @@ class MeteorInterface:
             "fitted_params_3d": None,  # Will be fitted if gridded output requested
         }
 
-    def generate(
+    def generate_ensemble_outputs(
         self,
         scenario,
         start_year,
@@ -542,7 +510,7 @@ class MeteorInterface:
         Examples
         --------
         >>> # Generate ensemble with noise
-        >>> ensemble = emulator.generate(
+        >>> ensemble = emulator.generate_ensemble_outputs(
         ...     scenario='ssp245',
         ...     start_year=2020,
         ...     end_year=2100,
@@ -553,7 +521,7 @@ class MeteorInterface:
         ... )
         >>>
         >>> # Generate climatology only (no noise)
-        >>> climatology = emulator.generate(
+        >>> climatology = emulator.generate_ensemble_outputs(
         ...     scenario='ssp245',
         ...     start_year=2020,
         ...     end_year=2100,
@@ -1330,94 +1298,89 @@ class MeteorInterface:
 
         # Check if degree days are requested
         if "degree_days" in impact_configs:
-            try:
-                dd_config = impact_configs["degree_days"]
 
-                # Determine base temperature - use hdd_base if provided, otherwise cdd_base
-                # Both HDD and CDD are calculated from the same base temperature
-                if "hdd_base" in dd_config:
-                    base_temp = dd_config["hdd_base"]
-                elif "cdd_base" in dd_config:
-                    base_temp = dd_config["cdd_base"]
-                else:
-                    raise ValueError(
-                        "degree_days config must include either 'hdd_base' or 'cdd_base'"
-                    )
+            dd_config = impact_configs["degree_days"]
 
-                # Get piControl baseline for absolute temperature calculation
-                # The timeseries data contains anomalies, we need to add baseline
-                picontrol_data = self.data_getter.make_meteor_training_data(
-                    "piControl", self.model, monthly=True
-                )[variable]
+            # Determine base temperature - use hdd_base if provided, otherwise cdd_base
+            # Both HDD and CDD are calculated from the same base temperature
+            if "hdd_base" in dd_config:
+                base_temp = dd_config["hdd_base"]
+            elif "cdd_base" in dd_config:
+                base_temp = dd_config["cdd_base"]
+            else:
+                raise ValueError(
+                    "degree_days config must include either 'hdd_base' or 'cdd_base'"
+                )
 
-                # Create single calculator instance
-                dd_model = DegreeDaysCalculator(base_temperature=base_temp)
+            # Get piControl baseline for absolute temperature calculation
+            # The timeseries data contains anomalies, we need to add baseline
+            picontrol_data = self.data_getter.make_meteor_training_data(
+                "piControl", self.model, monthly=True
+            )[variable]
 
-                # Initialize impact dictionaries for both HDD and CDD
-                impacts["hdd"] = {}
-                impacts["cdd"] = {}
+            # Create single calculator instance
+            dd_model = DegreeDaysCalculator(base_temperature=base_temp)
 
-                # Apply to all timeseries outputs
-                for key, ts_data in var_output.timeseries.items():
-                    # Calculate appropriate baseline for this aggregation
-                    if key == "global":
-                        baseline_k = float(global_mean(picontrol_data).mean())
-                    elif key.startswith("regional:custom:"):
-                        # Custom region - need to calculate baseline from bbox
+            # Initialize impact dictionaries for both HDD and CDD
+            impacts["hdd"] = {}
+            impacts["cdd"] = {}
 
-                        region_name = key.split(":")[2]
-                        if custom_regions and region_name in custom_regions:
-                            bbox = custom_regions[region_name]
-                            mask = create_region_mask(picontrol_data, bbox=bbox)
-                            masked_data = picontrol_data.where(mask)
-                            baseline_k = float(masked_data.mean())
-                        else:
-                            raise ValueError(
-                                f"Custom region '{region_name}' not found in custom_regions"
-                            )
-                    elif key.startswith("regional:"):
-                        region = key.split(":")[1]
-                        baseline_k = float(regional_mean(picontrol_data, region).mean())
-                    elif key.startswith("point:"):
-                        coords = key.split(":")[1]
-                        lat, lon = map(float, coords.split(","))
-                        baseline_k = float(
-                            extract_point(picontrol_data, lat, lon).mean()
-                        )
+            # Apply to all timeseries outputs
+            for key, ts_data in var_output.timeseries.items():
+                # Calculate appropriate baseline for this aggregation
+                if key == "global":
+                    baseline_k = float(global_mean(picontrol_data).mean())
+                elif key.startswith("regional:custom:"):
+                    # Custom region - need to calculate baseline from bbox
+
+                    region_name = key.split(":")[2]
+                    if custom_regions and region_name in custom_regions:
+                        bbox = custom_regions[region_name]
+                        mask = create_region_mask(picontrol_data, bbox=bbox)
+                        masked_data = picontrol_data.where(mask)
+                        baseline_k = float(masked_data.mean())
                     else:
-                        raise ValueError(f"Unknown aggregation type: {key}")
+                        raise ValueError(
+                            f"Custom region '{region_name}' not found in custom_regions"
+                        )
+                elif key.startswith("regional:"):
+                    region = key.split(":")[1]
+                    baseline_k = float(regional_mean(picontrol_data, region).mean())
+                elif key.startswith("point:"):
+                    coords = key.split(":")[1]
+                    lat, lon = map(float, coords.split(","))
+                    baseline_k = float(extract_point(picontrol_data, lat, lon).mean())
+                else:
+                    raise ValueError(f"Unknown aggregation type: {key}")
 
-                    # Convert from anomaly (K) to absolute temperature (°C)
-                    # ts_data is anomaly in K, baseline_k is absolute temperature in K
-                    n_realizations, n_months = ts_data.shape
+                # Convert from anomaly (K) to absolute temperature (°C)
+                # ts_data is anomaly in K, baseline_k is absolute temperature in K
+                n_realizations, n_months = ts_data.shape
 
-                    # Create xarray with month dimension (required by calculator)
-                    # Absolute temperature in Celsius = (anomaly_K + baseline_K) - 273.15
-                    temp_celsius = xr.DataArray(
-                        ts_data + baseline_k - 273.15,
-                        dims=["realization", "month"],
-                        coords={"month": np.arange(n_months)},
-                    )
+                # Create xarray with month dimension (required by calculator)
+                # Absolute temperature in Celsius = (anomaly_K + baseline_K) - 273.15
+                temp_celsius = xr.DataArray(
+                    ts_data + baseline_k - 273.15,
+                    dims=["realization", "month"],
+                    coords={"month": np.arange(n_months)},
+                )
 
-                    # Calculate degree days for each realization
-                    # Both HDD and CDD are calculated in the same call
-                    hdd_results = []
-                    cdd_results = []
-                    for i in range(n_realizations):
-                        result = dd_model.calculate(temp_celsius[i])
-                        hdd_results.append(result.data["annual_hdd"].values)
-                        cdd_results.append(result.data["annual_cdd"].values)
+                # Calculate degree days for each realization
+                # Both HDD and CDD are calculated in the same call
+                hdd_results = []
+                cdd_results = []
+                for i in range(n_realizations):
+                    result = dd_model.calculate(temp_celsius[i])
+                    hdd_results.append(result.data["annual_hdd"].values)
+                    cdd_results.append(result.data["annual_cdd"].values)
 
-                    # Stack back into arrays (n_realizations, n_years)
-                    impacts["hdd"][key] = np.array(hdd_results)
-                    impacts["cdd"][key] = np.array(cdd_results)
+                # Stack back into arrays (n_realizations, n_years)
+                impacts["hdd"][key] = np.array(hdd_results)
+                impacts["cdd"][key] = np.array(cdd_results)
 
-                    if verbose:  # pragma: no cover
-                        print(f"         • HDD for {key}")
-                        print(f"         • CDD for {key}")
-            except Exception as e:
                 if verbose:  # pragma: no cover
-                    print(f"      ⚠️  Error calculating degree days: {e}")
+                    print(f"         • HDD for {key}")
+                    print(f"         • CDD for {key}")
 
         return impacts
 

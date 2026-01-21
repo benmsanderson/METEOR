@@ -4,6 +4,7 @@ Module to get CMIP6 data and convert to format that can be used for METEOR
 
 import logging
 import os
+import pickle  # nosec B403
 
 import gcsfs
 import numpy as np
@@ -244,7 +245,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
 
     """
 
-    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals, too-many-branches
     def __init__(
         self,
         flds=None,
@@ -337,7 +338,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                         logging.info("Cached CMIP6 catalog to: %s", catalog_cache_file)
                     except OSError as e:
                         logging.warning("Failed to cache CMIP6 catalog: %s", e)
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 # If download fails and we have cache enabled, check if there's an old catalog
                 if self.enable_cache and os.path.exists(catalog_cache_file):
                     logging.warning(
@@ -918,8 +919,6 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         >>> if is_valid:
         ...     print(f"✅ {info['message']}")
         """
-        import pickle  # nosec B403
-
         expected_name = f"cmip6-{model_name}-{scenario}"
         expected_vars = set(self.flds)
 
@@ -985,6 +984,6 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             )
             return True, cached_data, info
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             info["message"] = f"Error reading cached file {cache_file}: {e}"
             return False, None, info

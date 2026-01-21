@@ -12,7 +12,7 @@ from meteor.precipitation_transform import (
 )
 
 
-class VariableTransformConfig:
+class VariableTransformConfig:  # pylint: disable=too-few-public-methods
     """
     Configuration for variable-specific transformations.
 
@@ -105,13 +105,12 @@ def get_variable_transform_config(variable):
     """
     if variable in VARIABLE_TRANSFORMS:
         return VARIABLE_TRANSFORMS[variable]
-    else:
-        # Default: no transform for unknown variables
-        return VariableTransformConfig(
-            name=None,
-            transform_type=None,
-            reason=f"Unknown variable {variable} - no transform applied",
-        )
+    # Default: no transform for unknown variables
+    return VariableTransformConfig(
+        name=None,
+        transform_type=None,
+        reason=f"Unknown variable {variable} - no transform applied",
+    )
 
 
 def list_available_transforms():

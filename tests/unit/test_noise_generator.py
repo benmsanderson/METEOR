@@ -177,6 +177,13 @@ def test_complex_scenarios():
         generator.generate_regional_mean_realizations(
             test_trajectory, n_realizations=1, region="XYZ"
         )
+    with pytest.raises(
+        ValueError,
+        match="Both lat and lon must be provided together for point extraction",
+    ):
+        generator.generate_regional_mean_realizations(
+            test_trajectory, n_realizations=1, lat=10
+        )
     noise_realizations = generator.generate_realization(
         test_trajectory, noise_only=True, n_realizations=3
     )
@@ -245,6 +252,10 @@ def test_meteor_noise_generator_error_conditions():
         ValueError, match="Model must be fitted before generating realizations"
     ):
         generator.generate_realization(np.array([1, 2, 3]))
+    with pytest.raises(
+        ValueError, match="Model must be fitted before generating realizations"
+    ):
+        generator.generate_regional_mean_realizations(np.array([1, 2, 3]))
 
 
 def test_meteor_noise_generator_feature_creation():

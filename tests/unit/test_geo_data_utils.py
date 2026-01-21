@@ -88,6 +88,11 @@ def test_regional_functions():
     assert isinstance(weights, xr.DataArray)
     assert weights.shape == (5, 6)
 
+    ds_flat = da.mean(dim=["time", "lon"]).squeeze()
+    weights_one_d = geo_data_utils.get_weights_for_ds(ds_flat)
+    assert weights_one_d.shape == (5,)
+    assert np.allclose(weights_one_d.values, weights.mean(dim="lon").values)
+
     # Test apply_weights_and_do_spatial_mean
     weighted_mean = geo_data_utils.apply_weights_and_do_spatial_mean(da, weights)
     assert isinstance(weighted_mean, xr.DataArray)
@@ -141,6 +146,10 @@ def test_regional_functions():
         geo_data_utils.extract_point(
             da, lat_point=60, lon_point=120, method="invalid_method"
         )
+    with pytest.raises(
+        ValueError, match="Must provide either region_code or region_mask"
+    ):
+        geo_data_utils.regional_mean(da)
 
 
 def test_numerical_edge_cases():
@@ -151,12 +160,15 @@ def test_numerical_edge_cases():
         np.array([[[0.0, 1e-15], [1e15, -1e15]]]),  # Very small and very large numbers
         dims=["time", "lat", "lon"],
         coords={"time": [2000], "lat": [0, 1], "lon": [0, 1]},
+        attrs={"units": "K"},
     )
 
     # Test that global_mean handles extreme values
     result = geo_data_utils.global_mean(edge_case_data)
     assert isinstance(result, xr.DataArray)
     assert np.isfinite(result.values).all()  # Should not produce inf or nan
+    assert result.attrs["units"] == "K"
+    assert result.attrs["operation"] == "area_weighted_global_mean"
 
     # Test with all-zero data
     zero_data = xr.DataArray(

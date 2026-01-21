@@ -76,6 +76,12 @@ def test_validate_temperature_data_custom_range():
         validate_temperature_data(data, "celsius", temp_range=(15, 25))
         assert len(w) > 0
 
+    # Should warn with narrow custom range
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        validate_temperature_data(data, "kelvin", temp_range=(290, 320))
+        assert len(w) > 0
+
 
 def test_validate_temperature_data_unknown_units():
     """Test validation with unknown units."""
@@ -104,6 +110,8 @@ def test_convert_kelvin_to_celsius():
 
     expected = [0, 20, 100]
     np.testing.assert_array_almost_equal(result.values, expected)
+    result_no_change = convert_temperature_units(result, "celsius", "celsius")
+    np.testing.assert_array_almost_equal(result_no_change.values, expected)
 
 
 def test_convert_celsius_to_fahrenheit():
@@ -201,6 +209,11 @@ def test_ensure_spatial_coordinates_missing():
     data = xr.DataArray(np.random.rand(10, 10), dims=["dimension1", "dimension2"])
 
     with pytest.raises(ValueError, match="Could not find latitude coordinate"):
+        ensure_spatial_coordinates(data)
+
+    data = xr.DataArray(np.random.rand(10, 10), dims=["lat_rho", "dimension2"])
+
+    with pytest.raises(ValueError, match="Could not find longitude coordinate"):
         ensure_spatial_coordinates(data)
 
 

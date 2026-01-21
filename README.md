@@ -32,7 +32,7 @@ emulator = MeteorInterface(
 emulator.train(auto=True, verbose=True)
 
 # Generate ensemble
-ensemble = emulator.generate_ensemble_output(
+ensemble = emulator.generate_ensemble_outputs(
     scenario='ssp245',
     start_year=1850,
     end_year=2100,

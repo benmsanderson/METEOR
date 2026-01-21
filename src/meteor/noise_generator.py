@@ -717,6 +717,9 @@ class MeteorNoiseGenerator:
 
         # Get EOFs reshaped to spatial grid (n_modes, n_lat, n_lon)
         eof_components = self.pca.components_.reshape(self.n_modes, n_lat, n_lon)
+        if region_mask is None and region != "global":
+            region_mask = self._get_ar6_region_mask(region)
+
         eof_projections = self._weighted_mean_over_region(
             eof_components, None, None, region_mask, region
         )
@@ -1028,7 +1031,6 @@ class MeteorNoiseGenerator:
         lon_2d, lat_2d = np.meshgrid(lons, lats)
         mask_3d = ar6_regions.mask(lon_2d, lat_2d)
         region_mask = mask_3d == region_number
-
         return region_mask
 
     def save_model(self, filepath):

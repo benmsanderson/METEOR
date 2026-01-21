@@ -34,7 +34,7 @@ def parse_scenario_input(scenario):
             "emissions": None,
             "concentrations": None,
         }
-    elif isinstance(scenario, dict):
+    if isinstance(scenario, dict):
         # Custom scenario
         if "emissions" not in scenario:
             raise ValueError("Custom scenario dict must include 'emissions' key")
@@ -62,8 +62,7 @@ def parse_scenario_input(scenario):
             "emissions": emissions,
             "concentrations": concentrations,
         }
-    else:
-        raise TypeError(f"scenario must be str or dict, got {type(scenario)}")
+    raise TypeError(f"scenario must be str or dict, got {type(scenario)}")
 
 
 def load_emissions_concentrations_from_name(scenario_name):

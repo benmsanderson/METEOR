@@ -274,6 +274,10 @@ class TestImpactEnsemble:
         with pytest.raises(ValueError, match="No ensemble results available"):
             ensemble.to_dataset(["temperature"])
 
+        # Test to_dataset with no results (should hit line 297 in ensemble_std)
+        with pytest.raises(ValueError, match="No ensemble results available"):
+            ensemble.ensemble_std(["temperature"])
+
         # Manually add some results to test variable not found errors
         dummy_data = {"other_var": xr.DataArray([1, 2, 3], dims=["x"])}
         dummy_result = ImpactResult(dummy_data, metadata={"test": "metadata"})
@@ -286,3 +290,7 @@ class TestImpactEnsemble:
         # Test to_dataset variable not found (should hit line 262)
         with pytest.raises(ValueError, match="Variable 'temperature' not found"):
             ensemble.to_dataset(["temperature"])
+
+            # Test to_dataset variable not found (should hit line 262)
+        with pytest.raises(ValueError, match="Variable 'temperature' not found"):
+            ensemble.ensemble_std("temperature")

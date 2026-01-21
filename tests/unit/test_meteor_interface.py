@@ -355,6 +355,11 @@ def test_generate_requires_training():
                 n_realizations=10,
                 timeseries=["global"],
             )
+        empty_impacts = interface._apply_impacts(
+            np.array([290.0]), "tas", {"unknown_impact": 5}
+        )
+        assert isinstance(empty_impacts, dict)
+        assert len(empty_impacts) == 0
 
 
 def test_generate_with_noise_false_forces_single_realization():

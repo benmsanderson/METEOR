@@ -73,7 +73,9 @@ def fit_distribution_parameters_1d(timeseries_data, distribution="gamma"):
 
         # Fit gamma with location fixed at 0
         try:
-            shape, loc, scale = stats.gamma.fit(data_clean, floc=0)
+            shape, loc, scale = stats.gamma.fit(  # pylint: disable=unused-variable
+                data_clean, floc=0
+            )
         except (ValueError, RuntimeError, RuntimeWarning):
             # If fit fails, use method of moments
             mean_val = np.mean(data_clean)
@@ -363,8 +365,7 @@ def apply_distribution_transform(
     # Return in same format as input
     if is_xarray:
         return xr.DataArray(transformed, coords=coords, dims=dims)
-    else:
-        return transformed
+    return transformed
 
 
 # =============================================================================
@@ -436,5 +437,4 @@ def apply_empirical_quantile_mapping(generated_data, target_data):
     # Return in same format as input
     if is_xarray:
         return xr.DataArray(transformed, coords=coords, dims=dims)
-    else:
-        return transformed
+    return transformed

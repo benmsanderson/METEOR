@@ -434,7 +434,7 @@ def extract_point(
     lon_data = ds[lon_name].values
     if lon_data.max() > 180 and lon_point < 0:
         lon_point = lon_point + 360
-    elif lon_data.max() <= 180 and lon_point > 180:
+    elif lon_data.max() <= 180 <= lon_point:
         lon_point = lon_point - 360
 
     # Extract point based on method

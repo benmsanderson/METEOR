@@ -177,7 +177,7 @@ class CacheHandler:
             if not os.path.exists(self.cache_dir):
                 os.makedirs(self.cache_dir)
         except Exception as e:
-            raise OSError(e)
+            raise OSError(e) from e
         for sub_cache in self.sub_caches:
             sub_cache_path = os.path.join(self.cache_dir, sub_cache)
             if not os.path.exists(sub_cache_path):
@@ -251,9 +251,9 @@ class CacheHandler:
 
             return True
 
-        except (
-            Exception
-        ) as e:  # pylint: disable=broad-exception-caught # pragma: no cover
+        except (  # pragma: no cover
+            Exception  # pylint: disable=broad-exception-caught
+        ) as e:
             # Cache file is corrupted, remove it
             try:
                 os.remove(cache_file)
@@ -444,9 +444,9 @@ class CacheHandler:
 
             return True
 
-        except (
-            Exception
-        ) as e:  # pylint: disable=broad-exception-caught  # pragma: no cover
+        except (  # pragma: no cover
+            Exception  # pylint: disable=broad-exception-caught
+        ) as e:
             logging.debug("Validation failed with exception: %s", e)
             return False
 
@@ -638,10 +638,9 @@ class CacheHandler:
                 cache_dir,
                 f"cmip6-{model_name}-{scenario}-{variable}_pattern_scaling.pkl",
             )
-        else:
-            return os.path.join(
-                cache_dir, f"cmip6-{model_name}-{scenario}_pattern_scaling.pkl"
-            )
+        return os.path.join(
+            cache_dir, f"cmip6-{model_name}-{scenario}_pattern_scaling.pkl"
+        )
 
     def get_noise_model_cache_path(self, model_name, variable_name):
         """

@@ -79,6 +79,7 @@ class MeteorNoiseGenerator:
         self.varx_results = None
         self.coords = None
         self.fitted = False
+        self.variable_name = None
 
         # In-memory cache for regional EOF projections (model-invariant)
         self._regional_eof_projections = {}
@@ -161,15 +162,14 @@ class MeteorNoiseGenerator:
         """
         if self.use_exog == "all":
             return X[:, :3]  # t_glob, annual_cos, annual_sin
-        elif self.use_exog == "temp_only":
+        if self.use_exog == "temp_only":
             return X[:, :1]  # Only t_glob
-        elif self.use_exog == "none":
+        if self.use_exog == "none":
             return None  # Pure VAR
-        else:
-            raise ValueError(
-                f"Invalid use_exog value: {self.use_exog}. "
-                f"Must be 'all', 'temp_only', or 'none'."
-            )
+        raise ValueError(
+            f"Invalid use_exog value: {self.use_exog}. "
+            f"Must be 'all', 'temp_only', or 'none'."
+        )
 
     # pylint: disable=too-many-locals
     def fit(
@@ -405,12 +405,11 @@ class MeteorNoiseGenerator:
         # Generate stochastic PCs for each realization
         if n_realizations == 1:
             return self._generate_stochastic_pcs(X_exog, n_time)
-        else:
-            all_pcs = []
-            for _ in range(n_realizations):
-                pcs = self._generate_stochastic_pcs(X_exog, n_time)
-                all_pcs.append(pcs)
-            return np.array(all_pcs)  # Shape: (n_realizations, n_time, n_modes)
+        all_pcs = []
+        for _ in range(n_realizations):
+            pcs = self._generate_stochastic_pcs(X_exog, n_time)
+            all_pcs.append(pcs)
+        return np.array(all_pcs)  # Shape: (n_realizations, n_time, n_modes)
 
     # pylint: disable=too-many-locals
     def generate_realization(
@@ -916,40 +915,38 @@ class MeteorNoiseGenerator:
 
             realizations.append(realization)
 
-        # Return format
+        # Return format numpy array
         if return_numpy:
             # Return as numpy array with shape (n_realizations, n_time) or (n_time,) if single
             if len(realizations) == 1:
                 return realizations[0]
-            else:
-                return np.array(realizations)
-        else:
-            # Build attributes
-            attrs = {location_type: location_id}
-            if lat is not None and lon is not None:
-                attrs["latitude"] = lat
-                attrs["longitude"] = lon
+            return np.array(realizations)
 
-            # Return as xarray DataArray
-            if len(realizations) == 1:
-                # Single realization - return 1D DataArray
-                return xr.DataArray(
-                    realizations[0],
-                    coords={"month": time},
-                    dims=("month",),
-                    attrs=attrs,
-                )
-            else:
-                # Multiple realizations - concatenate with 'realization' dimension
-                return xr.DataArray(
-                    np.array(realizations),
-                    coords={
-                        "realization": np.arange(len(realizations)),
-                        "month": time,
-                    },
-                    dims=("realization", "month"),
-                    attrs=attrs,
-                )
+        # Else xarray dataset or dataArray, so build attributes
+        attrs = {location_type: location_id}
+        if lat is not None and lon is not None:
+            attrs["latitude"] = lat
+            attrs["longitude"] = lon
+
+        # Return as xarray DataArray
+        if len(realizations) == 1:
+            # Single realization - return 1D DataArray
+            return xr.DataArray(
+                realizations[0],
+                coords={"month": time},
+                dims=("month",),
+                attrs=attrs,
+            )
+        # Multiple realizations - concatenate with 'realization' dimension
+        return xr.DataArray(
+            np.array(realizations),
+            coords={
+                "realization": np.arange(len(realizations)),
+                "month": time,
+            },
+            dims=("realization", "month"),
+            attrs=attrs,
+        )
 
     def _weighted_mean_over_region(self, data, lat, lon, region_mask, region):
         """
@@ -1099,7 +1096,6 @@ def train_noise_model_from_cmip6(
     n_modes=10,
     lag_order=2,
     cache_dir=None,
-    cache_handler=None,
     custom_global_temp=None,
     use_picontrol_baseline=True,
     save_diagnostics=False,
@@ -1349,7 +1345,7 @@ def load_noise_model_from_cache(cache_dir, model_name, variable_name):
     return noise_gen
 
 
-def validate_noise_model_cache(
+def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
     cache_file,
     variable_name,
     n_modes=40,
@@ -1459,7 +1455,7 @@ def validate_noise_model_cache(
         )
         return True, noise_model, info
 
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         info["message"] = f"Error loading cache: {e}"
         return False, None, info
 

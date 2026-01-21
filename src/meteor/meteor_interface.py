@@ -266,7 +266,7 @@ class MeteorInterface:
                         f"   → Fitting {transform_config.transform_type} transform..."
                     )
                     print(f"      Reason: {transform_config.reason}")
-                self._fit_transform(variable, transform_config, config, verbose=verbose)
+                self._fit_transform(variable, transform_config)
 
             self._is_trained[variable] = True
 
@@ -299,8 +299,8 @@ class MeteorInterface:
         )
 
         # Check cache
-        is_valid, cached_model, info = self.data_getter.validate_pattern_scaling_cache(
-            cache_file, self.model
+        is_valid, cached_model, info = (  # pylint: disable=unused-variable
+            self.data_getter.validate_pattern_scaling_cache(cache_file, self.model)
         )
 
         if is_valid:
@@ -354,11 +354,13 @@ class MeteorInterface:
         cache_file = self.cache_handler.get_noise_model_cache_path(self.model, variable)
 
         # Check cache
-        is_valid, cached_model, info = validate_noise_model_cache(
-            cache_file,
-            variable,
-            n_modes=config["n_modes_noise"],
-            lag_order=config["lag_order"],
+        is_valid, cached_model, info = (  # pylint: disable=unused-variable
+            validate_noise_model_cache(
+                cache_file,
+                variable,
+                n_modes=config["n_modes_noise"],
+                lag_order=config["lag_order"],
+            )
         )
 
         if is_valid:
@@ -416,8 +418,7 @@ class MeteorInterface:
                 cache_dir=self.cache_handler.cache_dir,
             )
 
-    # TODO: Unused arguments, drop?
-    def _fit_transform(self, variable, transform_config, config, verbose=True):
+    def _fit_transform(self, variable, transform_config):
         """
         Prepare variable-specific transform configuration.
 
@@ -838,11 +839,11 @@ class MeteorInterface:
         )
 
         # Get pattern scaling results
-        monthly_prediction, monthly_warming, em_data, conc_data = (
-            self._get_or_compute_pattern_scaling(
-                variable, scenario, start_year, end_year, verbose
-            )
+        pattern_result = self._get_or_compute_pattern_scaling(
+            variable, scenario, start_year, end_year, verbose
         )
+        monthly_prediction = pattern_result[0]
+        monthly_warming = pattern_result[1]
 
         # Get CMIP6 data for transform fitting
         if verbose:
@@ -1086,11 +1087,13 @@ class MeteorInterface:
             xarray DataArrays with gridded fields
         """
         # Get pattern scaling results (from cache or compute)
-        monthly_prediction, monthly_warming, em_data, conc_data = (
-            self._get_or_compute_pattern_scaling(
+        pattern_result = (
+            self._get_or_compute_pattern_scaling(  # pylint: disable=unused-variable
                 variable, scenario, start_year, end_year, verbose
             )
         )
+        monthly_prediction = pattern_result[0]
+        monthly_warming = pattern_result[1]
 
         # Get noise model
         noise_model = self.noise_models[variable]
@@ -1125,7 +1128,7 @@ class MeteorInterface:
                 if start_idx >= 0 and end_idx <= n_months:
                     # Generate realizations for this year
                     year_realizations = []
-                    for i in range(n_realizations):
+                    for i in range(n_realizations):  # pylint: disable=unused-variable
                         if include_noise:
                             # Generate full field with noise
                             realization = noise_model.generate_realization(

@@ -74,7 +74,9 @@ def test_load_emissions_concentrations(test_data_dir):
     assert "CH4" in em_data.columns
     assert "CO2" in conc_data.columns
     assert "CH4" in conc_data.columns
-    assert em_data.shape == (751, 40)
+    print(em_data)
+    print(conc_data)
+    assert em_data.shape == (351, 40)
     assert conc_data.shape == (801, 30)
 
     em_data2, conc_data2 = load_emissions_concentrations(

@@ -436,7 +436,9 @@ class CacheHandler:
 
             # Check 4: Essential coordinate variables should exist
             # Most climate data should have time coordinate
-            if "time" in dataset.sizes and "time" not in dataset.coords:
+            if (
+                "time" in dataset.sizes and "time" not in dataset.coords
+            ):  # pragma: no cover
                 logging.debug(
                     "Validation failed: 'time' dimension exists but no time coordinate"
                 )

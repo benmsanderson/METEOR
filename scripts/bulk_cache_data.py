@@ -331,7 +331,7 @@ def cache_data_combination(
             # NEW OPTIMIZATION: Check for variable-specific monthly cache instead of training data
             # This allows flexible variable combinations and avoids redundant storage
         # Check if monthly data is already cached
-        cache_exists = data_getter.is_cached(
+        cache_exists = data_getter.cache_handler.check_if_cmip6_cached(
             "get_single_var_mod_data_monthly", scenario, variable, model
         )
 

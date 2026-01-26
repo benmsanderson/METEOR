@@ -110,6 +110,10 @@ The changes listed in this file are categorised as follows:
     - New ``METEOR_Interface_Paper_plots.ipynb`` notebook
     - Updated ``GCAM_predict.ipynb`` notebook
     - Removed outdated example notebooks
+- **Updated dependencies, and overall infrastructure improvements**
+    - Removed  setup.py, setup.cfg and  ``requirements.txt`` and moved to ``pyproject.toml`` for modern packaging
+    - Improved Makefile and ci-cd workflows to fit with new infrastructure
+    - Updating to require newer ciceroscm version with various improvements
 
 ### Fixed
 

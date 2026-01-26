@@ -2,6 +2,7 @@ import os
 import shutil
 
 import pytest
+import xarray as xr
 
 from meteor import cache_handling
 
@@ -160,7 +161,9 @@ def test_find_expected_variable_from_args():
 
 def test_cache_clearing(tmp_path):
     cache_dir = tmp_path / "meteor_cache"
-    handler = cache_handling.CacheHandler(cache_dir=str(cache_dir), purpose="classic")
+    handler = cache_handling.CacheHandler(
+        cache_dir=str(cache_dir), purpose="classic", enable_compression=False
+    )
     handler.setup_cache_tree()
 
     # Create a dummy file in the cache
@@ -187,6 +190,20 @@ def test_cache_clearing(tmp_path):
         None, "get_single_var_mod_data", "piControl", "tas", "TestModel"
     )
     assert len(os.listdir(os.path.join(cache_dir, "cmip6"))) == 0
+    mock_data = xr.DataArray([1, 2, 3])
+    handler.save_cmip6_to_cache(
+        mock_data, "get_single_var_mod_data", "piControl", "tas", "TestModel"
+    )
+    assert os.path.exists(
+        (os.path.join(cache_dir, "cmip6", "TestModel_piControl_tas_raw.nc"))
+    )
+    os.mkdir(os.path.join(cache_dir, "cmip6", "Testsubfolder"))
+    assert os.path.exists(os.path.join(cache_dir, "cmip6", "Testsubfolder"))
+    handler.clear_cache(sub_cache="cmip6")
+    assert os.path.exists(os.path.join(cache_dir, "cmip6", "Testsubfolder"))
+    assert not os.path.exists(
+        (os.path.join(cache_dir, "cmip6", "TestModel_piControl_tas_raw.nc"))
+    )
 
 
 def test_cache_path_includes_variable_name():

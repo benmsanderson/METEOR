@@ -123,6 +123,9 @@ def load_emissions_concentrations(emissions_spec, concentrations_spec, verbose=F
         if verbose:
             print("      → Using provided emissions DataFrame")
     elif isinstance(emissions_spec, str):
+        # TODO: Consider allowing optional keyword args to be sent for input_handler
+        # as current input handler with no arguments cuts the emissions data to
+        # 1750-2100-range if no other nyend and nystart arguments are given.
         ih = input_handler.InputHandler({})
         em_data = ih.read_emissions(emissions_spec)
         if verbose:

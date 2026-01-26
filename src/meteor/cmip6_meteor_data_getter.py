@@ -169,7 +169,7 @@ def initialise_dataframe_and_models(
         that have the full data
     """
     mdls1 = df_all1[0][0].source_id.unique()
-    mdls1.sort()
+    mdls1 = sorted(mdls1)
     df_all = []
     cnames = df_all1[0][0].columns
     if mdl_skipmbrs is None:

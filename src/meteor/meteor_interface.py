@@ -832,10 +832,11 @@ class MeteorInterface:
         scenario_info = parse_scenario_input(scenario)
         scenario_name = scenario_info["name"]
 
-        # For custom scenarios, use ssp245 as the training scenario
-        # (we need CMIP6 data for transform fitting, not custom emissions)
-        training_scenario = (
-            "ssp245" if scenario_info["type"] == "custom" else scenario_name
+        # Always use the TRAINING scenario for transform fitting, not the
+        # prediction scenario. 
+        #TODO: don't assume this is ssp245, get from training config
+        transform_training_scenario = self._training_config.get(variable, {}).get(
+            "training_scenario", "ssp245"
         )
 
         # Get pattern scaling results
@@ -847,22 +848,26 @@ class MeteorInterface:
 
         # Get CMIP6 data for transform fitting
         if verbose:
-            print(f"      → Loading CMIP6 training data for {training_scenario}...")
+            print(f"      → Loading CMIP6 training data for {transform_training_scenario}...")
         ssp_data = self.data_getter.make_meteor_training_data_composite(
-            ["historical", training_scenario], self.model, monthly=True
+            ["historical", transform_training_scenario], self.model, monthly=True
         )[variable]
 
-        # Convert tas to anomalies from piControl baseline for comparison with emulated output
+        # Load piControl data for baseline
+        if verbose:
+            print(f"      → Loading piControl baseline for {variable}...")
+        picontrol_data = self.data_getter.make_meteor_training_data_composite(
+            ["piControl"], self.model, monthly=True
+        )[variable]
+        # Compute piControl climatology (mean across all time)
+        picontrol_mean = picontrol_data.mean(dim="month")
+
+        # For temperature: convert CMIP6 to anomalies (pattern scaling outputs anomalies)
+        # For precipitation: keep CMIP6 as absolute values (for Gamma transform fitting)
+        #   but we'll add piControl baseline to pattern output below
         if variable == "tas":
             if verbose:
-                print("      → Converting tas to anomalies from piControl baseline...")
-            # Load piControl data for baseline
-            picontrol_data = self.data_getter.make_meteor_training_data_composite(
-                ["piControl"], self.model, monthly=True
-            )[variable]
-            # Compute piControl climatology (mean across all time)
-            picontrol_mean = picontrol_data.mean(dim="month")
-            # Convert to anomalies
+                print(f"      → Converting {variable} to anomalies from piControl baseline...")
             ssp_data = ssp_data - picontrol_mean
 
         # ✅ Generate stochastic PCs (or skip if climatology only)
@@ -901,9 +906,15 @@ class MeteorInterface:
                 print(f"      • {agg}")
 
             # Parse aggregation type
+            # For precipitation, compute piControl baseline for this aggregation
+            # Pattern scaling outputs anomalies, but Gamma transform needs absolute values
+            picontrol_agg_mean = None
+
             if agg == "global":
                 # Global mean
                 pattern_agg = global_mean(monthly_prediction).values
+                if variable == "pr":
+                    picontrol_agg_mean = float(global_mean(picontrol_mean).values)
                 if include_noise:
                     raw_ensemble = noise_model.generate_regional_mean_realizations(
                         monthly_warming,
@@ -942,6 +953,8 @@ class MeteorInterface:
                         monthly_prediction, region_mask=region_mask
                     ).values
                     cmip6_agg = regional_mean(ssp_data, region_mask=region_mask)
+                    if variable == "pr":
+                        picontrol_agg_mean = float(regional_mean(picontrol_mean, region_mask=region_mask).values)
 
                     # For noise, use global since we don't have EOFs for custom regions
                     if include_noise:
@@ -962,6 +975,8 @@ class MeteorInterface:
                     pattern_agg = regional_mean(
                         monthly_prediction, region_code=region_code
                     ).values
+                    if variable == "pr":
+                        picontrol_agg_mean = float(regional_mean(picontrol_mean, region_code=region_code).values)
                     if include_noise:
                         raw_ensemble = noise_model.generate_regional_mean_realizations(
                             monthly_warming,
@@ -985,6 +1000,8 @@ class MeteorInterface:
                 lon = float(lon_str)
 
                 pattern_agg = extract_point(monthly_prediction, lat, lon).values
+                if variable == "pr":
+                    picontrol_agg_mean = float(extract_point(picontrol_mean, lat, lon).values)
                 if include_noise:
                     raw_ensemble = noise_model.generate_regional_mean_realizations(
                         monthly_warming,
@@ -1021,6 +1038,12 @@ class MeteorInterface:
                         else raw_ensemble.values[np.newaxis, :]
                     )
 
+                # For precipitation: add piControl baseline to convert anomalies to
+                # absolute values before fitting/applying the Gamma transform.
+                # The pattern scaling outputs anomalies, but Gamma requires positive values.
+                if variable == "pr" and picontrol_agg_mean is not None:
+                    ensemble_for_transform = ensemble_for_transform + picontrol_agg_mean
+
                 # Fit Gaussian to generated data
                 gaussian_params = transform_config.fit_1d_func(
                     ensemble_for_transform, "gaussian"
@@ -1041,20 +1064,27 @@ class MeteorInterface:
 
                 results[agg] = transformed_ensemble
             else:
-                # Convert to numpy if needed and ensure 2D
+                # No transform - convert to numpy if needed and ensure 2D
                 if isinstance(raw_ensemble, np.ndarray):
-                    results[agg] = (
+                    result_array = (
                         raw_ensemble
                         if raw_ensemble.ndim == 2
                         else raw_ensemble[np.newaxis, :]
                     )
                 else:
                     # xarray DataArray
-                    results[agg] = (
+                    result_array = (
                         raw_ensemble.values
                         if raw_ensemble.ndim == 2
                         else raw_ensemble.values[np.newaxis, :]
                     )
+
+                # For precipitation without transform: still add piControl baseline
+                # to convert from anomalies to absolute values
+                if variable == "pr" and picontrol_agg_mean is not None:
+                    result_array = result_array + picontrol_agg_mean
+
+                results[agg] = result_array
 
         return results
 

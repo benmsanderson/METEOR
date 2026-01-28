@@ -828,10 +828,6 @@ class MeteorInterface:
             Dictionary mapping aggregation names to xarray DataArrays
             with shape (n_realizations, n_months)
         """
-        # Parse scenario to get the actual name (handle both string and dict)
-        scenario_info = parse_scenario_input(scenario)
-        scenario_name = scenario_info["name"]
-
         # Always use the TRAINING scenario for transform fitting, not the
         # prediction scenario. default is ssp245
         transform_training_scenario = self._training_config.get(variable, {}).get(
@@ -847,7 +843,9 @@ class MeteorInterface:
 
         # Get CMIP6 data for transform fitting
         if verbose:
-            print(f"      → Loading CMIP6 training data for {transform_training_scenario}...")
+            print(
+                f"      → Loading CMIP6 training data for {transform_training_scenario}..."
+            )
         ssp_data = self.data_getter.make_meteor_training_data_composite(
             ["historical", transform_training_scenario], self.model, monthly=True
         )[variable]
@@ -868,18 +866,33 @@ class MeteorInterface:
         # Note: ssp_data is a composite starting from historical (~1850), so we need to
         # find the correct index for start_year.
         if variable == "pr":
-            # Calculate the index for start_year in the composite data
-            # The composite starts from the beginning of historical period
-            # We need to find where start_year begins
-            # Assume composite starts around 1850 and has monthly data
-            composite_start_year = 1850  # Historical period typically starts here
-            start_year_idx = (start_year - composite_start_year) * 12
-            end_year_idx = (end_year - composite_start_year + 1) * 12  # +1 for inclusive
-            
-            # Validate indices are within bounds - fail loudly if not
+            # Infer composite start year from the data length and structure
+            # Historical experiments in CMIP6 typically start at 1850
+            # We can infer this from the data by checking if it includes historical
             n_months = len(ssp_data.month)
-            composite_end_year = composite_start_year + n_months // 12 - 1
             
+            # Check if ssp_data has a 'start_year' attribute (set by data getter)
+            # Otherwise infer from experiment structure
+            if hasattr(ssp_data, "start_year"):
+                composite_start_year = int(ssp_data.start_year)
+            else:
+                # Default assumption: historical+scenario composite starts at 1850
+                # If the data is shorter than expected, calculate backwards from end_year
+                expected_months_from_1850 = (end_year - 1850 + 1) * 12
+                if n_months < expected_months_from_1850:
+                    # Data is shorter - calculate start year from data length
+                    composite_start_year = end_year - (n_months // 12) + 1
+                else:
+                    composite_start_year = 1850
+            
+            start_year_idx = (start_year - composite_start_year) * 12
+            end_year_idx = (
+                end_year - composite_start_year + 1
+            ) * 12  # +1 for inclusive
+
+            # Validate indices are within bounds - fail loudly if not
+            composite_end_year = composite_start_year + n_months // 12 - 1
+
             if start_year_idx < 0:
                 raise ValueError(
                     f"start_year {start_year} is before the composite data start year {composite_start_year}. "
@@ -895,27 +908,39 @@ class MeteorInterface:
                     f"start_year {start_year} does not have 12 months of data in the composite. "
                     f"Valid range: {composite_start_year}-{composite_end_year}"
                 )
-            
+
             # Use first year of prediction period as the baseline
-            pr_first_year_mean = ssp_data.isel(month=slice(start_year_idx, start_year_idx + 12)).mean(dim="month")
-            
+            pr_first_year_mean = ssp_data.isel(
+                month=slice(start_year_idx, start_year_idx + 12)
+            ).mean(dim="month")
+
             # CRITICAL: Slice ssp_data to only the prediction period (start_year to end_year)
             # for Gamma transform fitting. Using the full historical+scenario composite
             # would result in a lower mean distribution, causing negative bias.
             ssp_data = ssp_data.isel(month=slice(start_year_idx, end_year_idx))
-            
+
             if verbose:
-                print(f"      → Using {start_year} baseline for PR instead of piControl")
-                print(f"        → {start_year} mean (idx {start_year_idx}): {float(global_mean(pr_first_year_mean).values):.10f} kg/m²/s")
-                print(f"        → piControl mean:  {float(global_mean(picontrol_mean).values):.10f} kg/m²/s")
-                print(f"        → Gamma transform fitted to {start_year}-{end_year} ({len(ssp_data.month)} months)")
+                print(
+                    f"      → Using {start_year} baseline for PR instead of piControl"
+                )
+                print(
+                    f"        → {start_year} mean (idx {start_year_idx}): {float(global_mean(pr_first_year_mean).values):.10f} kg/m²/s"
+                )
+                print(
+                    f"        → piControl mean:  {float(global_mean(picontrol_mean).values):.10f} kg/m²/s"
+                )
+                print(
+                    f"        → Gamma transform fitted to {start_year}-{end_year} ({len(ssp_data.month)} months)"
+                )
 
         # For temperature: convert CMIP6 to anomalies (pattern scaling outputs anomalies)
         # For precipitation: keep CMIP6 as absolute values (for Gamma transform fitting)
         #   but we'll add first-year baseline to pattern output below
         if variable == "tas":
             if verbose:
-                print(f"      → Converting {variable} to anomalies from piControl baseline...")
+                print(
+                    f"      → Converting {variable} to anomalies from piControl baseline..."
+                )
             ssp_data = ssp_data - picontrol_mean
 
         # ✅ Generate stochastic PCs (or skip if climatology only)
@@ -965,9 +990,15 @@ class MeteorInterface:
                 if variable == "pr":
                     pr_baseline_agg = float(global_mean(pr_first_year_mean).values)
                     if verbose:
-                        print(f"        → PR first-year baseline (global): {pr_baseline_agg:.10f} kg/m²/s")
-                        print(f"        → PR pattern mean (anomaly): {pattern_agg.mean():.10f} kg/m²/s")
-                        print(f"        → PR pattern + baseline: {(pattern_agg.mean() + pr_baseline_agg):.10f} kg/m²/s")
+                        print(
+                            f"        → PR first-year baseline (global): {pr_baseline_agg:.10f} kg/m²/s"
+                        )
+                        print(
+                            f"        → PR pattern mean (anomaly): {pattern_agg.mean():.10f} kg/m²/s"
+                        )
+                        print(
+                            f"        → PR pattern + baseline: {(pattern_agg.mean() + pr_baseline_agg):.10f} kg/m²/s"
+                        )
                 if include_noise:
                     raw_ensemble = noise_model.generate_regional_mean_realizations(
                         monthly_warming,
@@ -1007,7 +1038,11 @@ class MeteorInterface:
                     ).values
                     cmip6_agg = regional_mean(ssp_data, region_mask=region_mask)
                     if variable == "pr":
-                        pr_baseline_agg = float(regional_mean(pr_first_year_mean, region_mask=region_mask).values)
+                        pr_baseline_agg = float(
+                            regional_mean(
+                                pr_first_year_mean, region_mask=region_mask
+                            ).values
+                        )
 
                     # For noise, use global since we don't have EOFs for custom regions
                     if include_noise:
@@ -1029,7 +1064,11 @@ class MeteorInterface:
                         monthly_prediction, region_code=region_code
                     ).values
                     if variable == "pr":
-                        pr_baseline_agg = float(regional_mean(pr_first_year_mean, region_code=region_code).values)
+                        pr_baseline_agg = float(
+                            regional_mean(
+                                pr_first_year_mean, region_code=region_code
+                            ).values
+                        )
                     if include_noise:
                         raw_ensemble = noise_model.generate_regional_mean_realizations(
                             monthly_warming,
@@ -1054,7 +1093,9 @@ class MeteorInterface:
 
                 pattern_agg = extract_point(monthly_prediction, lat, lon).values
                 if variable == "pr":
-                    pr_baseline_agg = float(extract_point(pr_first_year_mean, lat, lon).values)
+                    pr_baseline_agg = float(
+                        extract_point(pr_first_year_mean, lat, lon).values
+                    )
                 if include_noise:
                     raw_ensemble = noise_model.generate_regional_mean_realizations(
                         monthly_warming,

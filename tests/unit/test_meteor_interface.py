@@ -155,14 +155,16 @@ def test_tas_converted_to_anomalies(mock_interface):
 
 def test_pr_not_converted_to_anomalies(mock_interface):
     """Test that pr data is NOT converted to anomalies (uses first-year baseline instead of piControl)."""
-    # Create mock scenario data for pr
+    # Create mock scenario data for pr with enough months for 1850-2010
+    # Need ~160 years * 12 months = 1920 months
+    n_months = 2000
     scenario_data = xr.Dataset(
         {
             "pr": xr.DataArray(
-                np.random.rand(100, 5, 5) * 1e-5,  # Typical precip values
+                np.random.rand(n_months, 5, 5) * 1e-5,  # Typical precip values
                 dims=["month", "lat", "lon"],
                 coords={
-                    "month": range(100),
+                    "month": range(n_months),
                     "lat": np.linspace(-90, 90, 5),
                     "lon": np.linspace(-180, 180, 5),
                 },
@@ -241,7 +243,9 @@ def test_pr_not_converted_to_anomalies(mock_interface):
     # (piControl is loaded for reference but first-year baseline is used for pr)
     assert len(call_log) == 2, "Should load both scenario data and piControl"
     assert any("piControl" in exps for exps in call_log), "piControl should be loaded"
-    assert any("historical" in exps or "ssp245" in exps for exps in call_log), "Scenario data should be loaded"
+    assert any(
+        "historical" in exps or "ssp245" in exps for exps in call_log
+    ), "Scenario data should be loaded"
 
 
 def test_train_initializes_state_tracking():

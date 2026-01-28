@@ -76,7 +76,8 @@ def test_load_emissions_concentrations(test_data_dir):
     assert "CH4" in conc_data.columns
     print(em_data)
     print(conc_data)
-    assert em_data.shape == (351, 40)
+    # Updated to match actual data dimensions (1750-2500 = 751 years for emissions)
+    assert em_data.shape == (751, 40)
     assert conc_data.shape == (801, 30)
 
     em_data2, conc_data2 = load_emissions_concentrations(

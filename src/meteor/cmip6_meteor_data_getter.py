@@ -26,32 +26,33 @@ cmip6_to_meteor_exp_remapper = {
 def sort_member_ids_numerically(member_ids):
     """
     Sort CMIP6 member IDs numerically by the realization number.
-    
+
     Member IDs follow the pattern rXiYpZfW where X, Y, Z, W are integers.
     String sorting would put r10 before r1, but we want numerical order.
-    
+
     Parameters
     ----------
     member_ids : array-like
         List of member IDs like ['r1i1p1f1', 'r10i1p1f1', 'r2i1p1f1']
-        
+
     Returns
     -------
     list
         Member IDs sorted numerically by realization number (r value)
-        
+
     Examples
     --------
     >>> sort_member_ids_numerically(['r10i1p1f1', 'r1i1p1f1', 'r2i1p1f1'])
     ['r1i1p1f1', 'r2i1p1f1', 'r10i1p1f1']
     """
+
     def extract_realization_number(member_id):
         """Extract the realization number (r value) from member_id."""
-        match = re.match(r'r(\d+)i', member_id)
+        match = re.match(r"r(\d+)i", member_id)
         if match:
             return int(match.group(1))
-        return float('inf')  # Put unparseable IDs at the end
-    
+        return float("inf")  # Put unparseable IDs at the end
+
     return sorted(member_ids, key=extract_realization_number)
 
 

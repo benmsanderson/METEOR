@@ -853,7 +853,7 @@ class MeteorInterface:
             ["historical", transform_training_scenario], self.model, monthly=True
         )[variable]
 
-        # Load piControl data for baseline
+        # Load piControl data for baseline (used for temperature anomalies)
         if verbose:
             print(f"      → Loading piControl baseline for {variable}...")
         picontrol_data = self.data_getter.make_meteor_training_data_composite(
@@ -862,9 +862,47 @@ class MeteorInterface:
         # Compute piControl climatology (mean across all time)
         picontrol_mean = picontrol_data.mean(dim="month")
 
+        # For precipitation: use first-year (2015) baseline instead of piControl
+        # This is because CMIP6 scenarios in 2015 already include ~1°C of historical
+        # warming effects on precipitation, so using piControl would create a ~2-4% bias.
+        # We use the first 12 months of the prediction period (start_year) as the baseline.
+        # Note: ssp_data is a composite starting from historical (~1850), so we need to
+        # find the correct index for start_year.
+        if variable == "pr":
+            # Calculate the index for start_year in the composite data
+            # The composite starts from the beginning of historical period
+            # We need to find where start_year begins
+            # Assume composite starts around 1850 and has monthly data
+            composite_start_year = 1850  # Historical period typically starts here
+            start_year_idx = (start_year - composite_start_year) * 12
+            end_year_idx = (end_year - composite_start_year + 1) * 12  # +1 for inclusive
+            
+            # Ensure we don't go out of bounds
+            if start_year_idx < 0:
+                start_year_idx = 0
+            if end_year_idx > len(ssp_data.month):
+                end_year_idx = len(ssp_data.month)
+            if start_year_idx + 12 > len(ssp_data.month):
+                # Fall back to last 12 months if out of range
+                start_year_idx = max(0, len(ssp_data.month) - 12)
+            
+            # Use first year of prediction period as the baseline
+            pr_first_year_mean = ssp_data.isel(month=slice(start_year_idx, start_year_idx + 12)).mean(dim="month")
+            
+            # CRITICAL: Slice ssp_data to only the prediction period (start_year to end_year)
+            # for Gamma transform fitting. Using the full historical+scenario composite
+            # would result in a lower mean distribution, causing negative bias.
+            ssp_data = ssp_data.isel(month=slice(start_year_idx, end_year_idx))
+            
+            if verbose:
+                print(f"      → Using {start_year} baseline for PR instead of piControl")
+                print(f"        → {start_year} mean (idx {start_year_idx}): {float(global_mean(pr_first_year_mean).values):.10f} kg/m²/s")
+                print(f"        → piControl mean:  {float(global_mean(picontrol_mean).values):.10f} kg/m²/s")
+                print(f"        → Gamma transform fitted to {start_year}-{end_year} ({len(ssp_data.month)} months)")
+
         # For temperature: convert CMIP6 to anomalies (pattern scaling outputs anomalies)
         # For precipitation: keep CMIP6 as absolute values (for Gamma transform fitting)
-        #   but we'll add piControl baseline to pattern output below
+        #   but we'll add first-year baseline to pattern output below
         if variable == "tas":
             if verbose:
                 print(f"      → Converting {variable} to anomalies from piControl baseline...")
@@ -906,15 +944,20 @@ class MeteorInterface:
                 print(f"      • {agg}")
 
             # Parse aggregation type
-            # For precipitation, compute piControl baseline for this aggregation
+            # For precipitation, compute first-year baseline for this aggregation
             # Pattern scaling outputs anomalies, but Gamma transform needs absolute values
-            picontrol_agg_mean = None
+            # We use first-year (2015) baseline instead of piControl to match CMIP6 starting point
+            pr_baseline_agg = None
 
             if agg == "global":
                 # Global mean
                 pattern_agg = global_mean(monthly_prediction).values
                 if variable == "pr":
-                    picontrol_agg_mean = float(global_mean(picontrol_mean).values)
+                    pr_baseline_agg = float(global_mean(pr_first_year_mean).values)
+                    if verbose:
+                        print(f"        → PR first-year baseline (global): {pr_baseline_agg:.10f} kg/m²/s")
+                        print(f"        → PR pattern mean (anomaly): {pattern_agg.mean():.10f} kg/m²/s")
+                        print(f"        → PR pattern + baseline: {(pattern_agg.mean() + pr_baseline_agg):.10f} kg/m²/s")
                 if include_noise:
                     raw_ensemble = noise_model.generate_regional_mean_realizations(
                         monthly_warming,
@@ -954,7 +997,7 @@ class MeteorInterface:
                     ).values
                     cmip6_agg = regional_mean(ssp_data, region_mask=region_mask)
                     if variable == "pr":
-                        picontrol_agg_mean = float(regional_mean(picontrol_mean, region_mask=region_mask).values)
+                        pr_baseline_agg = float(regional_mean(pr_first_year_mean, region_mask=region_mask).values)
 
                     # For noise, use global since we don't have EOFs for custom regions
                     if include_noise:
@@ -976,7 +1019,7 @@ class MeteorInterface:
                         monthly_prediction, region_code=region_code
                     ).values
                     if variable == "pr":
-                        picontrol_agg_mean = float(regional_mean(picontrol_mean, region_code=region_code).values)
+                        pr_baseline_agg = float(regional_mean(pr_first_year_mean, region_code=region_code).values)
                     if include_noise:
                         raw_ensemble = noise_model.generate_regional_mean_realizations(
                             monthly_warming,
@@ -1001,7 +1044,7 @@ class MeteorInterface:
 
                 pattern_agg = extract_point(monthly_prediction, lat, lon).values
                 if variable == "pr":
-                    picontrol_agg_mean = float(extract_point(picontrol_mean, lat, lon).values)
+                    pr_baseline_agg = float(extract_point(pr_first_year_mean, lat, lon).values)
                 if include_noise:
                     raw_ensemble = noise_model.generate_regional_mean_realizations(
                         monthly_warming,
@@ -1038,11 +1081,12 @@ class MeteorInterface:
                         else raw_ensemble.values[np.newaxis, :]
                     )
 
-                # For precipitation: add piControl baseline to convert anomalies to
+                # For precipitation: add first-year baseline to convert anomalies to
                 # absolute values before fitting/applying the Gamma transform.
                 # The pattern scaling outputs anomalies, but Gamma requires positive values.
-                if variable == "pr" and picontrol_agg_mean is not None:
-                    ensemble_for_transform = ensemble_for_transform + picontrol_agg_mean
+                # We use first-year (2015) baseline to match CMIP6 starting point.
+                if variable == "pr" and pr_baseline_agg is not None:
+                    ensemble_for_transform = ensemble_for_transform + pr_baseline_agg
 
                 # Fit Gaussian to generated data
                 gaussian_params = transform_config.fit_1d_func(
@@ -1079,10 +1123,10 @@ class MeteorInterface:
                         else raw_ensemble.values[np.newaxis, :]
                     )
 
-                # For precipitation without transform: still add piControl baseline
+                # For precipitation without transform: still add first-year baseline
                 # to convert from anomalies to absolute values
-                if variable == "pr" and picontrol_agg_mean is not None:
-                    result_array = result_array + picontrol_agg_mean
+                if variable == "pr" and pr_baseline_agg is not None:
+                    result_array = result_array + pr_baseline_agg
 
                 results[agg] = result_array
 

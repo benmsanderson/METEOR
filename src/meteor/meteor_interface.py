@@ -870,7 +870,7 @@ class MeteorInterface:
             # Historical experiments in CMIP6 typically start at 1850
             # We can infer this from the data by checking if it includes historical
             n_months = len(ssp_data.month)
-            
+
             # Check if ssp_data has a 'start_year' attribute (set by data getter)
             # Otherwise infer from experiment structure
             if hasattr(ssp_data, "start_year"):
@@ -884,7 +884,7 @@ class MeteorInterface:
                     composite_start_year = end_year - (n_months // 12) + 1
                 else:
                     composite_start_year = 1850
-            
+
             start_year_idx = (start_year - composite_start_year) * 12
             end_year_idx = (
                 end_year - composite_start_year + 1

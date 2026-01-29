@@ -96,11 +96,11 @@ test-install: $(VENV_DIR)  ## test installing works
 	$(TEMPVENV)/bin/pip install pip wheel --upgrade
 	$(TEMPVENV)/bin/pip install .
 	$(TEMPVENV)/bin/python scripts/test_install.py
-##TODO: clear out hardcoded python3.9 reference
+## Updated to use python3.10+ for venv creation
 virtual-environment: $(VENV_DIR)  ## update venv, create a new venv if it doesn't exist make
 	echo "If you want this to be rerun, run make clean first"
 #$(VENV_DIR): setup.py setup.cfg
-	[ -d $(VENV_DIR) ] || python3 -m venv $(VENV_DIR)
+	[ -d $(VENV_DIR) ] || $$(command -v python3.13 || command -v python3.12 || command -v python3.11 || command -v python3.10 || python3) -m venv $(VENV_DIR)
 	$(VENV_DIR)/bin/pip install --upgrade pip wheel
 	$(VENV_DIR)/bin/pip install -e .[dev]
 	##Comment out $(VENV_DIR)/bin/jupyter nbextension enable --py widgetsnbextension
@@ -109,9 +109,8 @@ virtual-environment: $(VENV_DIR)  ## update venv, create a new venv if it doesn'
 	touch $(VENV_DIR)
 clean: $(VENV_DIR)
 	touch pyproject.toml
-##TODO: clear out hardcoded python3.9 reference
 first-venv: ## create a new virtual environment for the very first repo setup
-	python3 -m venv $(VENV_DIR)
+	$$(command -v python3.13 || command -v python3.12 || command -v python3.11 || command -v python3.10 || python3) -m venv $(VENV_DIR)
 
 	$(VENV_DIR)/bin/pip install --upgrade pip
 	$(VENV_DIR)/bin/pip install versioneer

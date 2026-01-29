@@ -924,10 +924,10 @@ class MeteorInterface:
                     f"      → Using {start_year} baseline for PR instead of piControl"
                 )
                 print(
-                    f"        → {start_year} mean (idx {start_year_idx}): {float(global_mean(pr_first_year_mean).values):.10f} kg/m²/s"
+                    f"        → {start_year} mean (idx {start_year_idx}): {float(global_mean(pr_first_year_mean).values.item()):.10f} kg/m²/s"
                 )
                 print(
-                    f"        → piControl mean:  {float(global_mean(picontrol_mean).values):.10f} kg/m²/s"
+                    f"        → piControl mean:  {float(global_mean(picontrol_mean).values.item()):.10f} kg/m²/s"
                 )
                 print(
                     f"        → Gamma transform fitted to {start_year}-{end_year} ({len(ssp_data.month)} months)"
@@ -988,7 +988,9 @@ class MeteorInterface:
                 # Global mean
                 pattern_agg = global_mean(monthly_prediction).values
                 if variable == "pr":
-                    pr_baseline_agg = float(global_mean(pr_first_year_mean).values)
+                    pr_baseline_agg = float(
+                        global_mean(pr_first_year_mean).values.item()
+                    )
                     if verbose:
                         print(
                             f"        → PR first-year baseline (global): {pr_baseline_agg:.10f} kg/m²/s"
@@ -1041,7 +1043,7 @@ class MeteorInterface:
                         pr_baseline_agg = float(
                             regional_mean(
                                 pr_first_year_mean, region_mask=region_mask
-                            ).values
+                            ).values.item()
                         )
 
                     # For noise, use global since we don't have EOFs for custom regions
@@ -1067,7 +1069,7 @@ class MeteorInterface:
                         pr_baseline_agg = float(
                             regional_mean(
                                 pr_first_year_mean, region_code=region_code
-                            ).values
+                            ).values.item()
                         )
                     if include_noise:
                         raw_ensemble = noise_model.generate_regional_mean_realizations(
@@ -1094,7 +1096,7 @@ class MeteorInterface:
                 pattern_agg = extract_point(monthly_prediction, lat, lon).values
                 if variable == "pr":
                     pr_baseline_agg = float(
-                        extract_point(pr_first_year_mean, lat, lon).values
+                        extract_point(pr_first_year_mean, lat, lon).values.item()
                     )
                 if include_noise:
                     raw_ensemble = noise_model.generate_regional_mean_realizations(

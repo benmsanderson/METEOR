@@ -244,89 +244,14 @@ def fit_timescales(X, a0):
     """
     # awgt = np.cos(X.lat / 180 * np.pi)
     # awgt = awgt / np.mean(awgt)
-    print("\n[FIT_TIMESCALES DEBUG]")
-    print("  Computing global mean timeseries...")
     ts = (X * wgt(X)).mean("lat", skipna=True).mean("lon", skipna=True).values
-    print(f"  Timeseries length: {len(ts)}")
-    print(f"  Timeseries NaN count: {np.isnan(ts).sum()}")
-
-    # Trim timeseries to only valid (non-NaN) data
-    valid_mask = ~np.isnan(ts)
-    n_valid = np.sum(valid_mask)
-    if n_valid < len(ts):
-        print("  ⚠️  WARNING: Timeseries contains NaN values!")
-        print(f"  ⚠️  Trimming from {len(ts)} to {n_valid} valid months")
-        # Find the last valid index
-        valid_indices = np.where(valid_mask)[0]
-        if len(valid_indices) > 0:
-            last_valid_idx = valid_indices[-1]
-            # Check if NaNs are at the end (most common case)
-            if last_valid_idx < len(ts) - 1:
-                print(
-                    f"  ⚠️  NaNs detected at end of timeseries (after month {last_valid_idx})"
-                )
-                ts = ts[: last_valid_idx + 1]
-            else:
-                # NaNs are scattered - use only contiguous valid data from start
-                first_nan_idx = (
-                    np.where(~valid_mask)[0][0] if np.any(~valid_mask) else len(ts)
-                )
-                print(f"  ⚠️  Using first {first_nan_idx} months (until first NaN)")
-                ts = ts[:first_nan_idx]
-
-    print(f"  Final timeseries length: {len(ts)}")
-    print(f"  Timeseries Inf count: {np.isinf(ts).sum()}")
-    print(f"  Timeseries range: [{np.nanmin(ts):.6e}, {np.nanmax(ts):.6e}]")
-    print(f"  Timeseries mean: {np.nanmean(ts):.6e}")
-    print(f"  Timeseries std: {np.nanstd(ts):.6e}")
-    print(f"  First 5 values: {ts[:5]}")
-
     fit_params = make_params(a0)
-    print(f"  Initial parameters: {fit_params.valuesdict()}")
-
-    # Test the objective function with initial parameters
-    try:
-        initial_residual = np.square(ts - expfun(np.arange(0, len(ts)), fit_params))
-        print(f"  Initial residual NaN count: {np.isnan(initial_residual).sum()}")
-        print(f"  Initial residual sum: {np.nansum(initial_residual):.6e}")
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        print(f"  ⚠️  Error computing initial residual: {e}")
-
     # print(ts)
-    print("  Starting lmfit.minimize...")
-    try:
-        out = lmfit.minimize(
-            lambda x: np.square(ts - expfun(np.arange(0, len(ts)), x)),
-            fit_params,
-        )
-        print(f"  Optimization complete. Success: {out.success}")
-        print(f"  Message: {out.message}")
-        if not out.success:
-            print("  ⚠️  Optimization failed!")
-            print(f"  Final parameters: {out.params.valuesdict()}")
-        return out
-    except Exception as fit_error:
-        print(f"\n{'='*70}")
-        print("❌ LMFIT MINIMIZE FAILED!")
-        print(f"{'='*70}")
-        print(f"Error: {type(fit_error).__name__}: {fit_error}")
-        print("\nDUMPING TIMESERIES DATA (ts variable):")
-        print(f"  Shape: {ts.shape}")
-        print(f"  Dtype: {ts.dtype}")
-        print("  Full timeseries values:")
-        print(ts)
-        print("\n  Statistics:")
-        print(f"    Min: {np.nanmin(ts):.6e}")
-        print(f"    Max: {np.nanmax(ts):.6e}")
-        print(f"    Mean: {np.nanmean(ts):.6e}")
-        print(f"    Std: {np.nanstd(ts):.6e}")
-        print(f"    NaN count: {np.isnan(ts).sum()}")
-        print(f"    Inf count: {np.isinf(ts).sum()}")
-        print(f"    Zero count: {np.sum(ts == 0)}")
-        print("\n  Initial parameters that were used:")
-        print(f"    {fit_params.valuesdict()}")
-        print(f"\n{'='*70}")
-        raise
+    out = lmfit.minimize(
+        lambda x: np.square(ts - expfun(np.arange(0, len(ts)), x)),
+        fit_params,
+    )
+    return out
 
 
 def make_amat(pars, nt):
@@ -586,18 +511,6 @@ def get_timescales(anomaly_data, n_modes):
     for i, t in enumerate(tguess):
         a0[2 * i] = ampguess
         a0[2 * i + 1] = t
-
-    # DEBUG: Print initial guesses and data stats
-    print("\n[PATTERN SCALING DEBUG]")
-    print(f"  n_modes: {n_modes}")
-    print(f"  ampguess: {ampguess:.6e}")
-    print(f"  tguess: {tguess}")
-    print(f"  a0 (initial guesses): {a0}")
-    print(f"  anomaly_data shape: {anomaly_data.shape}")
-    print(f"  anomaly_data NaN count: {np.isnan(anomaly_data.values).sum()}")
-    print(
-        f"  anomaly_data range: [{np.nanmin(anomaly_data.values):.6e}, {np.nanmax(anomaly_data.values):.6e}]"
-    )
 
     # fit the timescales using lmfit to fit global mean of the anomaly data
     aopt = fit_timescales(anomaly_data, a0)

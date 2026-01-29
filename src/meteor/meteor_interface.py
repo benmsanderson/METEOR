@@ -923,15 +923,6 @@ class MeteorInterface:
                 print(
                     f"      → Using {start_year} baseline for PR instead of piControl"
                 )
-                print(
-                    f"        → {start_year} mean (idx {start_year_idx}): {float(global_mean(pr_first_year_mean).values.item()):.10f} kg/m²/s"
-                )
-                print(
-                    f"        → piControl mean:  {float(global_mean(picontrol_mean).values.item()):.10f} kg/m²/s"
-                )
-                print(
-                    f"        → Gamma transform fitted to {start_year}-{end_year} ({len(ssp_data.month)} months)"
-                )
 
         # For temperature: convert CMIP6 to anomalies (pattern scaling outputs anomalies)
         # For precipitation: keep CMIP6 as absolute values (for Gamma transform fitting)
@@ -991,16 +982,6 @@ class MeteorInterface:
                     pr_baseline_agg = float(
                         global_mean(pr_first_year_mean).values.item()
                     )
-                    if verbose:
-                        print(
-                            f"        → PR first-year baseline (global): {pr_baseline_agg:.10f} kg/m²/s"
-                        )
-                        print(
-                            f"        → PR pattern mean (anomaly): {pattern_agg.mean():.10f} kg/m²/s"
-                        )
-                        print(
-                            f"        → PR pattern + baseline: {(pattern_agg.mean() + pr_baseline_agg):.10f} kg/m²/s"
-                        )
                 if include_noise:
                     raw_ensemble = noise_model.generate_regional_mean_realizations(
                         monthly_warming,

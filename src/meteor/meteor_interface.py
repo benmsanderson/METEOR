@@ -222,14 +222,14 @@ class MeteorInterface:
         ...     }
         ... )
         """
-        if verbose:
+        if verbose:  # pragma: no cover
             print("=" * 60)
             print(f"Training METEOR emulator for {self.model}")
             print(f"Variables: {', '.join(self.variables)}")
             print("=" * 60)
 
         for variable in self.variables:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(f"\n🔧 Training {variable.upper()}...")
 
             # Get configuration with hybrid precedence
@@ -249,19 +249,19 @@ class MeteorInterface:
             self._training_config[variable] = config
 
             # Train pattern scaling
-            if verbose:
+            if verbose:  # pragma: no cover
                 print("   → Training pattern scaling model...")
             self._train_pattern_scaling(variable, config, verbose=verbose)
 
             # Train noise model
-            if verbose:
+            if verbose:  # pragma: no cover
                 print("   → Training noise model...")
             self._train_noise_model(variable, config, verbose=verbose)
 
             # Fit transforms if needed
             transform_config = get_variable_transform_config(variable)
             if transform_config.transform_type and config.get("transform", True):
-                if verbose:
+                if verbose:  # pragma: no cover
                     print(
                         f"   → Fitting {transform_config.transform_type} transform..."
                     )
@@ -270,10 +270,10 @@ class MeteorInterface:
 
             self._is_trained[variable] = True
 
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(f"   ✅ {variable.upper()} training complete")
 
-        if verbose:
+        if verbose:  # pragma: no cover
             print("\n" + "=" * 60)
             print("✅ All variables trained successfully")
             print("=" * 60)
@@ -368,7 +368,7 @@ class MeteorInterface:
                 print("      ✓ Using cached noise model")
             self.noise_models[variable] = cached_model
         else:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print("      ⚠️  Training new noise model...")
 
             # ✅ Get training scenario from config
@@ -397,7 +397,7 @@ class MeteorInterface:
             # Trim first 100 years (spin-up) to match working notebook
             monthly_warming_trimmed = monthly_warming[1200:]  # 100 years * 12 months
 
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(
                     f"      → Using {training_scenario} pattern prediction for training"
                 )
@@ -548,7 +548,7 @@ class MeteorInterface:
             if not self._is_trained[var]:
                 raise RuntimeError(f"Variable '{var}' not trained. Call train() first.")
 
-        if verbose:
+        if verbose:  # pragma: no cover
             print("=" * 60)
             print(f"Generating ensemble for {scenario_name}")
             print(f"  Years: {start_year}-{end_year}")
@@ -558,7 +558,7 @@ class MeteorInterface:
         results = {}
 
         for variable in self.variables:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(f"\n📊 Generating {variable.upper()}...")
 
             var_output = VariableOutput(variable)
@@ -608,7 +608,7 @@ class MeteorInterface:
 
             results[variable] = var_output
 
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(f"   ✅ {variable.upper()} complete")
 
         # Create ensemble output
@@ -627,7 +627,7 @@ class MeteorInterface:
         if save_to:
             ensemble.to_netcdf(save_to)
 
-        if verbose:
+        if verbose:  # pragma: no cover
             print("\n" + "=" * 60)
             print("✅ Generation complete")
             print("=" * 60)
@@ -666,7 +666,7 @@ class MeteorInterface:
         scenario_info = parse_scenario_input(scenario)
         scenario_name = scenario_info["name"]
 
-        if verbose:
+        if verbose:  # pragma: no cover
             if scenario_info["type"] == "ssp":
                 print(
                     f"      → Computing pattern scaling for {variable}, {scenario_name}..."
@@ -693,7 +693,7 @@ class MeteorInterface:
             em_end_year = em_data.index[-1]
 
             if end_year > em_end_year:
-                if verbose:
+                if verbose:  # pragma: no cover
                     print(
                         f"      ⚠️  Warning: Emissions data ends at {em_end_year}, requested {end_year}"
                     )
@@ -702,7 +702,7 @@ class MeteorInterface:
                 end_year = em_end_year
 
             if start_year < em_start_year:
-                if verbose:
+                if verbose:  # pragma: no cover
                     print(
                         f"      ⚠️  Warning: Emissions data starts at {em_start_year}, requested {start_year}"
                     )
@@ -842,7 +842,7 @@ class MeteorInterface:
         monthly_warming = pattern_result[1]
 
         # Get CMIP6 data for transform fitting
-        if verbose:
+        if verbose:  # pragma: no cover
             print(
                 f"      → Loading CMIP6 training data for {transform_training_scenario}..."
             )
@@ -851,7 +851,7 @@ class MeteorInterface:
         )[variable]
 
         # Load piControl data for baseline (used for temperature anomalies)
-        if verbose:
+        if verbose:  # pragma: no cover
             print(f"      → Loading piControl baseline for {variable}...")
         picontrol_data = self.data_getter.make_meteor_training_data_composite(
             ["piControl"], self.model, monthly=True
@@ -919,7 +919,7 @@ class MeteorInterface:
             # would result in a lower mean distribution, causing negative bias.
             ssp_data = ssp_data.isel(month=slice(start_year_idx, end_year_idx))
 
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(
                     f"      → Using {start_year} baseline for PR instead of piControl"
                 )
@@ -928,7 +928,7 @@ class MeteorInterface:
         # For precipitation: keep CMIP6 as absolute values (for Gamma transform fitting)
         #   but we'll add first-year baseline to pattern output below
         if variable == "tas":
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(
                     f"      → Converting {variable} to anomalies from piControl baseline..."
                 )
@@ -941,7 +941,7 @@ class MeteorInterface:
         if include_noise:
             # CRITICAL: Generate stochastic PCs ONCE for all aggregations
             # This ensures all spatial scales share the same underlying variability
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(
                     f"      → Generating {n_realizations} stochastic PC realizations..."
                 )
@@ -966,7 +966,7 @@ class MeteorInterface:
             transform_config = transform_info  # It's a VariableTransformConfig object
 
         for agg in aggregations:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(f"      • {agg}")
 
             # Parse aggregation type

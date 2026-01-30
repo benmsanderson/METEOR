@@ -1,0 +1,116 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meteor"
+authors = [
+    {name = "Marit Sandstad", email = "marit.sandstad@cicero.oslo.no"},
+    {name = "Benjamin Sanderson", email = "benjamin.sanderson@cicero.oslo.no"},
+]
+description = "Python version of the CICERO-SCM simple climate model"
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["meteor", "meteor_interface", "python", "repo", "emulator", "climate", "spatial emulator", "model"]
+classifiers = [
+        "Development Status :: 4 - Beta",
+        "License :: OSI Approved :: Apache Software License",
+        "Intended Audience :: Developers",
+        "Operating System :: OS Independent",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+]
+dynamic = ["version"]
+dependencies = [
+    "click",
+    "python-dotenv",
+    "tqdm",
+    "matplotlib>=3.4",
+    "scipy",
+    "numpy>=1.23",
+    "pandas",
+    "xarray",
+    "netcdf4",
+    "h5netcdf",
+    "zarr<3",
+    "gcsfs",
+    "eofs",
+    "lmfit",
+    "ciceroscm>=2.0.1",
+    "scikit-learn",
+    "statsmodels",
+    "regionmask",
+]
+
+[project.optional-dependencies]
+notebooks = [
+    "ipywidgets",
+    "notebook",
+    "seaborn",
+    "ipykernel",
+    "cartopy"
+ ]
+tests =  [
+    "codecov",
+    "coverage",
+    "nbval",
+    "pytest-cov",
+    "pytest>=4.0",
+    "xlrd",
+    "importlib-metadata<5.0",
+]
+docs = ["sphinx>=5", "sphinx_rtd_theme", "sphinx-click"]
+deploy = ["twine>=1.11.0", "setuptools>=41.2", "wheel>=0.31.0","versioneer-518"]
+dev = [
+        "bandit",
+        "black>=22.3.0",
+        "black-nb",
+        "flake8",
+        "isort>5",
+        "mypy",
+        "nbdime",
+        "pydocstyle[toml]",
+        "pylint>=2.4.4",
+        "ruff==0.8.6",
+    'meteor[deploy,notebooks,tests,docs]'
+]
+
+[tool.setuptools_scm]
+[tool.pydocstyle]
+add-ignore = [
+    "D200",
+    "D205",
+    "D400",
+]
+convention = "numpy"
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "src",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.format]
+docstring-code-format = true
+
+
+[tool.isort]
+default_section = "THIRDPARTY"
+# comma after multiline breaks like black:
+include_trailing_comma = true
+known_first_party = "meteor"
+profile = "black"
+# black default line length:
+line_length = 88
+# multiline breaks like black:
+multi_line_output = 3
+skip = [
+    "versioneer.py", 
+    "src/meteor/_version.py",
+]
+
+# ... other project metadata fields as listed in:
+#     https://packaging.python.org/en/latest/guides/writing-pyproject-toml/

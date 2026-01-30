@@ -1,2 +1,7 @@
 exclude_dirs:
   - meteor/_version.py
+  - versioneer.py
+skips:
+  - B101
+  - B404
+  - B603

@@ -14,6 +14,124 @@ The changes listed in this file are categorised as follows:
     - Fixed: any bug fixes
     - Security: in case of vulnerabilities.
 
+[Unreleased]
+---------------------
+
+[Version 1.6.0]
+-----------------------------
+
+### Added
+
+- **High-level `MeteorInterface` API** in ``src/meteor/meteor_interface.py`` for simplified ensemble generation
+    - Single entry point for training and generation with automatic caching
+    - Support for multiple variables, scenarios, and aggregation types (global, regional, point-based)
+    - Built-in handling of variable-specific transforms (e.g., gamma distribution for precipitation)
+    - Automatic training state tracking and validation
+- **Bulk data caching system** via ``scripts/bulk_cache_data.py``
+    - Interactive and non-interactive modes for batch downloading CMIP6 data
+    - Checkpoint/resume capability for interrupted downloads
+    - Progress tracking and comprehensive error handling
+- **Rationalized cache location handling** in ``src/meteor/cache_handling.py``
+    - ``CacheHandler`` class with automatic cache location detection
+    - ``find_suitable_cache_location()`` intelligently chooses cache directory:
+        - Development environments (git clones): ``.cache/`` in repository root
+        - Pip-installed packages: ``~/.meteor/cache/`` in user home directory
+    - Organized cache structure with separate subdirectories for CMIP6 data, pattern scaling models, and noise models
+    - Graceful fallback if cache directory creation fails
+    - Validation and automatic cleanup of corrupted cache files
+- **Variable-specific transformation framework** in ``src/meteor/variable_transforms.py``
+    - ``VariableTransformConfig`` class for managing variable-specific data processing
+    - Transform registry system with support for gamma, Weibull, lognormal, and generalized gamma distributions
+    - Separate 1D and 3D fitting functions for flexible data handling
+    - Empirical quantile mapping support
+- **SCM input handling module** in ``src/meteor/scm_input_lib.py``
+    - ``parse_scenario_input()`` for flexible scenario specification (string or dictionary)
+    - ``load_emissions_concentrations()`` for loading emission and concentration data from files or DataFrames
+    - ``load_emissions_concentrations_from_name()`` for loading default scenario data
+    - Support for custom scenario definitions with user-provided emissions/concentrations
+- **Structured ensemble output containers** in ``src/meteor/ensemble_output.py``
+    - ``EnsembleOutput`` class for organizing multi-variable ensemble results
+    - ``VariableOutput`` class for storing timeseries, gridded output, and impact metrics
+    - Comprehensive metadata tracking (model, scenario, year range, realizations)
+- **netCDF4 compression support** in ``Cmip6MeteorDataGetter``
+    - Configurable compression levels (1-9) with zlib compression
+    - ~45% storage reduction for typical CMIP6 data
+    - Enabled by default with ``compression_level=4``
+- **Enhanced noise model capabilities**
+    - Regional mean generation with AR6 region support via ``generate_regional_mean_realizations()``
+    - Point-based extraction for city-scale projections
+    - Separate stochastic PC generation via ``generate_stochastic_pcs()``
+    - Exogenous variable support in VARX models via ``use_exog`` parameter
+    - Diagnostic output saving with ``save_diagnostics=True``
+- **Comprehensive test coverage**
+    - Unit tests for ``MeteorInterface`` (``tests/unit/test_meteor_interface.py``)
+    - Unit tests for variable transforms (``tests/unit/test_variable_transforms.py``)
+    - Unit tests for precipitation transforms (``tests/unit/test_precipitation_transform.py``)
+    - Unit tests for SCM input handling (``tests/unit/test_scm_input_lib.py``)
+    - Unit tests for pattern logic library (``tests/unit/test_pattern_logic_lib.py``)
+    - Enhanced noise generator tests with 4D ensemble support
+    - Test coverage increased to 90%+
+
+### Changed
+
+- **Refactored `prpatt.py` into modular components**
+    - Split into ``geo_data_utils.py`` for geographic data operations (area weighting, global means)
+    - Split into ``pattern_logic_lib.py`` for pattern scaling mathematical functions
+    - Improved code organization and maintainability
+- **Enhanced `MeteorNoiseGenerator` with new features**
+    - Support for 4D data (n_ensemble, n_time, n_lat, n_lon) in addition to 3D
+    - Improved fitting with custom global temperature trajectories
+    - Better handling of piControl baseline data
+    - Added ``use_picontrol_baseline`` parameter for baseline control
+    - Minimum time series length validation (default 60 months)
+- **Improved `Cmip6MeteorDataGetter` architecture**
+    - Separate cache validation for pattern scaling and noise models
+    - Enhanced cache key generation with compression settings
+    - Better error handling for cache operations
+    - Support for composite scenario training data
+    - sorting for ensemble members in correct numerical order
+- **Updated `ScmEngineForPatternScaling` configuration**
+    - New ``ScmEngineConfigurations`` dataclass for managing SCM inputs
+    - ``_validate_and_set_defaults()`` method for configuration validation
+    - Better error messages for configuration issues
+    - Support for custom natural CH4 and N2O emissions
+- **Enhanced precipitation handling**
+    - Gamma distribution fitting with improved error handling for common scipy errors
+    - Support for 3D and 4D spatial data
+    - Multiple distribution options (gamma, Weibull, lognormal, generalized gamma)
+    - Better validation of positive-only data requirements
+- **Improved CI/CD and testing infrastructure**
+    - Updated Python version support: 3.10, 3.11, 3.12 (dropped 3.9)
+    - Minimum coverage requirement raised from 85% to 90%
+    - Updated notebook tests to use new interface examples
+    - Removed outdated workflow files
+- **Updated documentation and examples**
+    - Comprehensive README rewrite with quick start guide
+    - New ``METEOR_Interface_Examples.ipynb`` notebook with full workflow examples
+    - New ``METEOR_Interface_Paper_plots.ipynb`` notebook
+    - Updated ``GCAM_predict.ipynb`` notebook
+    - Removed outdated example notebooks
+- **Updated dependencies, and overall infrastructure improvements**
+    - Removed  setup.py, setup.cfg and  ``requirements.txt`` and moved to ``pyproject.toml`` for modern packaging
+    - Improved Makefile and ci-cd workflows to fit with new infrastructure
+    - Updating to require newer ciceroscm version with various improvements
+
+### Fixed
+
+- Precipitation data now correctly processed as absolute values, not anomalies
+- Temperature anomaly calculation properly uses piControl baseline
+- Noise model fitting with short time series (added minimum length check)
+- Error handling in gamma distribution fitting for edge cases
+- Configuration validation in SCM engine (nystart/emstart/nyend relationships)
+
+### Storage Optimization
+
+- Cache only monthly variable-specific files
+- Compute annual and training data on-demand from monthly cache
+- netCDF4/zlib compression reduces file sizes by ~45%
+- Configurable compression levels for storage/speed tradeoffs
+
+
 [Version 1.5.0]
 -----------------------------
 

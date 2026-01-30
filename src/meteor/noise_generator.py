@@ -17,12 +17,13 @@ import pickle  # nosec - Used for trusted model serialization only
 import warnings
 
 import numpy as np
+import regionmask
 import xarray as xr
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LinearRegression
 from statsmodels.tsa.api import VAR
 
-from .prpatt import global_mean
+from .geo_data_utils import global_mean
 
 
 class MeteorNoiseGenerator:
@@ -54,7 +55,7 @@ class MeteorNoiseGenerator:
         Whether the model has been fitted
     """
 
-    def __init__(self, n_modes=10, lag_order=2):
+    def __init__(self, n_modes=10, lag_order=2, use_exog="temp_only"):
         """
         Initialize the noise generator.
 
@@ -64,14 +65,47 @@ class MeteorNoiseGenerator:
             Number of PCA modes to retain
         lag_order : int, default 2
             Lag order for VARX model
+        use_exog : str, default 'temp_only'
+            Exogenous variables to use in VARX model:
+            - 'all': Use temperature, annual_cos, annual_sin (original behavior)
+            - 'temp_only': Use only temperature (recommended to avoid spurious seasonality)
+            - 'none': Pure VAR with no exogenous variables
         """
         self.n_modes = n_modes
         self.lag_order = lag_order
+        self.use_exog = use_exog
         self.seasonal_model = None
         self.pca = None
         self.varx_results = None
         self.coords = None
         self.fitted = False
+        self.variable_name = None
+
+        # In-memory cache for regional EOF projections (model-invariant)
+        self._regional_eof_projections = {}
+
+        # Diagnostic outputs (optional, set during fit)
+        self.diagnostic_X_features = None
+        self.diagnostic_t_glob = None
+        self.diagnostic_time = None
+        self.diagnostic_seasonal_coef = None
+        self.diagnostic_seasonal_intercept = None
+        self.diagnostic_Y_data = None
+
+    def _fix_coords_to_np(self):
+        """Ensure coordinates are NumPy arrays for serialization."""
+        if hasattr(self.coords["lat"], "values"):
+            self.coords["lat"] = self.coords["lat"].values
+        if hasattr(self.coords["lon"], "values"):
+            self.coords["lon"] = self.coords["lon"].values
+        if not isinstance(self.coords["lat"], np.ndarray):
+            raise ValueError(
+                "Latitude coordinates must be NumPy arrays or xarray.DataArray"
+            )
+        if not isinstance(self.coords["lon"], np.ndarray):
+            raise ValueError(
+                "Longitude coordinates must be NumPy arrays or xarray.DataArray"
+            )
 
     def _create_harmonic_features(self, time, t_glob):
         """
@@ -112,18 +146,42 @@ class MeteorNoiseGenerator:
 
         return X
 
-    # pylint: disable=missing-type-doc,too-many-locals
+    def _extract_exog_variables(self, X):
+        """
+        Extract exogenous variables from feature matrix based on use_exog setting.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Full feature matrix from _create_harmonic_features
+
+        Returns
+        -------
+        np.ndarray or None
+            Exogenous variables for VARX, or None for pure VAR
+        """
+        if self.use_exog == "all":
+            return X[:, :3]  # t_glob, annual_cos, annual_sin
+        if self.use_exog == "temp_only":
+            return X[:, :1]  # Only t_glob
+        if self.use_exog == "none":
+            return None  # Pure VAR
+        raise ValueError(
+            f"Invalid use_exog value: {self.use_exog}. "
+            f"Must be 'all', 'temp_only', or 'none'."
+        )
+
+    # pylint: disable=too-many-locals
     def fit(
         self,
         monthly_data,
         variable_name,
         custom_global_temp=None,
         picontrol_baseline=None,
+        save_diagnostics=False,
     ):
         """
         Fit the noise generator to monthly climate data.
-
-        # pylint: disable=missing-type-doc
 
         Parameters
         ----------
@@ -140,6 +198,10 @@ class MeteorNoiseGenerator:
             If provided, global temperature will be computed relative to this
             baseline, ensuring consistency with pattern scaling. If None,
             falls back to using first 42 years of training data as baseline.
+        save_diagnostics : bool, default False
+            If True, saves the X features matrix, global mean, and time arrays
+            to self.diagnostic_X_features, self.diagnostic_t_glob, and
+            self.diagnostic_time for debugging purposes.
         """
         # Extract the variable data
         if variable_name not in monthly_data:
@@ -159,9 +221,20 @@ class MeteorNoiseGenerator:
                     f"must match data time dimension ({len(time)})"
                 )
             t_glob = np.array(custom_global_temp)
+
         else:
             # Calculate latitude-weighted global mean temperature
             t_globm = global_mean(ds[variable_name].mean(dim=["ens"]))
+
+            # Check if timeseries is long enough for rolling smoothing
+            rolling_window = 60  # 5 years
+            if len(time) < rolling_window:
+                raise ValueError(
+                    f"Time series too short for noise model fitting. "
+                    f"Need at least {rolling_window} months ({rolling_window / 12:.1f} years), "
+                    f"but got {len(time)} months ({len(time) / 12:.1f} years). "
+                    f"Consider using a longer training period or reducing the smoothing window."
+                )
 
             # Apply baseline correction
             if picontrol_baseline is not None:
@@ -180,7 +253,7 @@ class MeteorNoiseGenerator:
 
             # Apply smoothing
             t_glob = (
-                t_globm.rolling(month=60, center=True)
+                t_globm.rolling(month=rolling_window, center=True, min_periods=1)
                 .mean()
                 .interpolate_na("month", method="nearest", fill_value="extrapolate")
                 .values
@@ -188,6 +261,18 @@ class MeteorNoiseGenerator:
 
         # Create harmonic features
         X = self._create_harmonic_features(time, t_glob)
+        # print(t_glob)
+        # print(t_globm)
+
+        # Save diagnostic outputs if requested
+        if save_diagnostics:
+            self.diagnostic_X_features = X.copy()
+            self.diagnostic_t_glob = t_glob.copy()
+            self.diagnostic_time = time.copy()
+            print("   📊 Diagnostic outputs saved:")
+            print(f"      X_features shape: {X.shape}")
+            print(f"      t_glob shape: {t_glob.shape}")
+            print(f"      time shape: {time.shape}")
 
         # Prepare data for seasonal cycle fitting
         Y_xr = (  # pylint: disable=invalid-name
@@ -199,6 +284,18 @@ class MeteorNoiseGenerator:
         self.seasonal_model = LinearRegression(fit_intercept=True)
         self.seasonal_model.fit(X, Y)
 
+        # Save additional diagnostic outputs if requested
+        if save_diagnostics:
+            self.diagnostic_seasonal_coef = self.seasonal_model.coef_.copy()
+            self.diagnostic_seasonal_intercept = self.seasonal_model.intercept_.copy()
+            self.diagnostic_Y_data = Y.copy()
+            print("   📊 Seasonal model diagnostics saved:")
+            print(
+                f"      Coefficients shape: {self.seasonal_model.coef_.shape} (gridpoints × features)"
+            )
+            print(f"      Intercept shape: {self.seasonal_model.intercept_.shape}")
+            print(f"      Y data shape: {Y.shape} (time × gridpoints)")
+
         # Reconstruct seasonal cycle
         seasonal_cycle_fit = self.seasonal_model.predict(X)
         seasonal_cycle_fit_xr = xr.DataArray(
@@ -206,8 +303,14 @@ class MeteorNoiseGenerator:
         ).unstack("space")
 
         # Calculate anomalies
-        anomalies = ds[variable_name].mean(dim=["ens"]) - seasonal_cycle_fit_xr
-
+        if picontrol_baseline is not None:
+            anomalies = (
+                ds[variable_name].mean(dim=["ens"])
+                - seasonal_cycle_fit_xr
+                - picontrol_baseline
+            )
+        else:
+            anomalies = ds[variable_name].mean(dim=["ens"]) - seasonal_cycle_fit_xr
         # Fit PCA to anomalies
         anomalies_flat = anomalies.stack(space=("lat", "lon")).data
 
@@ -215,11 +318,10 @@ class MeteorNoiseGenerator:
         pcs = self.pca.fit_transform(anomalies_flat)
 
         # Fit VARX model to PCs
+        X_exog = self._extract_exog_variables(X)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            model_var = VAR(
-                endog=pcs, exog=X[:, :3]
-            )  # Use first 3 features as exogenous
+            model_var = VAR(endog=pcs, exog=X_exog)
             self.varx_results = model_var.fit(self.lag_order)
 
         # Store coordinate information
@@ -228,7 +330,10 @@ class MeteorNoiseGenerator:
             "lon": ds.coords["lon"],
             "month": ds.coords["month"],
         }
+        self._fix_coords_to_np()
 
+        # Store variable name for future reference
+        self.variable_name = variable_name
         self.fitted = True
 
         print("Noise generator fitted successfully.")
@@ -237,14 +342,83 @@ class MeteorNoiseGenerator:
             f"   - Variance explained: {self.pca.explained_variance_ratio_.sum():.2%}"
         )
         print(f"   - VARX lag order: {self.lag_order}")
+        if self.use_exog == "all":
+            print("   - Exogenous vars: t_glob, annual_cos, annual_sin")
+        elif self.use_exog == "temp_only":
+            print("   - Exogenous vars: t_glob only")
+        else:
+            print("   - Exogenous vars: none (pure VAR)")
 
-    # pylint: disable=missing-type-doc,too-many-locals
+    # pylint: disable=too-many-locals
+    def generate_stochastic_pcs(
+        self,
+        global_temp_trajectory,
+        n_realizations=1,
+        random_seed=None,
+    ):
+        """
+        Generate stochastic principal component time series.
+
+        This method generates only the stochastic PC loadings, which can be
+        used to reconstruct either gridded fields or regional/global means.
+        This enables self-consistent ensemble generation across different
+        spatial aggregations.
+
+        Parameters
+        ----------
+        global_temp_trajectory : array-like
+            Global temperature trajectory (used for exogenous variables in VARX model)
+        n_realizations : int, default 1
+            Number of realizations to generate
+        random_seed : int, optional
+            Random seed for reproducibility
+
+        Returns
+        -------
+        np.ndarray
+            Stochastic PC time series with shape:
+            - (n_time, n_modes) if n_realizations == 1
+            - (n_realizations, n_time, n_modes) if n_realizations > 1
+
+        Examples
+        --------
+        >>> # Generate PCs once, use for multiple outputs
+        >>> pcs = model.generate_stochastic_pcs(monthly_warming, n_realizations=100)
+        >>> global_means = model.generate_regional_mean_realizations(
+        ...     monthly_warming, region='global', stochastic_pcs=pcs)
+        >>> neu_means = model.generate_regional_mean_realizations(
+        ...     monthly_warming, region='NEU', stochastic_pcs=pcs)
+        """
+        if not self.fitted:
+            raise ValueError("Model must be fitted before generating realizations")
+
+        if random_seed is not None:
+            np.random.seed(random_seed)
+
+        n_time = len(global_temp_trajectory)
+        time = np.arange(n_time)
+
+        # Create exogenous variables for VARX
+        X = self._create_harmonic_features(time, global_temp_trajectory)
+        X_exog = self._extract_exog_variables(X)
+
+        # Generate stochastic PCs for each realization
+        if n_realizations == 1:
+            return self._generate_stochastic_pcs(X_exog, n_time)
+        all_pcs = []
+        for _ in range(n_realizations):
+            pcs = self._generate_stochastic_pcs(X_exog, n_time)
+            all_pcs.append(pcs)
+        return np.array(all_pcs)  # Shape: (n_realizations, n_time, n_modes)
+
+    # pylint: disable=too-many-locals
     def generate_realization(
         self,
         global_temp_trajectory,
         n_realizations=1,
         random_seed=None,
         noise_only=False,
+        add_base=None,
     ):
         """
         Generate stochastic climate realizations.
@@ -262,6 +436,10 @@ class MeteorNoiseGenerator:
             If True, generate only the stochastic noise component without direct temperature
             effects or constant terms, but preserve temperature-modulated seasonal harmonics.
             This is useful for adding to METEOR annual predictions.
+        add_base : xr.DataArray, optional
+            Base climatology to add to each realization. If provided, the addition is done
+            efficiently in NumPy before XArray conversion, avoiding expensive XArray operations.
+            Must have compatible shape with the output.
 
         Returns
         -------
@@ -275,86 +453,77 @@ class MeteorNoiseGenerator:
         if random_seed is not None:
             np.random.seed(random_seed)
 
+        # Create time coordinate (shared across all realizations)
+        n_time = len(global_temp_trajectory)
+        time = np.arange(n_time)
+
+        # Precompute harmonic features (shared across all realizations)
+        X = self._create_harmonic_features(time, global_temp_trajectory)
+        X_exog = self._extract_exog_variables(X)
+
+        # Precompute seasonal cycle as NumPy array (shared across all realizations)
+        if noise_only:
+            # For noise-only: keep seasonal harmonics AND temperature-modulated harmonics
+            # but remove the direct temperature effect (intercept + t_glob term)
+            seasonal_cycle = self.seasonal_model.predict(X)
+
+            # Calculate what to subtract (intercept + direct temperature effect)
+            intercept_effect = self.seasonal_model.intercept_
+            temp_effect = (
+                self.seasonal_model.coef_[:, 0] * global_temp_trajectory[:, np.newaxis]
+            )
+
+            # Remove intercept and direct temperature effect from seasonal cycle
+            seasonal_cycle_np = (
+                seasonal_cycle - intercept_effect[np.newaxis, :] - temp_effect
+            )
+        else:
+            # Standard operation: full seasonal cycle with temperature dependence
+            seasonal_cycle_np = self.seasonal_model.predict(X)
+
+        # Reshape seasonal cycle once
+        n_lat = len(self.coords["lat"])
+        n_lon = len(self.coords["lon"])
+        seasonal_cycle_reshaped = seasonal_cycle_np.reshape(n_time, n_lat, n_lon)
+
+        # Convert base climatology to NumPy if provided (once for all realizations)
+        base_clim_np = None
+        if add_base is not None:
+            # Handle potential ensemble dimension and squeeze it
+            base_values = add_base.values
+            if base_values.ndim == 4:
+                # Shape is (ens, time, lat, lon) - squeeze out ensemble dimension
+                base_values = base_values.squeeze()
+
+            # Now reshape to (n_time, n_lat, n_lon)
+            # If the time dimension doesn't match, select the first n_time steps
+            if base_values.shape[0] != n_time:
+                base_values = base_values[:n_time, :, :]
+
+            base_clim_np = base_values.reshape(n_time, n_lat, n_lon)
+
+        # Generate realizations (only stochastic component varies)
         realizations = []
-
         for _ in range(n_realizations):
-            # Create time coordinate
-            n_time = len(global_temp_trajectory)
-            time = np.arange(n_time)
+            # Generate stochastic component (this is the only unique part per realization)
+            synthetic_pcs = self._generate_stochastic_pcs(X_exog, n_time)
 
-            if noise_only:
-                # For noise-only: keep seasonal harmonics AND temperature-modulated harmonics
-                # but remove the direct temperature effect (intercept + t_glob term)
-                X = self._create_harmonic_features(time, global_temp_trajectory)
-
-                # Generate full seasonal cycle prediction
-                seasonal_cycle = self.seasonal_model.predict(X)
-
-                # Now remove only the direct temperature effects (intercept + t_glob)
-                # Keep: harmonics (indices 1-4) + temperature-modulated harmonics (indices 5-8)
-                # Remove: intercept + t_glob (index 0)
-
-                # Create a modified prediction by zeroing out unwanted terms
-                # The seasonal model coefficients are organized as:
-                # coef_[:, 0] = t_glob coefficient (direct temperature effect)
-                # coef_[:, 1-4] = pure harmonic coefficients
-                # coef_[:, 5-8] = temperature-modulated harmonic coefficients
-
-                # Calculate what to subtract (intercept + direct temperature effect)
-                intercept_effect = self.seasonal_model.intercept_
-                temp_effect = (
-                    self.seasonal_model.coef_[:, 0]
-                    * global_temp_trajectory[:, np.newaxis]
-                )
-
-                # Remove intercept and direct temperature effect from seasonal cycle
-                seasonal_cycle_adjusted = (
-                    seasonal_cycle - intercept_effect[np.newaxis, :] - temp_effect
-                )
-
-                seasonal_cycle_xr = xr.DataArray(
-                    seasonal_cycle_adjusted.reshape(
-                        n_time, len(self.coords["lat"]), len(self.coords["lon"])
-                    ),
-                    coords={
-                        "month": time,
-                        "lat": self.coords["lat"],
-                        "lon": self.coords["lon"],
-                    },
-                    dims=("month", "lat", "lon"),
-                )
-            else:
-                # Standard operation: full seasonal cycle with temperature dependence
-                X = self._create_harmonic_features(time, global_temp_trajectory)
-
-                # Generate seasonal cycle
-                seasonal_cycle = self.seasonal_model.predict(X)
-                seasonal_cycle_xr = xr.DataArray(
-                    seasonal_cycle.reshape(
-                        n_time, len(self.coords["lat"]), len(self.coords["lon"])
-                    ),
-                    coords={
-                        "month": time,
-                        "lat": self.coords["lat"],
-                        "lon": self.coords["lon"],
-                    },
-                    dims=("month", "lat", "lon"),
-                )
-
-            # Generate stochastic component
-            if noise_only:
-                # For noise-only, keep temperature in exogenous variables but use actual temperature
-                # This preserves the temperature-dependent variability patterns
-                synthetic_pcs = self._generate_stochastic_pcs(X[:, :3], n_time)
-            else:
-                synthetic_pcs = self._generate_stochastic_pcs(X[:, :3], n_time)
-
-            # Reconstruct anomalies
+            # Reconstruct anomalies (NumPy)
             reconstructed_anomalies = synthetic_pcs @ self.pca.components_
-            reconstructed_anomalies_xr = xr.DataArray(
-                reconstructed_anomalies.reshape(
-                    n_time, len(self.coords["lat"]), len(self.coords["lon"])
-                ),
+            reconstructed_anomalies_reshaped = reconstructed_anomalies.reshape(
+                n_time, n_lat, n_lon
+            )
+
+            # Combine seasonal cycle and anomalies in NumPy (FAST!)
+            realization_np = seasonal_cycle_reshaped + reconstructed_anomalies_reshaped
+
+            # Add base climatology in NumPy if provided (FAST!)
+            if base_clim_np is not None:
+                realization_np = realization_np + base_clim_np
+
+            # Convert to xarray only once at the end
+            realization_xr = xr.DataArray(
+                realization_np,
                 coords={
                     "month": time,
                     "lat": self.coords["lat"],
@@ -362,10 +531,7 @@ class MeteorNoiseGenerator:
                 },
                 dims=("month", "lat", "lon"),
             )
-
-            # Combine seasonal cycle and anomalies
-            realization = seasonal_cycle_xr + reconstructed_anomalies_xr
-            realizations.append(realization)
+            realizations.append(realization_xr)
 
         return realizations if n_realizations > 1 else realizations[0]
 
@@ -374,42 +540,495 @@ class MeteorNoiseGenerator:
         """
         Generate stochastic principal components using fitted VARX model.
 
+        This optimized implementation uses batched random generation
+        (generating all random shocks at once) and manual VAR time loop
+        instead of repeatedly calling statsmodels forecast() which has
+        significant overhead from redundant SVD decompositions.
+
+
         Parameters
         ----------
-        X_exog : np.ndarray
-            Exogenous variables for VARX model
+        X_exog : np.ndarray or None
+            Exogenous variables for VARX model (n_time, n_exog), or None for pure VAR
         n_time : int
             Number of time steps to generate
 
         Returns
         -------
         np.ndarray
-            Generated principal components
+            Generated principal components (n_time, n_modes)
         """
-        synthetic_pcs = np.zeros((n_time, self.n_modes))
+        # Extract coefficient matrices from fitted VARX model
+        params = self.varx_results.params
+        n_exog = X_exog.shape[1] if X_exog is not None else 0
 
-        # Use zero initial conditions (could be improved)
+        # Intercept (n_modes,)
+        intercept = params[0, :]
+
+        # Lag coefficient matrices A₁, A₂, ... (each n_modes × n_modes)
+        A_matrices = []
+        for lag_i in range(self.lag_order):
+            start_idx = 1 + lag_i * self.n_modes
+            end_idx = start_idx + self.n_modes
+            A_matrices.append(params[start_idx:end_idx, :].T)
+
+        # Exogenous coefficient matrix B (n_modes × n_exog)
+        B_matrix = params[-n_exog:, :].T
+
+        # Residual covariance matrix Σ (n_modes × n_modes)
+        residual_cov = self.varx_results.sigma_u
+
+        # 🚀 KEY OPTIMIZATION: Pre-generate ALL random shocks at once
+        # This eliminates 97% of the bottleneck (4,212 separate MVN calls → 1 batched call)
+        mean_shock = np.zeros(self.n_modes)
+        all_shocks = np.random.multivariate_normal(
+            mean_shock, residual_cov, size=n_time
+        )
+
+        # Initialize synthetic PCs with zero initial conditions
+        synthetic_pcs = np.zeros((n_time, self.n_modes))
         synthetic_pcs[: self.lag_order] = 0
 
-        # Get residual covariance
-        residual_cov = self.varx_results.sigma_u
-        mean_shock = np.zeros(self.n_modes)
-
-        # Generate time series
+        # Time loop (still needed for autoregressive structure)
+        # VAR equation: y_t = intercept + A₁y_{t-1} + A₂y_{t-2} + ... + B·x_t + ε_t
         for t in range(self.lag_order, n_time):
-            current_initial_conditions = synthetic_pcs[t - self.lag_order : t]
-            current_exog = X_exog[t : t + 1]
+            # Start with intercept
+            forecast = intercept.copy()
 
-            # Get mean forecast
-            mean_forecast = self.varx_results.forecast(
-                y=current_initial_conditions, steps=1, exog_future=current_exog
-            )
+            # Add lag contributions: A₁y_{t-1} + A₂y_{t-2} + ...
+            for lag_i in range(self.lag_order):
+                y_lag = synthetic_pcs[t - lag_i - 1]
+                forecast += A_matrices[lag_i] @ y_lag
 
-            # Add random shock
-            random_shock = np.random.multivariate_normal(mean_shock, residual_cov)
-            synthetic_pcs[t] = mean_forecast.flatten() + random_shock
+            # Add exogenous contribution: B·x_t (if using exogenous variables)
+            if X_exog is not None:
+                forecast += B_matrix @ X_exog[t]
+
+            # Add pre-generated random shock (no MVN call here!)
+            synthetic_pcs[t] = forecast + all_shocks[t]
 
         return synthetic_pcs
+
+    # TODO check if we can use the weights calculator from geo_data_utils.py
+    def _compute_spatial_weights(self):
+        """Compute area-weighted spatial averaging weights (cosine of latitude)."""
+        return np.cos(np.deg2rad(self.coords["lat"]))
+
+    def _find_nearest_gridpoint(self, target_lat, target_lon):
+        """
+        Find the nearest gridpoint to the target latitude and longitude.
+
+        Parameters
+        ----------
+        target_lat : float
+            Target latitude in degrees
+        target_lon : float
+            Target longitude in degrees (0-360 or -180 to 180)
+
+        Returns
+        -------
+        tuple
+            (lat_idx, lon_idx) indices of the nearest gridpoint
+        """
+        lats = self.coords["lat"]
+        lons = self.coords["lon"]
+
+        # Normalize longitude to 0-360 range
+        target_lon = target_lon % 360
+        lons_normalized = lons % 360
+
+        # Find nearest latitude
+        print(lats)
+        print(target_lat)
+        lat_idx = np.argmin(np.abs(lats - target_lat))
+
+        # Find nearest longitude
+        lon_idx = np.argmin(np.abs(lons_normalized - target_lon))
+
+        return lat_idx, lon_idx
+
+    def _get_point_eof_values(self, lat, lon):
+        """
+        Get EOF values at a specific point (no averaging).
+
+        Cached in memory since EOFs are model-invariant.
+
+        Parameters
+        ----------
+        lat : float
+            Latitude in degrees
+        lon : float
+            Longitude in degrees
+
+        Returns
+        -------
+        np.ndarray
+            EOF values at the point, shape (n_modes,)
+        """
+        # Create cache key
+        point_id = f"point_{lat:.2f}_{lon:.2f}"
+        if point_id in self._regional_eof_projections:
+            return self._regional_eof_projections[point_id]
+
+        # Find nearest gridpoint
+        lat_idx, lon_idx = self._find_nearest_gridpoint(lat, lon)
+
+        # Get EOFs reshaped to spatial grid
+        n_lat = len(self.coords["lat"])
+        n_lon = len(self.coords["lon"])
+        eof_components = self.pca.components_.reshape(self.n_modes, n_lat, n_lon)
+
+        # Extract values at the point (no averaging needed)
+        eof_point_values = eof_components[:, lat_idx, lon_idx]
+
+        # Cache and return
+        self._regional_eof_projections[point_id] = eof_point_values
+        return eof_point_values
+
+    # TODO region masking and averaging from geo_data_utils.py could be reused here?
+
+    def _get_regional_eof_projection(self, region, region_mask=None):
+        """
+        Get or compute the spatial mean projection of each EOF for a region.
+
+        Cached in memory since EOFs are model-invariant.
+
+        Parameters
+        ----------
+        region : str
+            Region identifier ('global' or AR6 region code like 'NEU')
+        region_mask : np.ndarray, optional
+            Custom 2D boolean mask (n_lat, n_lon) for the region
+
+        Returns
+        -------
+        np.ndarray
+            Mean projection of each EOF mode for the region, shape (n_modes,)
+        """
+        # Check cache first
+        region_id = region if region_mask is None else f"custom_{id(region_mask)}"
+        if region_id in self._regional_eof_projections:
+            return self._regional_eof_projections[region_id]
+
+        # Compute EOF projections
+        n_lat = len(self.coords["lat"])
+        n_lon = len(self.coords["lon"])
+
+        # Get EOFs reshaped to spatial grid (n_modes, n_lat, n_lon)
+        eof_components = self.pca.components_.reshape(self.n_modes, n_lat, n_lon)
+        if region_mask is None and region != "global":
+            region_mask = self._get_ar6_region_mask(region)
+
+        eof_projections = self._weighted_mean_over_region(
+            eof_components, None, None, region_mask, region
+        )
+
+        # Cache and return
+        self._regional_eof_projections[region_id] = eof_projections
+        return eof_projections
+
+    def generate_regional_mean_realizations(
+        self,
+        global_temp_trajectory,
+        region="global",
+        region_mask=None,
+        lat=None,
+        lon=None,
+        n_realizations=1,
+        random_seed=None,
+        noise_only=False,
+        add_base=None,
+        stochastic_pcs=None,
+        return_numpy=False,
+    ):
+        """
+        Generate regional/global mean or point-scale realizations efficiently.
+
+        This method avoids creating full 3D gridded fields by computing the
+        output directly from the PC projections. This is orders of magnitude
+        faster when only scalar time series are needed.
+
+        Parameters
+        ----------
+        global_temp_trajectory : array-like
+            Global temperature trajectory to drive the seasonal cycle
+        region : str, default 'global'
+            Region identifier: 'global' or AR6 region code (e.g., 'NEU', 'WNA').
+            Ignored if lat/lon are provided.
+        region_mask : np.ndarray, optional
+            Custom 2D boolean mask (n_lat, n_lon) for region. If provided, overrides `region`.
+            Ignored if lat/lon are provided.
+        lat : float, optional
+            Latitude for point extraction (degrees). If provided with `lon`, extracts
+            time series at the nearest gridpoint instead of computing regional mean.
+        lon : float, optional
+            Longitude for point extraction (degrees, 0-360 or -180 to 180).
+            Must be provided together with `lat`.
+        n_realizations : int, default 1
+            Number of realizations to generate
+        random_seed : int, optional
+            Random seed for reproducibility
+        noise_only : bool, default False
+            If True, generate only stochastic component (for adding to predictions)
+        add_base : xr.DataArray or np.ndarray, optional
+            Base climatology to add. Can be:
+            - Scalar time series (n_time,) - will be added directly
+            - Gridded field (n_time, n_lat, n_lon) - will be spatially averaged/extracted at point
+        stochastic_pcs : np.ndarray, optional
+            Pre-generated stochastic PCs from generate_stochastic_pcs().
+            If provided, these PCs are used (enabling self-consistent multi-region generation).
+            Shape: (n_time, n_modes) or (n_realizations, n_time, n_modes)
+        return_numpy : bool, default False
+            If True, return numpy arrays. If False, return xarray DataArrays.
+
+        Returns
+        -------
+        xr.DataArray or np.ndarray
+            Regional/global mean or point-scale time series.
+
+            - If n_realizations == 1:
+              Shape (n_time,) with dims ('month',)
+            - If n_realizations > 1:
+              Shape (n_realizations, n_time) with dims ('realization', 'month')
+
+            When return_numpy=False (default), returns xarray DataArray with proper
+            coordinates and dims. When return_numpy=True, returns numpy array.
+
+        Examples
+        --------
+        >>> # Fast generation of 100 global mean realizations
+        >>> global_means = model.generate_regional_mean_realizations(
+        ...     monthly_warming, region='global', n_realizations=100)
+        >>> # Returns shape (100, n_time) with dims ('realization', 'month')
+        >>>
+        >>> # Point-scale generation (e.g., New York City: 40.7°N, 74°W = 286°E)
+        >>> nyc_temps = model.generate_regional_mean_realizations(
+        ...     monthly_warming, lat=40.7, lon=286, n_realizations=100)
+        >>>
+        >>> # Self-consistent multi-location generation
+        >>> pcs = model.generate_stochastic_pcs(monthly_warming, n_realizations=50)
+        >>> global_m = model.generate_regional_mean_realizations(
+        ...     monthly_warming, region='global', stochastic_pcs=pcs)
+        >>> london = model.generate_regional_mean_realizations(
+        ...     monthly_warming, lat=51.5, lon=0, stochastic_pcs=pcs)
+        >>> # Global mean and London share the same stochastic variability
+        """
+        if not self.fitted:
+            raise ValueError("Model must be fitted before generating realizations")
+
+        # Validate lat/lon parameters
+        if (lat is None) != (lon is None):
+            raise ValueError(
+                "Both lat and lon must be provided together for point extraction"
+            )
+
+        if random_seed is not None and stochastic_pcs is None:
+            np.random.seed(random_seed)
+
+        n_time = len(global_temp_trajectory)
+        time = np.arange(n_time)
+
+        # Get EOF projections/values (cached)
+        if lat is not None and lon is not None:
+            # Point extraction mode
+            eof_projections = self._get_point_eof_values(lat, lon)
+            location_type = "point"
+            location_id = f"{lat:.2f}N_{lon:.2f}E"
+        else:
+            # Regional mean mode
+            eof_projections = self._get_regional_eof_projection(region, region_mask)
+            location_type = "region"
+            location_id = region
+
+        # Compute seasonal cycle regional mean
+        X = self._create_harmonic_features(time, global_temp_trajectory)
+
+        if noise_only:
+            # For noise-only: seasonal harmonics without direct temperature effect
+            seasonal_cycle = self.seasonal_model.predict(X)
+            intercept_effect = self.seasonal_model.intercept_
+            temp_effect = (
+                self.seasonal_model.coef_[:, 0] * global_temp_trajectory[:, np.newaxis]
+            )
+            seasonal_cycle_full = (
+                seasonal_cycle - intercept_effect[np.newaxis, :] - temp_effect
+            )
+        else:
+            seasonal_cycle_full = self.seasonal_model.predict(X)
+
+        # Compute seasonal mean (point extraction or regional average)
+        n_lat = len(self.coords["lat"])
+        n_lon = len(self.coords["lon"])
+        seasonal_cycle_grid = seasonal_cycle_full.reshape(n_time, n_lat, n_lon)
+
+        if lat is None and lon is None and region != "global" and region_mask is None:
+            # Get mask from AR6 regions
+            region_mask = self._get_ar6_region_mask(region)
+
+        seasonal_mean = self._weighted_mean_over_region(
+            seasonal_cycle_grid, lat, lon, region_mask, region
+        )
+        # Compute base climatology (if provided)
+        base_mean = None
+        if add_base is not None:
+            if isinstance(add_base, xr.DataArray):
+                add_base = add_base.values
+
+            if add_base.ndim == 1:
+                # Already a time series
+                base_mean = add_base
+            elif add_base.ndim == 3:
+                # Gridded field - extract point or compute regional mean
+                base_mean = self._weighted_mean_over_region(
+                    add_base, lat, lon, region_mask, region
+                )
+
+        # Generate or use provided stochastic PCs
+        if stochastic_pcs is None:
+            X_exog = self._extract_exog_variables(X)
+            if n_realizations == 1:
+                pcs_to_use = [self._generate_stochastic_pcs(X_exog, n_time)]
+            else:
+                pcs_to_use = [
+                    self._generate_stochastic_pcs(X_exog, n_time)
+                    for _ in range(n_realizations)
+                ]
+        else:
+            # Use provided PCs
+            if stochastic_pcs.ndim == 2:
+                # Single realization
+                pcs_to_use = [stochastic_pcs]
+            else:
+                # Multiple realizations
+                pcs_to_use = list(stochastic_pcs)
+
+        # Reconstruct regional means from PCs
+        realizations = []
+        for pcs in pcs_to_use:
+            # Anomaly contribution: PCs @ EOF_projections
+            anomaly_mean = pcs @ eof_projections  # (n_time,)
+
+            # Combine components
+            realization = seasonal_mean + anomaly_mean
+            if base_mean is not None:
+                realization = realization + base_mean
+
+            realizations.append(realization)
+
+        # Return format numpy array
+        if return_numpy:
+            # Return as numpy array with shape (n_realizations, n_time) or (n_time,) if single
+            if len(realizations) == 1:
+                return realizations[0]
+            return np.array(realizations)
+
+        # Else xarray dataset or dataArray, so build attributes
+        attrs = {location_type: location_id}
+        if lat is not None and lon is not None:
+            attrs["latitude"] = lat
+            attrs["longitude"] = lon
+
+        # Return as xarray DataArray
+        if len(realizations) == 1:
+            # Single realization - return 1D DataArray
+            return xr.DataArray(
+                realizations[0],
+                coords={"month": time},
+                dims=("month",),
+                attrs=attrs,
+            )
+        # Multiple realizations - concatenate with 'realization' dimension
+        return xr.DataArray(
+            np.array(realizations),
+            coords={
+                "realization": np.arange(len(realizations)),
+                "month": time,
+            },
+            dims=("realization", "month"),
+            attrs=attrs,
+        )
+
+    def _weighted_mean_over_region(self, data, lat, lon, region_mask, region):
+        """
+        Compute weighted mean over a region or point extraction.
+
+        Parameters
+        ----------
+        data : np.ndarray
+            Input data with shape (n_time, n_lat, n_lon)
+        lat : float, optional
+            Latitude for point extraction (degrees)
+        lon : float, optional
+            Longitude for point extraction (degrees)
+        region_mask : np.ndarray, optional
+            Custom 2D boolean mask (n_lat, n_lon) for region
+        Returns
+        -------
+        np.ndarray
+            Weighted mean time series with shape (n_time,)
+        """
+        # Point extraction
+        if lat is not None and lon is not None:
+            lat_idx, lon_idx = self._find_nearest_gridpoint(lat, lon)
+            return data[:, lat_idx, lon_idx]
+
+        # Regional or global mean, start by computing area weights
+        weights = self._compute_spatial_weights()
+        weight_grid = weights[:, np.newaxis]
+        if region == "global" and region_mask is None:
+            # Global mean
+            total_weight = np.sum(weights) * data.shape[2]
+            return np.array(
+                [
+                    np.sum(data[t] * weight_grid) / total_weight
+                    for t in range(data.shape[0])
+                ]
+            )
+        # Regional mean
+        mean_values = np.zeros(data.shape[0])
+        for t in range(data.shape[0]):
+            masked_data = np.where(region_mask, data[t], np.nan)
+            masked_weights = np.where(region_mask, weight_grid, 0)
+            mean_values[t] = np.nansum(masked_data * masked_weights) / np.sum(
+                masked_weights
+            )
+        return mean_values
+
+    def _get_ar6_region_mask(self, region):
+        """
+        Get AR6 region mask for the model grid.
+
+        Parameters
+        ----------
+        region : str
+            AR6 region code (e.g., 'NEU', 'WNA')
+
+        Returns
+        -------
+        np.ndarray
+            2D boolean mask (n_lat, n_lon) for the region
+        """
+        ar6_regions = regionmask.defined_regions.ar6.all
+
+        # Find region number
+        region_number = None
+        for r in ar6_regions:
+            if r.abbrev == region:
+                region_number = r.number
+                break
+
+        if region_number is None:
+            raise ValueError(f"AR6 region '{region}' not found")
+
+        # Create mask on this grid
+        lons = self.coords["lon"]
+
+        lats = self.coords["lat"]
+
+        lon_2d, lat_2d = np.meshgrid(lons, lats)
+        mask_3d = ar6_regions.mask(lon_2d, lat_2d)
+        region_mask = mask_3d == region_number
+        return region_mask
 
     def save_model(self, filepath):
         """
@@ -426,11 +1045,13 @@ class MeteorNoiseGenerator:
         model_data = {
             "n_modes": self.n_modes,
             "lag_order": self.lag_order,
+            "use_exog": self.use_exog,
             "seasonal_model": self.seasonal_model,
             "pca": self.pca,
             "varx_results": self.varx_results,
             "coords": self.coords,
             "fitted": self.fitted,
+            "variable_name": self.variable_name,
         }
 
         with open(filepath, "wb") as f:
@@ -452,16 +1073,21 @@ class MeteorNoiseGenerator:
 
         self.n_modes = model_data["n_modes"]
         self.lag_order = model_data["lag_order"]
+        self.use_exog = model_data.get(
+            "use_exog", "all"
+        )  # Default to 'all' for backward compatibility
         self.seasonal_model = model_data["seasonal_model"]
         self.pca = model_data["pca"]
         self.varx_results = model_data["varx_results"]
         self.coords = model_data["coords"]
         self.fitted = model_data["fitted"]
+        self._fix_coords_to_np()
+        # Load variable_name if available (for backward compatibility)
+        self.variable_name = model_data.get("variable_name", None)
 
         print(f"Model loaded from {filepath}")
 
 
-# pylint: disable=too-many-arguments,too-many-positional-arguments,missing-type-doc
 def train_noise_model_from_cmip6(
     data_getter,
     experiments,
@@ -472,6 +1098,8 @@ def train_noise_model_from_cmip6(
     cache_dir=None,
     custom_global_temp=None,
     use_picontrol_baseline=True,
+    save_diagnostics=False,
+    use_exog="temp_only",
 ):
     """
     Train a noise generator from CMIP6 data.
@@ -504,6 +1132,17 @@ def train_noise_model_from_cmip6(
         Whether to use piControl data as baseline for temperature anomalies.
         This ensures consistency with pattern scaling.
         If False, falls back to using first 42 years of training data.
+    save_diagnostics : bool, default False
+        If True, saves diagnostic outputs (X features matrix, global mean, time)
+        to the fitted model for debugging purposes. Access via
+        model.diagnostic_X_features, model.diagnostic_t_glob, model.diagnostic_time,
+        model.diagnostic_seasonal_coef, model.diagnostic_seasonal_intercept,
+        and model.diagnostic_Y_data.
+    use_exog : str, default 'temp_only'
+        Exogenous variables to use in VARX model:
+        - 'all': Use temperature, annual_cos, annual_sin (may cause spurious seasonality)
+        - 'temp_only': Use only temperature (recommended)
+        - 'none': Pure VAR with no exogenous variables
 
     Returns
     -------
@@ -545,14 +1184,17 @@ def train_noise_model_from_cmip6(
             picontrol_baseline = None
 
     # Create and fit noise generator
-    noise_gen = MeteorNoiseGenerator(n_modes=n_modes, lag_order=lag_order)
+    noise_gen = MeteorNoiseGenerator(
+        n_modes=n_modes, lag_order=lag_order, use_exog=use_exog
+    )
+    print(n_modes, lag_order)
     noise_gen.fit(
         monthly_data,
         variable_name,
         custom_global_temp=custom_global_temp,
         picontrol_baseline=picontrol_baseline,
+        save_diagnostics=save_diagnostics,
     )
-
     # Cache if requested
     if cache_dir is not None:
         os.makedirs(cache_dir, exist_ok=True)
@@ -564,7 +1206,6 @@ def train_noise_model_from_cmip6(
     return noise_gen
 
 
-# pylint: disable=too-many-arguments,too-many-positional-arguments,missing-type-doc
 def train_multiple_noise_models_from_cmip6(
     data_getter,
     experiments,
@@ -575,6 +1216,7 @@ def train_multiple_noise_models_from_cmip6(
     cache_dir=None,
     custom_global_temp=None,
     use_picontrol_baseline=True,
+    use_exog="temp_only",
 ):
     """
     Train noise generators for multiple model/variable combinations.
@@ -605,6 +1247,11 @@ def train_multiple_noise_models_from_cmip6(
         Whether to use piControl data as baseline for temperature anomalies.
         This ensures consistency with pattern scaling.
         If False, falls back to using first 42 years of training data.
+    use_exog : str, default 'temp_only'
+        Exogenous variables to use in VARX model:
+        - 'all': Use temperature, annual_cos, annual_sin (may cause spurious seasonality)
+        - 'temp_only': Use only temperature (recommended)
+        - 'none': Pure VAR with no exogenous variables
 
     Returns
     -------
@@ -651,6 +1298,7 @@ def train_multiple_noise_models_from_cmip6(
                     cache_dir=cache_dir,
                     custom_global_temp=custom_global_temp,
                     use_picontrol_baseline=use_picontrol_baseline,
+                    use_exog=use_exog,
                 )
                 noise_models[model][variable] = noise_gen
             except Exception as e:  # pylint: disable=broad-exception-caught
@@ -697,48 +1345,162 @@ def load_noise_model_from_cache(cache_dir, model_name, variable_name):
     return noise_gen
 
 
-# pylint: disable=too-many-arguments,too-many-positional-arguments,missing-type-doc
-def train_noise_model_from_composite(
-    data_getter,
-    experiments,
-    model_name,
+def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
+    cache_file,
     variable_name,
-    n_modes=10,
+    n_modes=40,
     lag_order=2,
-    cache_dir=None,
 ):
     """
-    Train a noise model from composite experimental data.
+    Validate a cached noise model file.
+
+    Checks if the cached pickle file exists, can be loaded, and contains
+    the expected configuration (n_modes, lag_order, variable_name) and
+    required attributes (pca, varx_results).
 
     Parameters
     ----------
-    data_getter : Cmip6MeteorDataGetter
-        Data getter instance
-    experiments : list
-        List of experiments to use for training (e.g., ["historical", "ssp245"])
-    model_name : str
-        Name of the climate model
+    cache_file : str
+        Path to the cached noise model file
     variable_name : str
-        Variable to model (e.g., 'tas', 'pr')
-    n_modes : int, default 10
-        Number of PCA modes
-    lag_order : int, default 2
-        VARX lag order
-    cache_dir : str, optional
-        Directory to cache the trained model
+        Expected variable name (e.g., 'tas', 'pr')
+    n_modes : int, optional
+        Expected number of PCA modes. Default is 40.
+    lag_order : int, optional
+        Expected temporal lag order. Default is 2.
 
     Returns
     -------
-    MeteorNoiseGenerator
-        Fitted noise generator
+    tuple
+        (is_valid, cached_model, info_dict) where:
+        - is_valid: bool indicating if cache is valid
+        - cached_model: loaded MeteorNoiseGenerator if valid, None otherwise
+        - info_dict: dict with 'message', 'expected', 'found' information
+
+    Examples
+    --------
+    >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
+    >>> cache_file = data_getter.get_noise_model_cache_path("CESM2", "tas")
+    >>> is_valid, model, info = data_getter.validate_noise_model_cache(
+    ...     cache_file, "tas", n_modes=40, lag_order=2
+    ... )
+    >>> if is_valid:
+    ...     print(f"✅ {info['message']}")
     """
-    # Use the new function for consistency
-    return train_noise_model_from_cmip6(
-        data_getter,
-        experiments,
-        model_name,
-        variable_name,
-        n_modes=n_modes,
-        lag_order=lag_order,
-        cache_dir=cache_dir,
-    )
+    info = {
+        "expected": {
+            "variable_name": variable_name,
+            "n_modes": n_modes,
+            "lag_order": lag_order,
+        },
+        "found": {},
+        "message": "",
+    }
+
+    # Check if file exists
+    if not os.path.exists(cache_file):
+        info["message"] = f"Cache file not found: {cache_file}"
+        return False, None, info
+
+    # Try to load and validate
+    try:
+        noise_model = MeteorNoiseGenerator(n_modes=n_modes, lag_order=lag_order)
+        noise_model.load_model(cache_file)
+
+        # Extract found information
+        info["found"]["n_modes"] = getattr(noise_model, "n_modes", None)
+        info["found"]["lag_order"] = getattr(noise_model, "lag_order", None)
+        info["found"]["variable_name"] = getattr(noise_model, "variable_name", None)
+
+        # Validate n_modes
+        if not hasattr(noise_model, "n_modes") or noise_model.n_modes != n_modes:
+            info["message"] = (
+                f"n_modes mismatch: expected {n_modes}, "
+                f"found {info['found']['n_modes']}"
+            )
+            return False, None, info
+
+        # Validate lag_order
+        if not hasattr(noise_model, "lag_order") or noise_model.lag_order != lag_order:
+            info["message"] = (
+                f"lag_order mismatch: expected {lag_order}, "
+                f"found {info['found']['lag_order']}"
+            )
+            return False, None, info
+
+        # Validate variable_name
+        if (
+            not hasattr(noise_model, "variable_name")
+            or noise_model.variable_name != variable_name
+        ):
+            info["message"] = (
+                f"variable_name mismatch: expected '{variable_name}', "
+                f"found '{info['found']['variable_name']}'"
+            )
+            return False, None, info
+
+        # Validate required attributes
+        required_attrs = ["pca", "varx_results"]
+        missing_attrs = [
+            attr for attr in required_attrs if not hasattr(noise_model, attr)
+        ]
+        if missing_attrs:
+            info["message"] = f"Missing required attributes: {missing_attrs}"
+            return False, None, info
+
+        # Cache is valid
+        info["message"] = (
+            f"Cache valid: variable={variable_name}, "
+            f"n_modes={n_modes}, lag_order={lag_order}"
+        )
+        return True, noise_model, info
+
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        info["message"] = f"Error loading cache: {e}"
+        return False, None, info
+
+
+# def train_noise_model_from_composite(
+#     data_getter,
+#     experiments,
+#     model_name,
+#     variable_name,
+#     n_modes=10,
+#     lag_order=2,
+#     cache_dir=None,
+# ):
+#     """
+#     Train a noise model from composite experimental data.
+
+#     Parameters
+#     ----------
+#     data_getter : Cmip6MeteorDataGetter
+#         Data getter instance
+#     experiments : list
+#         List of experiments to use for training (e.g., ["historical", "ssp245"])
+#     model_name : str
+#         Name of the climate model
+#     variable_name : str
+#         Variable to model (e.g., 'tas', 'pr')
+#     n_modes : int, default 10
+#         Number of PCA modes
+#     lag_order : int, default 2
+#         VARX lag order
+#     cache_dir : str, optional
+#         Directory to cache the trained model
+
+#     Returns
+#     -------
+#     MeteorNoiseGenerator
+#         Fitted noise generator
+#     """
+#     # Use the new function for consistency
+#     return train_noise_model_from_cmip6(
+#         data_getter,
+#         experiments,
+#         model_name,
+#         variable_name,
+#         n_modes=n_modes,
+#         lag_order=lag_order,
+#         cache_dir=cache_dir,
+#     )

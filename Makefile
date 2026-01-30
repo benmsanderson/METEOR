@@ -24,23 +24,24 @@ help:
 .PHONY: checks
 checks: $(VENV_DIR)  ## run all the checks
 	@echo "=== bandit ==="; $(VENV_DIR)/bin/bandit -c .bandit.yml -r src || echo "--- bandit failed ---" >&2; \
-		echo "\n\n=== black ==="; $(VENV_DIR)/bin/black --check src tests setup.py  || echo "--- black failed ---" >&2; \
-		echo "\n\n=== flake8 ==="; $(VENV_DIR)/bin/flake8 src tests setup.py || echo "--- flake8 failed ---" >&2; \
-		echo "\n\n=== isort ==="; $(VENV_DIR)/bin/isort --check-only --quiet src tests setup.py || echo "--- isort failed ---" >&2; \
+		echo "\n\n=== black ==="; $(VENV_DIR)/bin/black --check src tests  || echo "--- black failed ---" >&2; \
+		echo "\n\n=== ruff ==="; $(VENV_DIR)/bin/ruff check src tests || echo "--- ruff failed ---" >&2; \
+		echo "\n\n=== isort ==="; $(VENV_DIR)/bin/isort --check-only --quiet src tests|| echo "--- isort failed ---" >&2; \
 		echo "\n\n=== pydocstyle ==="; $(VENV_DIR)/bin/pydocstyle src || echo "--- pydocstyle failed ---" >&2; \
 		echo "\n\n=== pylint ==="; $(VENV_DIR)/bin/pylint src || echo "--- pylint failed ---" >&2; \
-		echo "\n\n=== notebook tests 1 ==="; $(VENV_DIR)/bin/pytest notebooks/CMIP6_demo_with_residual.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
-		echo "\n\n=== notebook tests 2 ==="; $(VENV_DIR)/bin/pytest notebooks/CMIP6_noise_model_examples.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
-		echo "\n\n=== notebook tests 3 ==="; $(VENV_DIR)/bin/pytest notebooks/METEOR_single_model_pattern_example.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
+		echo "\n\n=== notebook tests 1 ==="; $(VENV_DIR)/bin/pytest notebooks/METEOR_Interface_Paper_plots.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
+		echo "\n\n=== notebook tests 2 ==="; $(VENV_DIR)/bin/pytest notebooks/GCAM_predict.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
+		echo "\n\n=== notebook tests 3 ==="; $(VENV_DIR)/bin/pytest notebooks/METEOR_Interface_Examples.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
+		echo "\n\n=== notebook tests 4 ==="; $(VENV_DIR)/bin/pytest notebooks/METEOR_Impacts_Clean_Demo.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
 		echo "\n\n=== tests ==="; $(VENV_DIR)/bin/pytest tests -r a --cov=meteor --cov-report='' \
 			&& $(VENV_DIR)/bin/coverage report --fail-under=90 || echo "--- tests failed ---" >&2; \
 		echo
 
 format-checks: $(VENV_DIR)  ## run all the checks
 	@echo "=== bandit ==="; $(VENV_DIR)/bin/bandit -c .bandit.yml -r src || echo "--- bandit failed ---" >&2; \
-		echo "\n\n=== black ==="; $(VENV_DIR)/bin/black --check src tests setup.py  || echo "--- black failed ---" >&2; \
-		echo "\n\n=== flake8 ==="; $(VENV_DIR)/bin/flake8 src tests setup.py || echo "--- flake8 failed ---" >&2; \
-		echo "\n\n=== isort ==="; $(VENV_DIR)/bin/isort --check-only --quiet src tests setup.py || echo "--- isort failed ---" >&2; \
+		echo "\n\n=== black ==="; $(VENV_DIR)/bin/black --check src tests || echo "--- black failed ---" >&2; \
+		echo "\n\n=== ruff ==="; $(VENV_DIR)/bin/ruff check src tests || echo "--- ruff failed ---" >&2; \
+		echo "\n\n=== isort ==="; $(VENV_DIR)/bin/isort --check-only --quiet src tests || echo "--- isort failed ---" >&2; \
 		echo "\n\n=== pydocstyle ==="; $(VENV_DIR)/bin/pydocstyle src || echo "--- pydocstyle failed ---" >&2; \
 		echo "\n\n=== pylint ==="; $(VENV_DIR)/bin/pylint src || echo "--- pylint failed ---" >&2; \
 		echo
@@ -63,7 +64,7 @@ format-notebooks: $(VENV_DIR)  ## format the notebooks
 black: $(VENV_DIR)  ## apply black formatter to source and tests
 	@status=$$(git status --porcelain src tests docs scripts); \
 	if test "x$${status}" = x; then \
-		$(VENV_DIR)/bin/black --exclude _version.py setup.py src tests docs/source/conf.py scripts/*.py; \
+		$(VENV_DIR)/bin/black --exclude _version.py src tests docs/source/conf.py scripts/*.py; \
 	else \
 		echo Not trying any formatting. Working directory is dirty ... >&2; \
 	fi;
@@ -71,7 +72,7 @@ black: $(VENV_DIR)  ## apply black formatter to source and tests
 isort: $(VENV_DIR)  ## format the code
 	@status=$$(git status --porcelain src tests); \
 	if test "x$${status}" = x; then \
-		$(VENV_DIR)/bin/isort src tests setup.py; \
+		$(VENV_DIR)/bin/isort src tests; \
 	else \
 		echo Not trying any formatting. Working directory is dirty ... >&2; \
 	fi;
@@ -95,11 +96,11 @@ test-install: $(VENV_DIR)  ## test installing works
 	$(TEMPVENV)/bin/pip install pip wheel --upgrade
 	$(TEMPVENV)/bin/pip install .
 	$(TEMPVENV)/bin/python scripts/test_install.py
-##TODO: clear out hardcoded python3.9 reference
+## Updated to use python3.10+ for venv creation
 virtual-environment: $(VENV_DIR)  ## update venv, create a new venv if it doesn't exist make
 	echo "If you want this to be rerun, run make clean first"
-$(VENV_DIR): setup.py setup.cfg
-	[ -d $(VENV_DIR) ] || python3 -m venv $(VENV_DIR)
+#$(VENV_DIR): setup.py setup.cfg
+	[ -d $(VENV_DIR) ] || $$(command -v python3.13 || command -v python3.12 || command -v python3.11 || command -v python3.10 || python3) -m venv $(VENV_DIR)
 	$(VENV_DIR)/bin/pip install --upgrade pip wheel
 	$(VENV_DIR)/bin/pip install -e .[dev]
 	##Comment out $(VENV_DIR)/bin/jupyter nbextension enable --py widgetsnbextension
@@ -107,10 +108,9 @@ $(VENV_DIR): setup.py setup.cfg
 
 	touch $(VENV_DIR)
 clean: $(VENV_DIR)
-	touch setup.py
-##TODO: clear out hardcoded python3.9 reference
+	touch pyproject.toml
 first-venv: ## create a new virtual environment for the very first repo setup
-	python3 -m venv $(VENV_DIR)
+	$$(command -v python3.13 || command -v python3.12 || command -v python3.11 || command -v python3.10 || python3) -m venv $(VENV_DIR)
 
 	$(VENV_DIR)/bin/pip install --upgrade pip
 	$(VENV_DIR)/bin/pip install versioneer

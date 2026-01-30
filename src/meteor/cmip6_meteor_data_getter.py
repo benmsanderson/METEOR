@@ -2,14 +2,17 @@
 Module to get CMIP6 data and convert to format that can be used for METEOR
 """
 
-import hashlib
 import logging
 import os
+import pickle  # nosec B403
+import re
 
 import gcsfs
 import numpy as np
 import pandas as pd
 import xarray as xr
+
+from .cache_handling import CacheHandler
 
 cmip6_to_meteor_exp_remapper = {
     "base": "piControl",
@@ -18,6 +21,39 @@ cmip6_to_meteor_exp_remapper = {
     "co2x16": "abrupt-4xCO2",
     "1pc": "1pctCO2",
 }
+
+
+def sort_member_ids_numerically(member_ids):
+    """
+    Sort CMIP6 member IDs numerically by the realization number.
+
+    Member IDs follow the pattern rXiYpZfW where X, Y, Z, W are integers.
+    String sorting would put r10 before r1, but we want numerical order.
+
+    Parameters
+    ----------
+    member_ids : array-like
+        List of member IDs like ['r1i1p1f1', 'r10i1p1f1', 'r2i1p1f1']
+
+    Returns
+    -------
+    list
+        Member IDs sorted numerically by realization number (r value)
+
+    Examples
+    --------
+    >>> sort_member_ids_numerically(['r10i1p1f1', 'r1i1p1f1', 'r2i1p1f1'])
+    ['r1i1p1f1', 'r2i1p1f1', 'r10i1p1f1']
+    """
+
+    def extract_realization_number(member_id):
+        """Extract the realization number (r value) from member_id."""
+        match = re.match(r"r(\d+)i", member_id)
+        if match:
+            return int(match.group(1))
+        return float("inf")  # Put unparseable IDs at the end
+
+    return sorted(member_ids, key=extract_realization_number)
 
 
 def multiply_along_axis(array_a, array_b, axis):
@@ -167,7 +203,7 @@ def initialise_dataframe_and_models(
         that have the full data
     """
     mdls1 = df_all1[0][0].source_id.unique()
-    mdls1.sort()
+    mdls1 = sorted(mdls1)
     df_all = []
     cnames = df_all1[0][0].columns
     if mdl_skipmbrs is None:
@@ -194,13 +230,15 @@ def initialise_dataframe_and_models(
                     hist_tmp = df_all1[ii][j].query(
                         "source_id=='" + mdl + "' & experiment_id == 'historical'"
                     )
-                    hmb = hist_tmp.member_id.unique()
+                    hmb = sort_member_ids_numerically(hist_tmp.member_id.unique())
                 else:
                     hmb = []
                 tmp = df_all1[i][j].query("source_id=='" + mdl + "'")
                 mmbs = tmp.member_id.unique()
                 if len(mmbs) > 0:
-                    mmb = mmbs[0]
+                    # Sort member IDs numerically to prefer r1 over r10, r2, etc.
+                    mmbs_sorted = sort_member_ids_numerically(mmbs)
+                    mmb = mmbs_sorted[0]
                     if len(hmb) > 0:
                         if hmb[0] in mmbs:
                             mmb = hmb[0]
@@ -221,7 +259,7 @@ def initialise_dataframe_and_models(
     return df_all, mdls
 
 
-class Cmip6MeteorDataGetter:
+class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
     """
     Cmip6MeteorDataGetter class
 
@@ -243,14 +281,17 @@ class Cmip6MeteorDataGetter:
 
     """
 
-    # pylint: disable=too-many-arguments,too-many-positional-arguments
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals, too-many-branches
     def __init__(
         self,
         flds=None,
         exps=None,
         dbe=None,
         cache_dir=None,
-        enable_cache=True,
+        cache_handler=None,
+        enable_cache=False,
+        enable_compression=True,
+        compression_level=6,
     ):
         """
         Initialise data getter object
@@ -272,7 +313,17 @@ class Cmip6MeteorDataGetter:
         cache_dir : str, optional
             Directory to store cached data. If None, defaults to ~/.meteor/cmip6_cache
         enable_cache : bool, optional
-            Whether to enable automatic caching. Default is True.
+            Whether to enable automatic caching. Default is False.
+            Set to True to cache downloaded data locally for faster subsequent access.
+        enable_compression : bool, optional
+            Whether to enable netCDF4/zlib compression for cached files. Default is True.
+            This can significantly reduce file sizes (typically 70-90% compression).
+        compression_level : int, optional
+            Compression level for netCDF4/zlib compression (1-9). Default is 6.
+            Higher values provide better compression but slower performance:
+            - 1: Fastest compression, larger files
+            - 6: Good balance of speed vs compression (recommended)
+            - 9: Best compression, slowest performance
         df_all : list
             Two dimensional list along experiments and fields, every entry
             is a pandas.DataSet with lines with data placement for one
@@ -287,31 +338,56 @@ class Cmip6MeteorDataGetter:
 
         # Set up caching
         self.enable_cache = enable_cache
-        if cache_dir is None:
-            cache_dir = os.path.expanduser("~/.meteor/cmip6_cache")
-        self.cache_dir = cache_dir
-
         if self.enable_cache:
-            try:
-                os.makedirs(self.cache_dir, exist_ok=True)
-                logging.info(
-                    "Setting up local cache for CMIP6 data at: %s. "
-                    "This will improve performance by storing downloaded data locally.",
-                    self.cache_dir,
+            if cache_handler is None:
+                self.cache_handler = CacheHandler(
+                    cache_dir=cache_dir,
+                    purpose="cmip6",
+                    enable_compression=enable_compression,
+                    compression_level=compression_level,
                 )
-            except OSError as e:
-                logging.warning(
-                    "Failed to create cache directory at %s: %s. "
-                    "Disabling cache functionality.",
-                    self.cache_dir,
-                    e,
-                )
-                self.enable_cache = False
+            else:
+                self.cache_handler = cache_handler
+            self.enable_cache = self.cache_handler.cache_functioning
 
-        df = pd.read_csv(
-            "https://storage.googleapis.com/cmip6/cmip6-zarr-consolidated-stores.csv",
-            low_memory=False,
-        )
+            # Load CMIP6 catalog (with caching to avoid network calls when possible)
+            catalog_cache_file = self.cache_handler.get_cmip6_query_catalogue()
+        else:
+            catalog_cache_file = None
+
+        if self.enable_cache and os.path.exists(catalog_cache_file):
+            # Use cached catalog
+            logging.info("Loading CMIP6 catalog from cache: %s", catalog_cache_file)
+            df = pd.read_csv(catalog_cache_file, low_memory=False)
+        else:
+            # Download catalog from Google Cloud Storage
+            try:
+                logging.info("Downloading CMIP6 catalog from Google Cloud Storage...")
+                df = pd.read_csv(
+                    "https://storage.googleapis.com/cmip6/cmip6-zarr-consolidated-stores.csv",
+                    low_memory=False,
+                )
+                # Cache the catalog if caching is enabled
+                if self.enable_cache:
+                    try:
+                        df.to_csv(catalog_cache_file, index=False)
+                        logging.info("Cached CMIP6 catalog to: %s", catalog_cache_file)
+                    except OSError as e:
+                        logging.warning("Failed to cache CMIP6 catalog: %s", e)
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # If download fails and we have cache enabled, check if there's an old catalog
+                if self.enable_cache and os.path.exists(catalog_cache_file):
+                    logging.warning(
+                        "Failed to download CMIP6 catalog (%s), using cached version.",
+                        e,
+                    )
+                    df = pd.read_csv(catalog_cache_file, low_memory=False)
+                else:
+                    # No cache available and download failed
+                    raise RuntimeError(
+                        f"Failed to load CMIP6 catalog from Google Cloud Storage "
+                        f"and no cached version available: {e}"
+                    ) from e
         df_all1 = []
         for i, exp in enumerate(self.exps):
             df_ta1 = []
@@ -325,180 +401,6 @@ class Cmip6MeteorDataGetter:
             df_all1, flds=self.flds, exps=self.exps
         )
         self.gcs = gcsfs.GCSFileSystem(token="anon")  # nosec
-
-    def _generate_cache_key(self, method_name, *args, **kwargs):
-        """
-        Generate a descriptive cache filename for a method call.
-
-        Parameters
-        ----------
-        method_name : str
-            Name of the method being cached
-        *args : tuple
-            Positional arguments to the method
-        **kwargs : dict
-            Keyword arguments to the method
-
-        Returns
-        -------
-        str
-            Descriptive cache filename (without extension)
-        """
-        if method_name == "get_single_var_mod_data":
-            exp, fld, model = args
-            return f"{model}_{exp}_{fld}_raw"
-        if method_name == "get_single_var_mod_data_yearmean":
-            exp, fld, model = args
-            return f"{model}_{exp}_{fld}_yearly"
-        if method_name == "get_single_var_mod_data_monthly":
-            exp, fld, model = args
-            return f"{model}_{exp}_{fld}_monthly"
-        if method_name == "make_meteor_training_data":
-            exp, model = args[:2]  # pylint: disable=unbalanced-tuple-unpacking
-            monthly = kwargs.get("monthly", False)
-            suffix = "_monthly" if monthly else "_yearly"
-            return f"{model}_{exp}_training{suffix}"
-        if method_name == "make_meteor_training_data_composite":
-            exps, model = args[:2]  # pylint: disable=unbalanced-tuple-unpacking
-            monthly = kwargs.get("monthly", False)
-            exp_str = "_".join(exps)
-            suffix = "_monthly" if monthly else "_yearly"
-            return f"{model}_{exp_str}_composite{suffix}"
-        # Fallback to hash-based naming
-        key_data = {
-            "method": method_name,
-            "args": args,
-            "kwargs": kwargs,
-        }
-        key_str = str(sorted(key_data.items()))
-        return hashlib.md5(
-            key_str.encode()
-        ).hexdigest()  # nosec - Used for cache key generation, not security
-
-    def _get_cache_path(self, cache_key):
-        """
-        Get the full path for a cache file.
-
-        Parameters
-        ----------
-        cache_key : str
-            Cache key
-
-        Returns
-        -------
-        str
-            Full path to cache file
-        """
-        return os.path.join(self.cache_dir, f"{cache_key}.nc")
-
-    def _load_from_cache(self, cache_key, expected_type=None):
-        """
-        Load data from cache if it exists.
-
-        Parameters
-        ----------
-        cache_key : str
-            Cache key
-        expected_type : str, optional
-            Expected return type ('Dataset' or 'DataArray'). If None, uses metadata from cache.
-
-        Returns
-        -------
-        object or None
-            Cached data if exists, None otherwise
-        """
-        # pylint: disable=too-many-return-statements
-        if not self.enable_cache:
-            return None
-
-        cache_path = self._get_cache_path(cache_key)
-        if os.path.exists(cache_path):
-            try:
-                dataset = xr.open_dataset(cache_path)
-
-                # Determine return type based on expected_type or metadata
-                if expected_type == "DataArray":
-                    # Force return as DataArray
-                    if len(dataset.data_vars) == 1:
-                        var_name = list(dataset.data_vars)[0]
-                        return dataset[var_name]
-                    # Multiple variables, can't convert to DataArray safely
-                    return None
-                if expected_type == "Dataset":
-                    # Force return as Dataset
-                    return dataset
-                # Use metadata to determine type (backward compatibility)
-                original_type = dataset.attrs.get("original_type")
-                if original_type == "DataArray" and len(dataset.data_vars) == 1:
-                    var_name = list(dataset.data_vars)[0]
-                    return dataset[var_name]
-                # Default to Dataset (safer for zarr data)
-                return dataset
-            except (OSError, ValueError, KeyError):
-                # Cache file corrupted, remove it
-                try:
-                    os.remove(cache_path)
-                except OSError:
-                    pass
-        return None
-
-    def _save_to_cache(self, cache_key, data):
-        """
-        Save data to cache.
-
-        Parameters
-        ----------
-        cache_key : str
-            Cache key
-        data : xr.Dataset or xr.DataArray
-            Data to cache
-        """
-        if not self.enable_cache:
-            return
-
-        cache_path = self._get_cache_path(cache_key)
-        try:
-            # Convert DataArray to Dataset if needed and mark the original type
-            if isinstance(data, xr.DataArray):
-                # Use the variable name if available, otherwise use 'data'
-                var_name = data.name if data.name else "data"
-                data_to_save = data.to_dataset(name=var_name)
-                # Mark that this was originally a DataArray
-                data_to_save.attrs["original_type"] = "DataArray"
-            else:
-                data_to_save = data
-                # Mark that this was originally a Dataset
-                data_to_save.attrs["original_type"] = "Dataset"
-
-            # Add metadata about when this was cached
-            data_to_save.attrs["cached_by_meteor"] = (
-                "true"  # Use string instead of boolean
-            )
-            data_to_save.attrs["cache_timestamp"] = pd.Timestamp.now().isoformat()
-
-            data_to_save.to_netcdf(cache_path)
-        except (OSError, ValueError) as e:
-            # Failed to cache, but don't raise error
-            logging.warning(
-                "Failed to save data to cache at %s: %s. "
-                "Continuing without caching.",
-                cache_path,
-                e,
-            )
-
-    def clear_cache(self):
-        """
-        Clear all cached data for this data getter.
-        """
-        if not self.enable_cache or not os.path.exists(self.cache_dir):
-            return
-
-        for filename in os.listdir(self.cache_dir):
-            if filename.endswith(".nc"):
-                try:
-                    os.remove(os.path.join(self.cache_dir, filename))
-                except OSError:
-                    pass
 
     def _set_fld_exps_dbe(self, flds, exps, dbe):
         """
@@ -517,21 +419,30 @@ class Cmip6MeteorDataGetter:
         dbe : list
             Of CMIP6 project names for each of the experiments. This should be the same length
             as exps, and have values corresponding to ecah experiment in the same order.
-            If None is sent, it will be set to a list of all entries equal to
-            'CMIP' with the same lenght as exps
+            If None is sent, it will be set based on the experiment type:
+            - CMIP experiments: 'CMIP'
+            - SSP scenarios: 'ScenarioMIP'
+            - 1pctCO2: 'CMIP'
 
         Returns
         -------
         list
-            dbe, If None was sent, a list of all entries equal to
-            'CMIP' with the same lenght as exps will be returned
+            dbe, If None was sent, a list with correct activity_ids for each experiment
         """
         if not flds:
             flds = ["tas", "pr"]
         if not exps:
             exps = ["piControl", "abrupt-4xCO2"]
         if not dbe:
-            dbe = ["CMIP" for i in range(len(exps))]
+            # Map experiments to correct activity_ids
+            dbe = []
+            for exp in exps:
+                if exp.startswith("ssp"):
+                    # SSP scenarios are in ScenarioMIP
+                    dbe.append("ScenarioMIP")
+                else:
+                    # Default experiments (1pct, piControl, abrupt-4xCO2, historical) are in CMIP
+                    dbe.append("CMIP")
         self.flds = flds
         self.exps = exps
         return dbe
@@ -594,10 +505,9 @@ class Cmip6MeteorDataGetter:
         """
         # Try to load from cache first if caching is enabled
         if self.enable_cache:
-            cache_key = self._generate_cache_key(
+            cached_data = self.cache_handler.load_cmip6_cached_data(
                 "get_single_var_mod_data", exp, fld, model
             )
-            cached_data = self._load_from_cache(cache_key)
             if cached_data is not None:
                 return cached_data
 
@@ -624,9 +534,22 @@ class Cmip6MeteorDataGetter:
         mapper = self.gcs.get_mapper(zstore_ref)
         fld_data = xr.open_zarr(mapper, decode_times=False).sortby("time")
 
-        # Save to cache if caching is enabled
-        if self.enable_cache:
-            self._save_to_cache(cache_key, fld_data)
+        # Apply limit for piControl experiments to save storage space while maintaining
+        # sufficient data for pattern fitting. Pattern fitting requires enough data points
+        # to accurately estimate temporal response parameters.
+        # Use 150 years which balances storage efficiency with statistical robustness
+        if exp == "piControl" and len(fld_data.time) > 1800:  # 150 years * 12 months
+            print(
+                f"   Limiting piControl data to first 150 years (was {len(fld_data.time) // 12} years)"
+            )
+            fld_data = fld_data.isel(
+                time=slice(0, 1800)
+            )  # First 150 years (1800 months)
+
+        # No longer cache raw data - we only cache processed monthly data
+        # to avoid redundancy and save storage space
+        # if self.enable_cache:
+        #     self._save_to_cache(cache_key, fld_data)
 
         return fld_data
 
@@ -650,29 +573,42 @@ class Cmip6MeteorDataGetter:
         """
         # Try to load from cache first if caching is enabled
         if self.enable_cache:
-            cache_key = self._generate_cache_key(
-                "get_single_var_mod_data_yearmean", exp, fld, model
+            cached_data = self.cache_handler.load_cmip6_cached_data(
+                "get_single_var_mod_data_yearmean",
+                exp,
+                fld,
+                model,
+                expected_type="DataArray",
             )
-            cached_data = self._load_from_cache(cache_key, expected_type="DataArray")
             if cached_data is not None:
+                logging.info("✓ Using cached yearly data for %s/%s/%s", model, exp, fld)
                 return cached_data
 
-        # Original logic
-        ds = self.get_single_var_mod_data(exp, fld, model)
-        if ds is None:
+        # Get monthly data (which may be cached) and compute yearly mean
+        logging.info(
+            "Computing yearly mean from monthly data for %s/%s/%s...", model, exp, fld
+        )
+        var_monthly = self.get_single_var_mod_data_monthly(exp, fld, model)
+        if var_monthly is None:
             return None
 
-        var_yearly = year_mean_monthly_xarray(ds[fld])
-        var_yearly = var_yearly.assign_coords(
-            {"time": np.arange(len(ds.time.values) // 12)}
-        ).rename({"time": "year"})
-        var_yearly = var_yearly.expand_dims(
-            dim={"ens": np.array([1])}
-        )  # .assign_coords({'ens':1})
+        # Convert monthly to yearly mean
+        # var_monthly has dimensions (ens, month, lat, lon)
+        # We need to reshape to compute yearly means
+        n_years = var_monthly.sizes["month"] // 12
+        var_monthly_subset = var_monthly.isel(month=slice(0, n_years * 12))
 
-        # Save to cache if caching is enabled
+        # Reshape and compute yearly mean
+        var_yearly = var_monthly_subset.coarsen(month=12, boundary="trim").mean()
+        var_yearly = var_yearly.assign_coords({"month": np.arange(n_years)}).rename(
+            {"month": "year"}
+        )
+
+        # Cache the yearly data to avoid recomputing
         if self.enable_cache:
-            self._save_to_cache(cache_key, var_yearly)
+            self.cache_handler.save_cmip6_to_cache(
+                var_yearly, "get_single_var_mod_data_yearmean", exp, fld, model
+            )
 
         return var_yearly
 
@@ -696,19 +632,41 @@ class Cmip6MeteorDataGetter:
         """
         # Try to load from cache first if caching is enabled
         if self.enable_cache:
-            cache_key = self._generate_cache_key(
-                "get_single_var_mod_data_monthly", exp, fld, model
+            cached_data = self.cache_handler.load_cmip6_cached_data(
+                "get_single_var_mod_data_monthly",
+                exp,
+                fld,
+                model,
+                expected_type="DataArray",
             )
-            cached_data = self._load_from_cache(cache_key, expected_type="DataArray")
             if cached_data is not None:
+                logging.info(
+                    "✓ Using cached monthly data for %s/%s/%s", model, exp, fld
+                )
                 return cached_data
 
         # Original logic
+        logging.info(
+            "Downloading data from Google Cloud for %s/%s/%s...", model, exp, fld
+        )
         ds = self.get_single_var_mod_data(exp, fld, model)
         if ds is None:
             return None
 
+        # Extract the variable and standardize dimension names
         var_monthly = ds[fld]
+
+        # Standardize dimension names for compatibility
+        # Some models use 'latitude'/'longitude', others use 'lat'/'lon'
+        dim_mapping = {}
+        if "latitude" in var_monthly.dims:
+            dim_mapping["latitude"] = "lat"
+        if "longitude" in var_monthly.dims:
+            dim_mapping["longitude"] = "lon"
+
+        if dim_mapping:
+            var_monthly = var_monthly.rename(dim_mapping)
+
         var_monthly = var_monthly.assign_coords(
             {"time": np.arange(len(ds.time.values))}
         ).rename({"time": "month"})
@@ -716,7 +674,9 @@ class Cmip6MeteorDataGetter:
 
         # Save to cache if caching is enabled
         if self.enable_cache:
-            self._save_to_cache(cache_key, var_monthly)
+            self.cache_handler.save_cmip6_to_cache(
+                var_monthly, "get_single_var_mod_data_monthly", exp, fld, model
+            )
 
         return var_monthly
 
@@ -744,13 +704,15 @@ class Cmip6MeteorDataGetter:
         """
         # Try to load from cache first if caching is enabled
         if self.enable_cache:
-            cache_key = self._generate_cache_key(
-                "make_meteor_training_data", exp, model, exp_mapper, monthly=monthly
+            cached_data = self.cache_handler.load_cmip6_cached_data(
+                "make_meteor_training_data",
+                exp,
+                model,
+                exp_mapper,
+                monthly=monthly,
             )
-            cached_data = self._load_from_cache(cache_key)
             if cached_data is not None:
                 return cached_data
-
         # Original logic
         if not exp_mapper:
             exp_mapper = cmip6_to_meteor_exp_remapper
@@ -777,9 +739,10 @@ class Cmip6MeteorDataGetter:
                 )
         training_data = make_xarray_with_correct_dims(self.flds, fld_values)
 
-        # Save to cache if caching is enabled
-        if self.enable_cache:
-            self._save_to_cache(cache_key, training_data)
+        # No longer cache training data - generate on-the-fly from variable-specific caches
+        # to avoid redundancy and enable flexible variable combinations
+        # if self.enable_cache:
+        #     self._save_to_cache(cache_key, training_data)
 
         return training_data
 
@@ -820,14 +783,13 @@ class Cmip6MeteorDataGetter:
         """
         # Try to load from cache first if caching is enabled
         if self.enable_cache:
-            cache_key = self._generate_cache_key(
+            cached_data = self.cache_handler.load_cmip6_cached_data(
                 "make_meteor_training_data_composite",
                 exps,
                 model,
                 overlap,
                 monthly=monthly,
             )
-            cached_data = self._load_from_cache(cache_key)
             if cached_data is not None:
                 return cached_data
 
@@ -898,8 +860,166 @@ class Cmip6MeteorDataGetter:
 
         result = make_xarray_with_correct_dims(self.flds, fld_values)
 
-        # Save to cache if caching is enabled
-        if self.enable_cache:
-            self._save_to_cache(cache_key, result)
+        # No longer cache composite training data - generate on-the-fly
+        # to avoid redundancy and save storage space
+        # if self.enable_cache:
+        #     self._save_to_cache(cache_key, result)
 
         return result
+
+    def prepare_pattern_scaling_training_data(
+        self, model_name, scenario_train="ssp245"
+    ):
+        """
+        Prepare complete training data dictionary for pattern scaling.
+
+        Creates a standardized training data dictionary with the required experiments
+        for METEOR pattern scaling: base (piControl), co2x4 (abrupt-4xCO2),
+        scenario (historical+SSP), and sulxanom (aerosol anomaly).
+
+        Parameters
+        ----------
+        model_name : str
+            Name of the CMIP6 model to prepare data for
+        scenario_train : str, optional
+            SSP scenario to use for training. Default is "ssp245".
+            Common options: "ssp126", "ssp245", "ssp370", "ssp585"
+
+        Returns
+        -------
+        dict
+            Dictionary with keys: 'base', 'co2x4', scenario_train, 'sulxanom'
+            Each value is an xr.Dataset with training data for that experiment
+
+        Examples
+        --------
+        >>> data_getter = Cmip6MeteorDataGetter(
+        ...     exps=["piControl", "ssp245", "historical", "abrupt-4xCO2"],
+        ...     flds=["tas"]
+        ... )
+        >>> training_data = data_getter.prepare_pattern_scaling_training_data("CESM2")
+        >>> print(training_data.keys())
+        dict_keys(['base', 'co2x4', 'ssp245', 'sulxanom'])
+        """
+        print(f"🔧 Preparing pattern scaling training data for {model_name}...")
+
+        # Prepare training data dictionary
+        training_data = {
+            "base": self.make_meteor_training_data("base", model_name),
+            "co2x4": self.make_meteor_training_data("co2x4", model_name),
+            scenario_train: self.make_meteor_training_data_composite(
+                ["historical", scenario_train], model_name
+            ),
+        }
+
+        # Use the scenario as the aerosol anomaly experiment (sulxanom)
+        training_data["sulxanom"] = training_data[scenario_train]
+
+        print(
+            f"   ✅ Training data prepared for experiments: {list(training_data.keys())}"
+        )
+        return training_data
+
+    def validate_pattern_scaling_cache(self, cache_file, model_name, scenario="aer"):
+        """
+        Validate a cached pattern scaling model file.
+
+        Checks if the cached pickle file exists, can be loaded, and contains
+        the expected model name and variable fields.
+
+        Parameters
+        ----------
+        cache_file : str
+            Path to the cached model file
+        model_name : str
+            Expected model name
+        scenario : str, optional
+            Scenario suffix for expected model name. Default is "aer".
+
+        Returns
+        -------
+        tuple
+            (is_valid, cached_model, info_dict) where:
+            - is_valid: bool indicating if cache is valid
+            - cached_model: loaded model object if valid, None otherwise
+            - info_dict: dict with 'message', 'expected_name', 'found_name',
+              'expected_fields', 'found_fields'
+
+        Examples
+        --------
+        >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
+        >>> cache_file = data_getter.get_pattern_scaling_cache_path("CESM2")
+        >>> is_valid, model, info = data_getter.validate_pattern_scaling_cache(
+        ...     cache_file, "CESM2"
+        ... )
+        >>> if is_valid:
+        ...     print(f"✅ {info['message']}")
+        """
+        expected_name = f"cmip6-{model_name}-{scenario}"
+        expected_vars = set(self.flds)
+
+        info = {
+            "expected_name": expected_name,
+            "expected_fields": expected_vars,
+            "found_name": None,
+            "found_fields": set(),
+            "message": "",
+        }
+
+        # Check if file exists
+        if not os.path.exists(cache_file):
+            info["message"] = f"Cache file not found: {cache_file}"
+            return False, None, info
+
+        # Try to load and validate
+        try:
+            with open(cache_file, "rb") as f:
+                cached_data = pickle.load(f)  # nosec B301
+
+            # The MeteorPatternScaling.save_model() saves a dict, not the object itself
+            # Check if we loaded a dict (new format) or object (old format)
+            if isinstance(cached_data, dict):
+                # New format: dictionary with model data
+                info["found_name"] = cached_data.get("name", "unknown")
+                if "patternflds" in cached_data:
+                    info["found_fields"] = set(cached_data["patternflds"].keys())
+            else:
+                # Old format: try to get attributes from object
+                info["found_name"] = getattr(cached_data, "name", "unknown")
+                if hasattr(cached_data, "flds"):
+                    info["found_fields"] = set(cached_data.flds.keys())
+                elif hasattr(cached_data, "patternflds"):
+                    info["found_fields"] = set(cached_data.patternflds.keys())
+
+            # Validate model name
+            if info["found_name"] != expected_name:
+                info["message"] = (
+                    f"Model name mismatch: expected '{expected_name}', "
+                    f"found '{info['found_name']}'"
+                )
+                return False, None, info
+
+            # Validate fields exist
+            if not info["found_fields"]:
+                info["message"] = "Cached model missing field information"
+                return False, None, info
+
+            # Validate all expected fields are present
+            if not expected_vars.issubset(info["found_fields"]):
+                missing = expected_vars - info["found_fields"]
+                info["message"] = (
+                    f"Missing required fields: {missing}. "
+                    f"Expected {expected_vars}, found {info['found_fields']}"
+                )
+                return False, None, info
+
+            # Cache is valid
+            info["message"] = (
+                f"Cache valid: model={info['found_name']}, "
+                f"fields={list(info['found_fields'])}"
+            )
+            return True, cached_data, info
+
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            info["message"] = f"Error reading cached file {cache_file}: {e}"
+            return False, None, info

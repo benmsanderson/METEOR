@@ -175,58 +175,41 @@ class ScmEngineForPatternScaling:
               contents
         """
         if cfg is None:
-            ih_temp = input_handler.InputHandler({})
-            em_set = ih_temp.read_emissions(
-                os.path.join(
-                    os.path.dirname(__file__), "default_scm_data", "ssp245_em_RCMIP.txt"
-                )
-            )
-            conc_set = input_handler.read_inputfile(
+            cfg = {}
+
+        # Validate and set defaults for all config parameters
+        cfg = _validate_and_set_defaults(cfg)
+
+        # Load default data files if not provided
+        if "concentrations_data" not in cfg:
+            cfg["concentrations_data"] = input_handler.read_inputfile(
                 os.path.join(
                     os.path.dirname(__file__),
                     "default_scm_data",
                     "ssp245_conc_RCMIP.txt",
                 )
             )
-            self.cfg = ScmEngineConfigurations(
-                gaspam_data=input_handler.read_components(
-                    os.path.join(
-                        os.path.dirname(__file__),
-                        "default_scm_data",
-                        "gases_vupdate_2022_AR6.txt",
-                    )
-                ),
-                concentrations_data=conc_set,
-                emissions_data=em_set,
-            )
-        else:
-            if "concentrations_data" not in cfg:
-                cfg["concentrations_data"] = input_handler.read_inputfile(
-                    os.path.join(
-                        os.path.dirname(__file__),
-                        "default_scm_data",
-                        "ssp245_conc_RCMIP.txt",
-                    )
+        if "emissions_data" not in cfg:
+            ih_temp = input_handler.InputHandler({})
+            cfg["emissions_data"] = ih_temp.read_emissions(
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "default_scm_data",
+                    "ssp245_em_RCMIP.txt",
                 )
-            if "emissions_data" not in cfg:
-                ih_temp = input_handler.InputHandler({})
-                cfg["emissions_data"] = ih_temp.read_emissions(
-                    os.path.join(
-                        os.path.dirname(__file__),
-                        "default_scm_data",
-                        "ssp245_em_RCMIP.txt",
-                    )
-                )
-            self.cfg = ScmEngineConfigurations(
-                gaspam_data=input_handler.read_components(
-                    os.path.join(
-                        os.path.dirname(__file__),
-                        "default_scm_data",
-                        "gases_vupdate_2022_AR6.txt",
-                    )
-                ),
-                **cfg,
             )
+
+        # Create the configuration object
+        self.cfg = ScmEngineConfigurations(
+            gaspam_data=input_handler.read_components(
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "default_scm_data",
+                    "gases_vupdate_2022_AR6.txt",
+                )
+            ),
+            **cfg,
+        )
 
         self.input_h = input_handler.InputHandler(asdict(self.cfg))
 
@@ -339,3 +322,49 @@ class ScmEngineForPatternScaling:
                 forcing[co2_name] = forcing[co2_name] - forc_series
 
         return forcing
+
+
+def _validate_and_set_defaults(cfg):
+    """
+    Validate config and set sensible defaults for temporal parameters.
+
+    Parameters
+    ----------
+    cfg : dict
+        Configuration dictionary
+
+    Returns
+    -------
+    dict
+        Validated configuration with defaults set
+
+    Raises
+    ------
+    ValueError
+        If temporal parameters are inconsistent
+    """
+    # Set defaults for temporal parameters
+    defaults = {
+        "emstart": 2000,
+        "nystart": 1950,
+        "nyend": 2100,
+        "conc_run": True,
+    }
+
+    for key, default in defaults.items():
+        if key not in cfg:
+            cfg[key] = default
+
+    # Sanity checks for temporal consistency
+    if cfg["nystart"] > cfg["emstart"]:
+        raise ValueError(
+            f"nystart ({cfg['nystart']}) must be <= emstart ({cfg['emstart']}). "
+            "The simulation start year (nystart) should not be after the emission start year."
+        )
+
+    if cfg["emstart"] > cfg["nyend"]:
+        raise ValueError(
+            f"emstart ({cfg['emstart']}) must be <= nyend ({cfg['nyend']}). "
+            "The emission start year should not be after the simulation end year."
+        )
+    return cfg

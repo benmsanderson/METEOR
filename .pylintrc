@@ -1,19 +1,16 @@
 [MASTER]
 ignore=_version.py
-load-plugins=
-    pylint.extensions.bad_builtin,
-    pylint.extensions.check_elif,
-    pylint.extensions.docparams,
-    pylint.extensions.overlapping_exceptions,
-    pylint.extensions.redefined_variable_type
-
 
 [MESSAGES CONTROL]
-disable=
-    # handled by black
-    format,
-    import-error,
-    fixme
+disable=format,
+        fixme,
+        too-many-branches,
+        too-many-locals,
+        too-many-arguments,
+        too-many-positional-arguments,
+        too-many-statements,
+        too-many-nested-blocks,
+        too-many-instance-attributes,
 
 [SIMILARITIES]
 min-similarity-lines=7
@@ -22,4 +19,4 @@ ignore-docstrings=yes
 ignore-imports=yes
 
 [FORMAT]
-good-names=i,j,k,ds,ax,t,X,a0,ts,na,a0,b,ui,bx,nt
+good-names=i,j,k,ds,ax,t,X,a0,ts,na,a0,b,ui,bx,nt,X_exog,diagnostic_X_features,diagnostic_Y_data

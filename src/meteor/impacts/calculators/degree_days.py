@@ -23,6 +23,56 @@ import xarray as xr
 from ..impacts_core import ImpactCalculator, ImpactResult
 
 
+def validate_temperature_input_and_convert(climate_data: xr.DataArray) -> xr.DataArray:
+    """
+    Validate that input data is suitable for degree days calculation.
+
+    Parameters
+    ----------
+    climate_data : xr.DataArray
+        Input temperature data to validate
+
+    Raises
+    ------
+    ValueError
+        If input data is not suitable
+    """
+    if not (isinstance(climate_data, (xr.DataArray, float))):
+        raise ValueError("Input must be an xarray.DataArray or float")
+
+    # Check for reasonable temperature values (assuming Kelvin or Celsius)
+    if isinstance(climate_data, float):
+        temp_min = climate_data
+        temp_max = climate_data
+    else:
+        temp_min = float(climate_data.min())
+        temp_max = float(climate_data.max())
+
+    # Heuristic check: if all values are > 200, assume Kelvin; if < 100, assume Celsius
+    if temp_min > 200:
+        # Likely Kelvin - check for reasonable range
+        if temp_min < 150 or temp_max > 400:
+            warnings.warn(
+                f"Temperature values seem unusual (range: {temp_min:.1f} to {temp_max:.1f}K). "
+                "Please verify the data is correct."
+            )
+        return climate_data - 273.15  # Convert Kelvin to Celsius
+    if temp_max < 100:
+        # Likely Celsius - check for reasonable range
+        if temp_min < -100 or temp_max > 80:
+            warnings.warn(
+                f"Temperature values seem unusual (range: {temp_min:.1f} to {temp_max:.1f}°C). "
+                "Please verify the data is correct."
+            )
+        return climate_data  # Already in Celsius
+    # Mixed range - could be Celsius with hot values or unusual units
+    warnings.warn(
+        f"Temperature values seem unusual (range: {temp_min:.1f} to {temp_max:.1f} Celsius). "
+        "Very high values detected - please verify units are correct."
+    )
+    return climate_data  # Assume Celsius
+
+
 class DegreeDaysCalculator(ImpactCalculator):
     """
     Calculator for Heating Degree Days (HDD) and Cooling Degree Days (CDD).
@@ -66,7 +116,7 @@ class DegreeDaysCalculator(ImpactCalculator):
             Human-readable name for this calculator
         """
         super().__init__(name)
-        self.base_temperature = base_temperature
+        self.base_temperature = validate_temperature_input_and_convert(base_temperature)
         self.sigma_m_c1 = sigma_m_c1
         self.sigma_m_c2 = sigma_m_c2
         self.sigma_m_c3 = sigma_m_c3
@@ -87,36 +137,10 @@ class DegreeDaysCalculator(ImpactCalculator):
             If input data is not suitable
         """
         if not isinstance(climate_data, xr.DataArray):
-            raise ValueError("Input must be an xarray.DataArray")
+            raise ValueError("Input must be an xarray.DataArray or float")
 
         if "month" not in climate_data.dims:
             raise ValueError("Input DataArray must have a dimension named 'month'")
-
-        # Check for reasonable temperature values (assuming Kelvin or Celsius)
-        temp_min = float(climate_data.min())
-        temp_max = float(climate_data.max())
-
-        # Heuristic check: if all values are > 200, assume Kelvin; if < 100, assume Celsius
-        if temp_min > 200:
-            # Likely Kelvin - check for reasonable range
-            if temp_min < 150 or temp_max > 400:
-                warnings.warn(
-                    f"Temperature values seem unusual (range: {temp_min:.1f} to {temp_max:.1f}K). "
-                    "Please verify the data is correct."
-                )
-        elif temp_max < 100:
-            # Likely Celsius - check for reasonable range
-            if temp_min < -100 or temp_max > 80:
-                warnings.warn(
-                    f"Temperature values seem unusual (range: {temp_min:.1f} to {temp_max:.1f}°C). "
-                    "Please verify the data is correct."
-                )
-        elif temp_max > 100:
-            # Mixed range - could be Celsius with hot values or unusual units
-            warnings.warn(
-                f"Temperature values seem unusual (range: {temp_min:.1f} to {temp_max:.1f} Celsius). "
-                "Very high values detected - please verify units are correct."
-            )
 
     def calculate(self, climate_data: xr.DataArray) -> ImpactResult:
         """
@@ -138,8 +162,9 @@ class DegreeDaysCalculator(ImpactCalculator):
             - 'annual_hdd': Annual total heating degree days
             - 'annual_cdd': Annual total cooling degree days
         """
-        # Validate input
+        # Validate input and convert if necessary
         self.validate_input(climate_data)
+        climate_data = validate_temperature_input_and_convert(climate_data)
 
         # Calculate degree days
         monthly_hdd, monthly_cdd, annual_hdd, annual_cdd = self._calculate_degree_days(
@@ -224,6 +249,10 @@ class DegreeDaysCalculator(ImpactCalculator):
             + (self.sigma_m_c3 * sigma_y)
         )
 
+        # Ensure sigma_m is positive (can become negative for high temperatures)
+        # Use a minimum value of 0.5 to avoid division by zero and unrealistic results
+        sigma_m = xr.where(sigma_m < 0.5, 0.5, sigma_m)
+
         # a = c1_a * sqrt(D_m)
         a_val = self.a_val_c1 * np.sqrt(days_in_month)
 
@@ -255,6 +284,17 @@ class DegreeDaysCalculator(ImpactCalculator):
         monthly_cdd = xr.where(
             monthly_mean_temps > self.base_temperature, degree_days_m, 0
         )
+
+        # Debug: Check if we're getting any CDD
+        n_cdd_months = int((monthly_cdd > 0).sum())
+        n_total_months = len(monthly_cdd)
+        if n_cdd_months == 0 and n_total_months > 0:
+            temp_range = f"{float(monthly_mean_temps.min()):.1f} to {float(monthly_mean_temps.max()):.1f}"
+            warnings.warn(
+                f"No CDD calculated (all {n_total_months} months below {self.base_temperature}°C). "
+                f"Temperature range: {temp_range}°C. Consider using a lower base temperature.",
+                UserWarning,
+            )
 
         # Set names and attributes
         monthly_hdd.name = "monthly_hdd"

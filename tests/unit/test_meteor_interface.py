@@ -154,15 +154,17 @@ def test_tas_converted_to_anomalies(mock_interface):
 
 
 def test_pr_not_converted_to_anomalies(mock_interface):
-    """Test that pr data is NOT converted to anomalies."""
-    # Create mock scenario data for pr
+    """Test that pr data is NOT converted to anomalies (uses first-year baseline instead of piControl)."""
+    # Create mock scenario data for pr with enough months for 1850-2010
+    # Need ~160 years * 12 months = 1920 months
+    n_months = 2000
     scenario_data = xr.Dataset(
         {
             "pr": xr.DataArray(
-                np.random.rand(100, 5, 5) * 1e-5,  # Typical precip values
+                np.random.rand(n_months, 5, 5) * 1e-5,  # Typical precip values
                 dims=["month", "lat", "lon"],
                 coords={
-                    "month": range(100),
+                    "month": range(n_months),
                     "lat": np.linspace(-90, 90, 5),
                     "lon": np.linspace(-180, 180, 5),
                 },
@@ -170,14 +172,27 @@ def test_pr_not_converted_to_anomalies(mock_interface):
         }
     )
 
-    call_count = [0]
+    picontrol_data = xr.Dataset(
+        {
+            "pr": xr.DataArray(
+                np.random.rand(500, 5, 5) * 1e-5,  # piControl data
+                dims=["month", "lat", "lon"],
+                coords={
+                    "month": range(500),
+                    "lat": np.linspace(-90, 90, 5),
+                    "lon": np.linspace(-180, 180, 5),
+                },
+            )
+        }
+    )
+
+    call_log = []
 
     def mock_composite(exps, model, monthly=True):
-        call_count[0] += 1
-        # Should only be called once for pr (scenario data)
-        # Should NOT be called for piControl
+        call_log.append(exps)
+        # Return appropriate data based on what's requested
         if "piControl" in exps:
-            pytest.fail("piControl should not be loaded for pr variable")
+            return picontrol_data
         return scenario_data
 
     mock_interface.data_getter.make_meteor_training_data_composite = mock_composite
@@ -224,8 +239,13 @@ def test_pr_not_converted_to_anomalies(mock_interface):
             verbose=False,
         )
 
-    # Verify piControl was NOT loaded (call_count should be 1, not 2)
-    assert call_count[0] == 1, "piControl should not be loaded for precipitation"
+    # Verify both piControl and scenario data were loaded
+    # (piControl is loaded for reference but first-year baseline is used for pr)
+    assert len(call_log) == 2, "Should load both scenario data and piControl"
+    assert any("piControl" in exps for exps in call_log), "piControl should be loaded"
+    assert any(
+        "historical" in exps or "ssp245" in exps for exps in call_log
+    ), "Scenario data should be loaded"
 
 
 def test_train_initializes_state_tracking():

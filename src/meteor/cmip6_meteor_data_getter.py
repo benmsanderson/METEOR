@@ -5,6 +5,7 @@ Module to get CMIP6 data and convert to format that can be used for METEOR
 import logging
 import os
 import pickle  # nosec B403
+import re
 
 import gcsfs
 import numpy as np
@@ -20,6 +21,39 @@ cmip6_to_meteor_exp_remapper = {
     "co2x16": "abrupt-4xCO2",
     "1pc": "1pctCO2",
 }
+
+
+def sort_member_ids_numerically(member_ids):
+    """
+    Sort CMIP6 member IDs numerically by the realization number.
+
+    Member IDs follow the pattern rXiYpZfW where X, Y, Z, W are integers.
+    String sorting would put r10 before r1, but we want numerical order.
+
+    Parameters
+    ----------
+    member_ids : array-like
+        List of member IDs like ['r1i1p1f1', 'r10i1p1f1', 'r2i1p1f1']
+
+    Returns
+    -------
+    list
+        Member IDs sorted numerically by realization number (r value)
+
+    Examples
+    --------
+    >>> sort_member_ids_numerically(['r10i1p1f1', 'r1i1p1f1', 'r2i1p1f1'])
+    ['r1i1p1f1', 'r2i1p1f1', 'r10i1p1f1']
+    """
+
+    def extract_realization_number(member_id):
+        """Extract the realization number (r value) from member_id."""
+        match = re.match(r"r(\d+)i", member_id)
+        if match:
+            return int(match.group(1))
+        return float("inf")  # Put unparseable IDs at the end
+
+    return sorted(member_ids, key=extract_realization_number)
 
 
 def multiply_along_axis(array_a, array_b, axis):
@@ -196,13 +230,15 @@ def initialise_dataframe_and_models(
                     hist_tmp = df_all1[ii][j].query(
                         "source_id=='" + mdl + "' & experiment_id == 'historical'"
                     )
-                    hmb = hist_tmp.member_id.unique()
+                    hmb = sort_member_ids_numerically(hist_tmp.member_id.unique())
                 else:
                     hmb = []
                 tmp = df_all1[i][j].query("source_id=='" + mdl + "'")
                 mmbs = tmp.member_id.unique()
                 if len(mmbs) > 0:
-                    mmb = mmbs[0]
+                    # Sort member IDs numerically to prefer r1 over r10, r2, etc.
+                    mmbs_sorted = sort_member_ids_numerically(mmbs)
+                    mmb = mmbs_sorted[0]
                     if len(hmb) > 0:
                         if hmb[0] in mmbs:
                             mmb = hmb[0]

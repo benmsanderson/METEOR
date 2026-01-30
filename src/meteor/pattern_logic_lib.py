@@ -511,6 +511,7 @@ def get_timescales(anomaly_data, n_modes):
     for i, t in enumerate(tguess):
         a0[2 * i] = ampguess
         a0[2 * i + 1] = t
+
     # fit the timescales using lmfit to fit global mean of the anomaly data
     aopt = fit_timescales(anomaly_data, a0)
     pattern = {}

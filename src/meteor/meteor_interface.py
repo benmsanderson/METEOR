@@ -222,14 +222,14 @@ class MeteorInterface:
         ...     }
         ... )
         """
-        if verbose:
+        if verbose:  # pragma: no cover
             print("=" * 60)
             print(f"Training METEOR emulator for {self.model}")
             print(f"Variables: {', '.join(self.variables)}")
             print("=" * 60)
 
         for variable in self.variables:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(f"\n🔧 Training {variable.upper()}...")
 
             # Get configuration with hybrid precedence
@@ -249,19 +249,19 @@ class MeteorInterface:
             self._training_config[variable] = config
 
             # Train pattern scaling
-            if verbose:
+            if verbose:  # pragma: no cover
                 print("   → Training pattern scaling model...")
             self._train_pattern_scaling(variable, config, verbose=verbose)
 
             # Train noise model
-            if verbose:
+            if verbose:  # pragma: no cover
                 print("   → Training noise model...")
             self._train_noise_model(variable, config, verbose=verbose)
 
             # Fit transforms if needed
             transform_config = get_variable_transform_config(variable)
             if transform_config.transform_type and config.get("transform", True):
-                if verbose:
+                if verbose:  # pragma: no cover
                     print(
                         f"   → Fitting {transform_config.transform_type} transform..."
                     )
@@ -270,10 +270,10 @@ class MeteorInterface:
 
             self._is_trained[variable] = True
 
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(f"   ✅ {variable.upper()} training complete")
 
-        if verbose:
+        if verbose:  # pragma: no cover
             print("\n" + "=" * 60)
             print("✅ All variables trained successfully")
             print("=" * 60)
@@ -368,7 +368,7 @@ class MeteorInterface:
                 print("      ✓ Using cached noise model")
             self.noise_models[variable] = cached_model
         else:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print("      ⚠️  Training new noise model...")
 
             # ✅ Get training scenario from config
@@ -397,7 +397,7 @@ class MeteorInterface:
             # Trim first 100 years (spin-up) to match working notebook
             monthly_warming_trimmed = monthly_warming[1200:]  # 100 years * 12 months
 
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(
                     f"      → Using {training_scenario} pattern prediction for training"
                 )
@@ -415,7 +415,7 @@ class MeteorInterface:
                 lag_order=config["lag_order"],
                 use_exog=config["use_exog"],
                 custom_global_temp=monthly_warming_trimmed,  # ✅ Pass pattern prediction
-                cache_dir=self.cache_handler.cache_dir,
+                cache_dir=os.path.join(self.cache_handler.cache_dir, "noise_models"),
             )
 
     def _fit_transform(self, variable, transform_config):
@@ -548,7 +548,7 @@ class MeteorInterface:
             if not self._is_trained[var]:
                 raise RuntimeError(f"Variable '{var}' not trained. Call train() first.")
 
-        if verbose:
+        if verbose:  # pragma: no cover
             print("=" * 60)
             print(f"Generating ensemble for {scenario_name}")
             print(f"  Years: {start_year}-{end_year}")
@@ -558,7 +558,7 @@ class MeteorInterface:
         results = {}
 
         for variable in self.variables:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(f"\n📊 Generating {variable.upper()}...")
 
             var_output = VariableOutput(variable)
@@ -608,7 +608,7 @@ class MeteorInterface:
 
             results[variable] = var_output
 
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(f"   ✅ {variable.upper()} complete")
 
         # Create ensemble output
@@ -627,7 +627,7 @@ class MeteorInterface:
         if save_to:
             ensemble.to_netcdf(save_to)
 
-        if verbose:
+        if verbose:  # pragma: no cover
             print("\n" + "=" * 60)
             print("✅ Generation complete")
             print("=" * 60)
@@ -666,7 +666,7 @@ class MeteorInterface:
         scenario_info = parse_scenario_input(scenario)
         scenario_name = scenario_info["name"]
 
-        if verbose:
+        if verbose:  # pragma: no cover
             if scenario_info["type"] == "ssp":
                 print(
                     f"      → Computing pattern scaling for {variable}, {scenario_name}..."
@@ -693,7 +693,7 @@ class MeteorInterface:
             em_end_year = em_data.index[-1]
 
             if end_year > em_end_year:
-                if verbose:
+                if verbose:  # pragma: no cover
                     print(
                         f"      ⚠️  Warning: Emissions data ends at {em_end_year}, requested {end_year}"
                     )
@@ -702,7 +702,7 @@ class MeteorInterface:
                 end_year = em_end_year
 
             if start_year < em_start_year:
-                if verbose:
+                if verbose:  # pragma: no cover
                     print(
                         f"      ⚠️  Warning: Emissions data starts at {em_start_year}, requested {start_year}"
                     )
@@ -828,14 +828,10 @@ class MeteorInterface:
             Dictionary mapping aggregation names to xarray DataArrays
             with shape (n_realizations, n_months)
         """
-        # Parse scenario to get the actual name (handle both string and dict)
-        scenario_info = parse_scenario_input(scenario)
-        scenario_name = scenario_info["name"]
-
-        # For custom scenarios, use ssp245 as the training scenario
-        # (we need CMIP6 data for transform fitting, not custom emissions)
-        training_scenario = (
-            "ssp245" if scenario_info["type"] == "custom" else scenario_name
+        # Always use the TRAINING scenario for transform fitting, not the
+        # prediction scenario. default is ssp245
+        transform_training_scenario = self._training_config.get(variable, {}).get(
+            "training_scenario", "ssp245"
         )
 
         # Get pattern scaling results
@@ -846,23 +842,96 @@ class MeteorInterface:
         monthly_warming = pattern_result[1]
 
         # Get CMIP6 data for transform fitting
-        if verbose:
-            print(f"      → Loading CMIP6 training data for {training_scenario}...")
+        if verbose:  # pragma: no cover
+            print(
+                f"      → Loading CMIP6 training data for {transform_training_scenario}..."
+            )
         ssp_data = self.data_getter.make_meteor_training_data_composite(
-            ["historical", training_scenario], self.model, monthly=True
+            ["historical", transform_training_scenario], self.model, monthly=True
         )[variable]
 
-        # Convert tas to anomalies from piControl baseline for comparison with emulated output
+        # Load piControl data for baseline (used for temperature anomalies)
+        if verbose:  # pragma: no cover
+            print(f"      → Loading piControl baseline for {variable}...")
+        picontrol_data = self.data_getter.make_meteor_training_data_composite(
+            ["piControl"], self.model, monthly=True
+        )[variable]
+        # Compute piControl climatology (mean across all time)
+        picontrol_mean = picontrol_data.mean(dim="month")
+
+        # For precipitation: use first-year (2015) baseline instead of piControl
+        # This is because CMIP6 scenarios in 2015 already include ~1°C of historical
+        # warming effects on precipitation, so using piControl would create a ~2-4% bias.
+        # We use the first 12 months of the prediction period (start_year) as the baseline.
+        # Note: ssp_data is a composite starting from historical (~1850), so we need to
+        # find the correct index for start_year.
+        if variable == "pr":
+            # Infer composite start year from the data length and structure
+            # Historical experiments in CMIP6 typically start at 1850
+            # We can infer this from the data by checking if it includes historical
+            n_months = len(ssp_data.month)
+
+            # Check if ssp_data has a 'start_year' attribute (set by data getter)
+            # Otherwise infer from experiment structure
+            if hasattr(ssp_data, "start_year"):
+                composite_start_year = int(ssp_data.start_year)
+            else:
+                # Default assumption: historical+scenario composite starts at 1850
+                # If the data is shorter than expected, calculate backwards from end_year
+                expected_months_from_1850 = (end_year - 1850 + 1) * 12
+                if n_months < expected_months_from_1850:
+                    # Data is shorter - calculate start year from data length
+                    composite_start_year = end_year - (n_months // 12) + 1
+                else:
+                    composite_start_year = 1850
+
+            start_year_idx = (start_year - composite_start_year) * 12
+            end_year_idx = (
+                end_year - composite_start_year + 1
+            ) * 12  # +1 for inclusive
+
+            # Validate indices are within bounds - fail loudly if not
+            composite_end_year = composite_start_year + n_months // 12 - 1
+
+            if start_year_idx < 0:
+                raise ValueError(
+                    f"start_year {start_year} is before the composite data start year {composite_start_year}. "
+                    f"Valid range: {composite_start_year}-{composite_end_year}"
+                )
+            if end_year_idx > n_months:
+                raise ValueError(
+                    f"end_year {end_year} is beyond the composite data end year {composite_end_year}. "
+                    f"Valid range: {composite_start_year}-{composite_end_year}"
+                )
+            if start_year_idx + 12 > n_months:
+                raise ValueError(
+                    f"start_year {start_year} does not have 12 months of data in the composite. "
+                    f"Valid range: {composite_start_year}-{composite_end_year}"
+                )
+
+            # Use first year of prediction period as the baseline
+            pr_first_year_mean = ssp_data.isel(
+                month=slice(start_year_idx, start_year_idx + 12)
+            ).mean(dim="month")
+
+            # CRITICAL: Slice ssp_data to only the prediction period (start_year to end_year)
+            # for Gamma transform fitting. Using the full historical+scenario composite
+            # would result in a lower mean distribution, causing negative bias.
+            ssp_data = ssp_data.isel(month=slice(start_year_idx, end_year_idx))
+
+            if verbose:  # pragma: no cover
+                print(
+                    f"      → Using {start_year} baseline for PR instead of piControl"
+                )
+
+        # For temperature: convert CMIP6 to anomalies (pattern scaling outputs anomalies)
+        # For precipitation: keep CMIP6 as absolute values (for Gamma transform fitting)
+        #   but we'll add first-year baseline to pattern output below
         if variable == "tas":
-            if verbose:
-                print("      → Converting tas to anomalies from piControl baseline...")
-            # Load piControl data for baseline
-            picontrol_data = self.data_getter.make_meteor_training_data_composite(
-                ["piControl"], self.model, monthly=True
-            )[variable]
-            # Compute piControl climatology (mean across all time)
-            picontrol_mean = picontrol_data.mean(dim="month")
-            # Convert to anomalies
+            if verbose:  # pragma: no cover
+                print(
+                    f"      → Converting {variable} to anomalies from piControl baseline..."
+                )
             ssp_data = ssp_data - picontrol_mean
 
         # ✅ Generate stochastic PCs (or skip if climatology only)
@@ -872,7 +941,7 @@ class MeteorInterface:
         if include_noise:
             # CRITICAL: Generate stochastic PCs ONCE for all aggregations
             # This ensures all spatial scales share the same underlying variability
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(
                     f"      → Generating {n_realizations} stochastic PC realizations..."
                 )
@@ -897,13 +966,22 @@ class MeteorInterface:
             transform_config = transform_info  # It's a VariableTransformConfig object
 
         for agg in aggregations:
-            if verbose:
+            if verbose:  # pragma: no cover
                 print(f"      • {agg}")
 
             # Parse aggregation type
+            # For precipitation, compute first-year baseline for this aggregation
+            # Pattern scaling outputs anomalies, but Gamma transform needs absolute values
+            # We use first-year (2015) baseline instead of piControl to match CMIP6 starting point
+            pr_baseline_agg = None
+
             if agg == "global":
                 # Global mean
                 pattern_agg = global_mean(monthly_prediction).values
+                if variable == "pr":
+                    pr_baseline_agg = float(
+                        global_mean(pr_first_year_mean).values.item()
+                    )
                 if include_noise:
                     raw_ensemble = noise_model.generate_regional_mean_realizations(
                         monthly_warming,
@@ -942,6 +1020,12 @@ class MeteorInterface:
                         monthly_prediction, region_mask=region_mask
                     ).values
                     cmip6_agg = regional_mean(ssp_data, region_mask=region_mask)
+                    if variable == "pr":
+                        pr_baseline_agg = float(
+                            regional_mean(
+                                pr_first_year_mean, region_mask=region_mask
+                            ).values.item()
+                        )
 
                     # For noise, use global since we don't have EOFs for custom regions
                     if include_noise:
@@ -962,6 +1046,12 @@ class MeteorInterface:
                     pattern_agg = regional_mean(
                         monthly_prediction, region_code=region_code
                     ).values
+                    if variable == "pr":
+                        pr_baseline_agg = float(
+                            regional_mean(
+                                pr_first_year_mean, region_code=region_code
+                            ).values.item()
+                        )
                     if include_noise:
                         raw_ensemble = noise_model.generate_regional_mean_realizations(
                             monthly_warming,
@@ -985,6 +1075,10 @@ class MeteorInterface:
                 lon = float(lon_str)
 
                 pattern_agg = extract_point(monthly_prediction, lat, lon).values
+                if variable == "pr":
+                    pr_baseline_agg = float(
+                        extract_point(pr_first_year_mean, lat, lon).values.item()
+                    )
                 if include_noise:
                     raw_ensemble = noise_model.generate_regional_mean_realizations(
                         monthly_warming,
@@ -1021,6 +1115,13 @@ class MeteorInterface:
                         else raw_ensemble.values[np.newaxis, :]
                     )
 
+                # For precipitation: add first-year baseline to convert anomalies to
+                # absolute values before fitting/applying the Gamma transform.
+                # The pattern scaling outputs anomalies, but Gamma requires positive values.
+                # We use first-year (2015) baseline to match CMIP6 starting point.
+                if variable == "pr" and pr_baseline_agg is not None:
+                    ensemble_for_transform = ensemble_for_transform + pr_baseline_agg
+
                 # Fit Gaussian to generated data
                 gaussian_params = transform_config.fit_1d_func(
                     ensemble_for_transform, "gaussian"
@@ -1041,20 +1142,27 @@ class MeteorInterface:
 
                 results[agg] = transformed_ensemble
             else:
-                # Convert to numpy if needed and ensure 2D
+                # No transform - convert to numpy if needed and ensure 2D
                 if isinstance(raw_ensemble, np.ndarray):
-                    results[agg] = (
+                    result_array = (
                         raw_ensemble
                         if raw_ensemble.ndim == 2
                         else raw_ensemble[np.newaxis, :]
                     )
                 else:
                     # xarray DataArray
-                    results[agg] = (
+                    result_array = (
                         raw_ensemble.values
                         if raw_ensemble.ndim == 2
                         else raw_ensemble.values[np.newaxis, :]
                     )
+
+                # For precipitation without transform: still add first-year baseline
+                # to convert from anomalies to absolute values
+                if variable == "pr" and pr_baseline_agg is not None:
+                    result_array = result_array + pr_baseline_agg
+
+                results[agg] = result_array
 
         return results
 

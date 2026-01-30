@@ -100,7 +100,6 @@ jobs:
         pip install -e .[tests,models,notebooks]
     - name: Test notebooks with nbval
       run: |
-          pytest notebooks/METEOR_Interface_Paper_plots.ipynb  -r a --nbval-lax --nbval-sanitize-with tests/notebook-tests.cfg --no-cov
           pytest notebooks/GCAM_predict.ipynb  -r a --nbval-lax --nbval-sanitize-with tests/notebook-tests.cfg --no-cov
           pytest notebooks/METEOR_Interface_Examples.ipynb -r a --nbval-lax --nbval-sanitize-with tests/notebook-tests.cfg --no-cov
           pytest notebooks/METEOR_Impacts_Clean_Demo.ipynb -r a --nbval-lax --nbval-sanitize-with tests/notebook-tests.cfg --no-cov

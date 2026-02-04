@@ -1,0 +1,3 @@
+[submodule "notebooks/paper"]
+	path = notebooks/paper
+	url = https://github.com/benmsanderson/METEOR15_paper

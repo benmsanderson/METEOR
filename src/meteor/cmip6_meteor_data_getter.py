@@ -228,9 +228,9 @@ def initialise_dataframe_and_models(
         # Test that one ensemble member has all data:
         sufficient_data = True
         model_missing_data = []
-        for i in range(len(exps)):
+        for i, _ in enumerate(exps):
             # find first variable for expt/model
-            for j in range(len(flds)):
+            for j, _ in enumerate(flds):
                 if "historical" in exps:
                     ii = exps.index("historical")
                     query_str = f"source_id=='{mdl}' &" f"experiment_id == 'historical'"

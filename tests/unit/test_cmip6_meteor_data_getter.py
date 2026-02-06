@@ -321,32 +321,38 @@ def test_year_mean_monthly_xarray():
     assert yearly_data.sizes["lat"] == 3
     assert yearly_data.sizes["lon"] == 3
 
+
 def test_sort_member_ids_with_unparseable_ids():
-    member_ids = np.array([
-        'r1i1p1f1',     # valid
-        'r10i1p1f1',    # valid
-        'not_a_member', # invalid → triggers float("inf")
-        'r2i1p1f1',     # valid
-    ])
+    member_ids = np.array(
+        [
+            "r1i1p1f1",  # valid
+            "r10i1p1f1",  # valid
+            "not_a_member",  # invalid → triggers float("inf")
+            "r2i1p1f1",  # valid
+        ]
+    )
 
     sorted_ids = cmip6_meteor_data_getter.sort_member_ids_numerically(member_ids)
 
     # 'not_a_member' should end up at the end
-    assert sorted_ids[-1] == 'not_a_member'
+    assert sorted_ids[-1] == "not_a_member"
     # valid IDs should be sorted numerically
-    assert sorted_ids[:-1] == ['r1i1p1f1', 'r2i1p1f1', 'r10i1p1f1']
+    assert sorted_ids[:-1] == ["r1i1p1f1", "r2i1p1f1", "r10i1p1f1"]
+
 
 def test_data_query_empty_branch():
-    flds = ['pr']
-    exps = ['historical']
+    flds = ["pr"]
+    exps = ["historical"]
 
     # Create dataframe with one member, but mismatch so query returns empty
-    df_dummy = pd.DataFrame({
-        'source_id': ['ModelX'],
-        'experiment_id': ['historical'],
-        'member_id': ['r2i1p1f1'],  # will be sorted first as r2
-        'pr': [0.1]
-    })
+    df_dummy = pd.DataFrame(
+        {
+            "source_id": ["ModelX"],
+            "experiment_id": ["historical"],
+            "member_id": ["r2i1p1f1"],  # will be sorted first as r2
+            "pr": [0.1],
+        }
+    )
 
     # df_all1: list of list of dataframes (exps x flds)
     df_all1 = [[df_dummy.copy() for _ in flds] for _ in exps]
@@ -354,16 +360,20 @@ def test_data_query_empty_branch():
     # Introduce a mismatch: first sorted member is r1i1p1f1, but only r2 exists
     def fake_sort_member_ids_numerically(member_ids):
         # Force it to return 'r1i1p1f1' first
-        return ['r1i1p1f1'] + list(member_ids)
+        return ["r1i1p1f1"] + list(member_ids)
 
     # Patch the function used inside
     original_sort = cmip6_meteor_data_getter.sort_member_ids_numerically
-    cmip6_meteor_data_getter.sort_member_ids_numerically = fake_sort_member_ids_numerically
+    cmip6_meteor_data_getter.sort_member_ids_numerically = (
+        fake_sort_member_ids_numerically
+    )
 
     try:
-        df_all, mdls = cmip6_meteor_data_getter.initialise_dataframe_and_models(df_all1, flds, exps)
+        df_all, mdls = cmip6_meteor_data_getter.initialise_dataframe_and_models(
+            df_all1, flds, exps
+        )
         # The model should be excluded because sufficient_data becomes False
-        assert 'ModelX' not in mdls
+        assert "ModelX" not in mdls
     finally:
         # Restore original function
         cmip6_meteor_data_getter.sort_member_ids_numerically = original_sort
@@ -698,9 +708,7 @@ def test_get_single_var_mod_data_monthly_renames_lat_lon(monkeypatch):
     )
     data_getter.get_single_var_mod_data = lambda *_args, **_kwargs: ds
 
-    monthly = data_getter.get_single_var_mod_data_monthly(
-        "piControl", "tas", "ModelA"
-    )
+    monthly = data_getter.get_single_var_mod_data_monthly("piControl", "tas", "ModelA")
     assert "lat" in monthly.dims
     assert "lon" in monthly.dims
     assert "latitude" not in monthly.dims
@@ -947,9 +955,7 @@ def test_caching(tmp_path):
     # Missing required fields
     missing_required_file = tmp_path / "missing_required.pkl"
     with open(missing_required_file, "wb") as handle:
-        pickle.dump(
-            {"name": expected_name, "patternflds": {"tas": None}}, handle
-        )
+        pickle.dump({"name": expected_name, "patternflds": {"tas": None}}, handle)
     is_valid, cached_model, info = data_getter.validate_pattern_scaling_cache(
         str(missing_required_file), "ModelA"
     )
@@ -966,6 +972,7 @@ def test_caching(tmp_path):
     assert is_valid is False
     assert cached_model is None
     assert "Error reading cached file" in info["message"]
+
 
 # def test_error_handling_for_invalid_experiments_and_fields():
 #     """Test error handling for invalid experiments and fields to hit lines 585-593."""

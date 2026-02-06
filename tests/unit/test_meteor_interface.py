@@ -362,17 +362,20 @@ def test_model_dictionaries_are_mutable():
 
 def test_cache():
     """Test pattern scaling cache hit and noise training cache miss."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter") as mock_getter_class, patch(
-        "meteor.meteor_interface.MeteorPatternScaling"
-    ) as mock_pattern_class, patch(
-        "meteor.meteor_interface.validate_noise_model_cache"
-    ) as mock_validate_noise, patch(
-        "meteor.meteor_interface.load_emissions_concentrations_from_name"
-    ) as mock_load_emissions, patch(
-        "meteor.meteor_interface.train_noise_model_from_cmip6"
-    ) as mock_train_noise, patch(
-        "meteor.meteor_interface.global_mean"
-    ) as mock_global_mean:
+    with (
+        patch("meteor.meteor_interface.Cmip6MeteorDataGetter") as mock_getter_class,
+        patch("meteor.meteor_interface.MeteorPatternScaling") as mock_pattern_class,
+        patch(
+            "meteor.meteor_interface.validate_noise_model_cache"
+        ) as mock_validate_noise,
+        patch(
+            "meteor.meteor_interface.load_emissions_concentrations_from_name"
+        ) as mock_load_emissions,
+        patch(
+            "meteor.meteor_interface.train_noise_model_from_cmip6"
+        ) as mock_train_noise,
+        patch("meteor.meteor_interface.global_mean") as mock_global_mean,
+    ):
         mock_getter = MagicMock()
         mock_getter_class.return_value = mock_getter
         mock_getter.validate_pattern_scaling_cache.return_value = (
@@ -400,7 +403,9 @@ def test_cache():
             coords={"month": np.arange(2400), "lat": [0, 1], "lon": [0, 1]},
         )
         interface.pattern_models["tas"] = MagicMock()
-        interface.pattern_models["tas"].predict_from_combined_experiment.return_value = {
+        interface.pattern_models[
+            "tas"
+        ].predict_from_combined_experiment.return_value = {
             "tas": xr.DataArray(np.zeros(200), dims=["year"])
         }
         interface.pattern_models["tas"].to_monthly.return_value = monthly_prediction

@@ -1,3 +1,4 @@
+import pickle
 from unittest.mock import patch
 
 import numpy as np
@@ -6,6 +7,38 @@ import pytest
 import xarray as xr
 
 from meteor import cmip6_meteor_data_getter
+
+
+def _make_min_catalog_df(model, exp, fld, tabid, activity_id="CMIP"):
+    return pd.DataFrame(
+        [
+            {
+                "activity_id": activity_id,
+                "table_id": tabid,
+                "variable_id": fld,
+                "experiment_id": exp,
+                "source_id": model,
+                "member_id": "r1i1p1f1",
+                "zstore": f"gs://dummy/{model}/{exp}/{fld}",
+            }
+        ]
+    )
+
+
+class OldFormatFlds:
+    name = ""
+
+    def __init__(self, name, flds):
+        self.name = name
+        self.flds = flds
+
+
+class OldFormatPatternFlds:
+    name = ""
+
+    def __init__(self, name, patternflds):
+        self.name = name
+        self.patternflds = patternflds
 
 
 def test_get_unique_models():
@@ -115,6 +148,33 @@ def test_comprehensive_basic_functionality():
     )
     assert custom_getter.flds == ["tas"]
     assert custom_getter.exps == ["piControl", "abrupt-4xCO2", "1pctCO2"]
+
+    # Test 2b: Parameter defaults and validation in _set_models_flds_tabids_exps_dbe
+    print("Testing parameter normalization...")
+    normalized_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models="CanESM5",
+        flds="tas",
+        tabids="Amon",
+        exps="ssp126",
+    )
+    assert normalized_getter.filter_models == ["CanESM5"]
+    assert normalized_getter.flds == ["tas"]
+    assert normalized_getter.tabids == ["Amon"]
+    assert normalized_getter.exps == ["ssp126"]
+    assert normalized_getter._set_models_flds_tabids_exps_dbe(
+        models="CanESM5",
+        flds="tas",
+        tabids="Amon",
+        exps="ssp126",
+        dbe=None,
+    ) == ["ScenarioMIP"]
+
+    with pytest.raises(ValueError, match="tabids should be the same length as flds"):
+        cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+            flds=["tas", "pr"],
+            tabids=["Amon"],
+            exps=["piControl"],
+        )
 
     # Test 3: Models property and validation
     print("Testing model validation...")
@@ -307,6 +367,605 @@ def test_data_query_empty_branch():
     finally:
         # Restore original function
         cmip6_meteor_data_getter.sort_member_ids_numerically = original_sort
+
+
+def test_default_mdl_skipmbrs_used_when_none():
+    flds = ["pr"]
+    exps = ["historical"]
+    df_dummy = pd.DataFrame(
+        {
+            "source_id": ["NorESM2-LM", "ModelX"],
+            "experiment_id": ["historical", "historical"],
+            "member_id": ["r1i1p1f1", "r1i1p1f1"],
+            "pr": [0.1, 0.2],
+        }
+    )
+    df_all1 = [[df_dummy.copy() for _ in flds] for _ in exps]
+
+    df_all_none, mdls_none = cmip6_meteor_data_getter.initialise_dataframe_and_models(
+        df_all1, flds, exps, mdl_skipmbrs=None
+    )
+    df_all_explicit, mdls_explicit = (
+        cmip6_meteor_data_getter.initialise_dataframe_and_models(
+            df_all1,
+            flds,
+            exps,
+            mdl_skipmbrs={"NorESM2-LM": ["r1i1p1f1"]},
+        )
+    )
+
+    assert mdls_none == mdls_explicit
+    assert len(df_all_none) == len(df_all_explicit)
+    for exp_idx in range(len(exps)):
+        for fld_idx in range(len(flds)):
+            pd.testing.assert_frame_equal(
+                df_all_none[exp_idx][fld_idx],
+                df_all_explicit[exp_idx][fld_idx],
+            )
+
+
+def _patch_empty_catalog(monkeypatch):
+    empty_df = pd.DataFrame(
+        columns=[
+            "activity_id",
+            "table_id",
+            "variable_id",
+            "experiment_id",
+            "source_id",
+            "member_id",
+            "zstore",
+        ]
+    )
+    monkeypatch.setattr(
+        cmip6_meteor_data_getter.pd, "read_csv", lambda *_, **__: empty_df
+    )
+    monkeypatch.setattr(
+        cmip6_meteor_data_getter.gcsfs, "GCSFileSystem", lambda *_, **__: object()
+    )
+
+
+def test_init_error_message_no_models(monkeypatch):
+    _patch_empty_catalog(monkeypatch)
+
+    with pytest.raises(ValueError) as excinfo:
+        cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+            flds=["banana"],
+            tabids=["Lmon"],
+            exps=["abrupt-4xCO2"],
+        )
+
+    msg = str(excinfo.value)
+    assert msg.startswith("No models found that have complete data")
+    assert "banana (table_id: Lmon)" in msg
+    assert "Experiments: ['abrupt-4xCO2']" in msg
+
+
+def test_init_error_message_single_model(monkeypatch):
+    _patch_empty_catalog(monkeypatch)
+
+    with pytest.raises(ValueError) as excinfo:
+        cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+            models="NonExistentModel",
+            flds=["banana"],
+            tabids=["Lmon"],
+            exps=["abrupt-4xCO2"],
+        )
+
+    msg = str(excinfo.value)
+    assert msg.startswith("Model NonExistentModel does not have complete data")
+    assert "banana (table_id: Lmon)" in msg
+    assert "Experiments: ['abrupt-4xCO2']" in msg
+
+
+def test_init_error_message_multiple_models(monkeypatch):
+    _patch_empty_catalog(monkeypatch)
+
+    with pytest.raises(ValueError) as excinfo:
+        cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+            models=["Model1", "Model2"],
+            flds=["banana"],
+            tabids=["Lmon"],
+            exps=["abrupt-4xCO2"],
+        )
+
+    msg = str(excinfo.value)
+    assert msg.startswith(
+        "Non of the requested models ['Model1', 'Model2'] have complete data"
+    )
+    assert "banana (table_id: Lmon)" in msg
+    assert "Experiments: ['abrupt-4xCO2']" in msg
+
+
+def test_get_single_var_mod_data_warns_for_unfiltered_model(monkeypatch, caplog):
+    df = _make_min_catalog_df("ModelA", "piControl", "tas", "Amon")
+    monkeypatch.setattr(cmip6_meteor_data_getter.pd, "read_csv", lambda *_, **__: df)
+    monkeypatch.setattr(
+        cmip6_meteor_data_getter.gcsfs, "GCSFileSystem", lambda *_, **__: object()
+    )
+
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models=["ModelA"],
+        flds=["tas"],
+        tabids=["Amon"],
+        exps=["piControl"],
+    )
+
+    caplog.set_level("WARNING")
+    assert not data_getter.check_if_model_has_data("OtherModel")
+    assert "was not among the requested models" in caplog.text
+
+
+def test_get_single_var_mod_data_cache_hit(monkeypatch):
+    df = _make_min_catalog_df("ModelA", "piControl", "tas", "Amon")
+    monkeypatch.setattr(cmip6_meteor_data_getter.pd, "read_csv", lambda *_, **__: df)
+    monkeypatch.setattr(
+        cmip6_meteor_data_getter.gcsfs, "GCSFileSystem", lambda *_, **__: object()
+    )
+
+    class DummyCache:
+        cache_functioning = True
+
+        def get_cmip6_query_catalogue(self):
+            return "/tmp/cmip6_catalog.csv"
+
+        def load_cmip6_cached_data(self, *_args, **_kwargs):
+            return "CACHED"
+
+        def save_cmip6_to_cache(self, *_args, **_kwargs):
+            return None
+
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models=["ModelA"],
+        flds=["tas"],
+        tabids=["Amon"],
+        exps=["piControl"],
+        enable_cache=True,
+        cache_handler=DummyCache(),
+    )
+
+    assert data_getter.get_single_var_mod_data("piControl", "tas", "ModelA") == "CACHED"
+
+
+def test_get_single_var_mod_data_nan_zstore_ref(monkeypatch):
+    df = _make_min_catalog_df("ModelA", "piControl", "tas", "Amon")
+    df.loc[0, "zstore"] = np.nan
+    monkeypatch.setattr(cmip6_meteor_data_getter.pd, "read_csv", lambda *_, **__: df)
+    monkeypatch.setattr(
+        cmip6_meteor_data_getter.gcsfs, "GCSFileSystem", lambda *_, **__: object()
+    )
+
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models=["ModelA"],
+        flds=["tas"],
+        tabids=["Amon"],
+        exps=["piControl"],
+    )
+
+    with pytest.raises(KeyError, match="No zstore ref for ModelA"):
+        data_getter.get_single_var_mod_data("piControl", "tas", "ModelA")
+
+
+def test_get_single_var_mod_data_yearmean_cache_hit(monkeypatch, caplog):
+    df = _make_min_catalog_df("ModelA", "piControl", "tas", "Amon")
+    monkeypatch.setattr(cmip6_meteor_data_getter.pd, "read_csv", lambda *_, **__: df)
+    monkeypatch.setattr(
+        cmip6_meteor_data_getter.gcsfs, "GCSFileSystem", lambda *_, **__: object()
+    )
+
+    cached = xr.DataArray(
+        np.zeros((1, 1, 1, 1)),
+        dims=["ens", "year", "lat", "lon"],
+        coords={"ens": [1], "year": [0], "lat": [0], "lon": [0]},
+    )
+
+    class DummyCache:
+        cache_functioning = True
+
+        def get_cmip6_query_catalogue(self):
+            return "/tmp/cmip6_catalog.csv"
+
+        def load_cmip6_cached_data(self, *_args, **_kwargs):
+            return cached
+
+        def save_cmip6_to_cache(self, *_args, **_kwargs):
+            return None
+
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models=["ModelA"],
+        flds=["tas"],
+        tabids=["Amon"],
+        exps=["piControl"],
+        enable_cache=True,
+        cache_handler=DummyCache(),
+    )
+
+    caplog.set_level("INFO")
+    result = data_getter.get_single_var_mod_data_yearmean("piControl", "tas", "ModelA")
+    assert result is cached
+    assert "Using cached yearly data" in caplog.text
+
+
+def test_get_single_var_mod_data_yearmean_monthly_none(monkeypatch):
+    df = _make_min_catalog_df("ModelA", "piControl", "tas", "Amon")
+    monkeypatch.setattr(cmip6_meteor_data_getter.pd, "read_csv", lambda *_, **__: df)
+    monkeypatch.setattr(
+        cmip6_meteor_data_getter.gcsfs, "GCSFileSystem", lambda *_, **__: object()
+    )
+
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models=["ModelA"],
+        flds=["tas"],
+        tabids=["Amon"],
+        exps=["piControl"],
+    )
+    data_getter.get_single_var_mod_data_monthly = lambda *_args, **_kwargs: None
+
+    assert (
+        data_getter.get_single_var_mod_data_yearmean("piControl", "tas", "ModelA")
+        is None
+    )
+
+
+def test_get_single_var_mod_data_yearmean_saves_cache(monkeypatch):
+    df = _make_min_catalog_df("ModelA", "piControl", "tas", "Amon")
+    monkeypatch.setattr(cmip6_meteor_data_getter.pd, "read_csv", lambda *_, **__: df)
+    monkeypatch.setattr(
+        cmip6_meteor_data_getter.gcsfs, "GCSFileSystem", lambda *_, **__: object()
+    )
+
+    monthly = xr.DataArray(
+        np.zeros((1, 12, 1, 1)),
+        dims=["ens", "month", "lat", "lon"],
+        coords={"ens": [1], "month": np.arange(12), "lat": [0], "lon": [0]},
+    )
+
+    class DummyCache:
+        cache_functioning = True
+        saved = False
+
+        def get_cmip6_query_catalogue(self):
+            return "/tmp/cmip6_catalog.csv"
+
+        def load_cmip6_cached_data(self, *_args, **_kwargs):
+            return None
+
+        def save_cmip6_to_cache(self, *_args, **_kwargs):
+            self.saved = True
+
+    cache = DummyCache()
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models=["ModelA"],
+        flds=["tas"],
+        tabids=["Amon"],
+        exps=["piControl"],
+        enable_cache=True,
+        cache_handler=cache,
+    )
+    data_getter.get_single_var_mod_data_monthly = lambda *_args, **_kwargs: monthly
+
+    result = data_getter.get_single_var_mod_data_yearmean("piControl", "tas", "ModelA")
+    assert result is not None
+    assert cache.saved is True
+
+
+def test_get_single_var_mod_data_monthly_none(monkeypatch):
+    df = _make_min_catalog_df("ModelA", "piControl", "tas", "Amon")
+    monkeypatch.setattr(cmip6_meteor_data_getter.pd, "read_csv", lambda *_, **__: df)
+    monkeypatch.setattr(
+        cmip6_meteor_data_getter.gcsfs, "GCSFileSystem", lambda *_, **__: object()
+    )
+
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models=["ModelA"],
+        flds=["tas"],
+        tabids=["Amon"],
+        exps=["piControl"],
+    )
+    data_getter.get_single_var_mod_data = lambda *_args, **_kwargs: None
+
+    assert (
+        data_getter.get_single_var_mod_data_monthly("piControl", "tas", "ModelA")
+        is None
+    )
+
+
+def test_get_single_var_mod_data_monthly_renames_lat_lon(monkeypatch):
+    df = _make_min_catalog_df("ModelA", "piControl", "tas", "Amon")
+    monkeypatch.setattr(cmip6_meteor_data_getter.pd, "read_csv", lambda *_, **__: df)
+    monkeypatch.setattr(
+        cmip6_meteor_data_getter.gcsfs, "GCSFileSystem", lambda *_, **__: object()
+    )
+
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models=["ModelA"],
+        flds=["tas"],
+        tabids=["Amon"],
+        exps=["piControl"],
+    )
+
+    ds = xr.Dataset(
+        {
+            "tas": xr.DataArray(
+                np.zeros((2, 3, 4)),
+                dims=["time", "latitude", "longitude"],
+                coords={
+                    "time": [0, 1],
+                    "latitude": [10, 20, 30],
+                    "longitude": [0, 90, 180, 270],
+                },
+            )
+        }
+    )
+    data_getter.get_single_var_mod_data = lambda *_args, **_kwargs: ds
+
+    monthly = data_getter.get_single_var_mod_data_monthly(
+        "piControl", "tas", "ModelA"
+    )
+    assert "lat" in monthly.dims
+    assert "lon" in monthly.dims
+    assert "latitude" not in monthly.dims
+    assert "longitude" not in monthly.dims
+
+
+def test_get_single_var_mod_data_monthly_saves_cache(monkeypatch):
+    df = _make_min_catalog_df("ModelA", "piControl", "tas", "Amon")
+    monkeypatch.setattr(cmip6_meteor_data_getter.pd, "read_csv", lambda *_, **__: df)
+    monkeypatch.setattr(
+        cmip6_meteor_data_getter.gcsfs, "GCSFileSystem", lambda *_, **__: object()
+    )
+
+    class DummyCache:
+        cache_functioning = True
+        saved = False
+
+        def get_cmip6_query_catalogue(self):
+            return "/tmp/cmip6_catalog.csv"
+
+        def load_cmip6_cached_data(self, *_args, **_kwargs):
+            return None
+
+        def save_cmip6_to_cache(self, *_args, **_kwargs):
+            self.saved = True
+
+    ds = xr.Dataset(
+        {
+            "tas": xr.DataArray(
+                np.zeros((2, 2, 2)),
+                dims=["time", "lat", "lon"],
+                coords={"time": [0, 1], "lat": [0, 1], "lon": [0, 1]},
+            )
+        }
+    )
+
+    cache = DummyCache()
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models=["ModelA"],
+        flds=["tas"],
+        tabids=["Amon"],
+        exps=["piControl"],
+        enable_cache=True,
+        cache_handler=cache,
+    )
+    data_getter.get_single_var_mod_data = lambda *_args, **_kwargs: ds
+
+    result = data_getter.get_single_var_mod_data_monthly("piControl", "tas", "ModelA")
+    assert result is not None
+    assert cache.saved is True
+
+
+def test_make_meteor_training_data_cache_hit(monkeypatch):
+    df = _make_min_catalog_df("ModelA", "piControl", "tas", "Amon")
+    monkeypatch.setattr(cmip6_meteor_data_getter.pd, "read_csv", lambda *_, **__: df)
+    monkeypatch.setattr(
+        cmip6_meteor_data_getter.gcsfs, "GCSFileSystem", lambda *_, **__: object()
+    )
+
+    cached = xr.Dataset({"tas": xr.DataArray([1], dims=["x"])})
+
+    class DummyCache:
+        cache_functioning = True
+
+        def get_cmip6_query_catalogue(self):
+            return "/tmp/cmip6_catalog.csv"
+
+        def load_cmip6_cached_data(self, *_args, **_kwargs):
+            return cached
+
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models=["ModelA"],
+        flds=["tas"],
+        tabids=["Amon"],
+        exps=["piControl"],
+        enable_cache=True,
+        cache_handler=DummyCache(),
+    )
+
+    result = data_getter.make_meteor_training_data(
+        "base", "ModelA", exp_mapper=None, monthly=False
+    )
+    assert result is cached
+
+
+def test_make_meteor_training_data_default_exp_mapper_monthly(monkeypatch):
+    df = _make_min_catalog_df("ModelA", "piControl", "tas", "Amon")
+    monkeypatch.setattr(cmip6_meteor_data_getter.pd, "read_csv", lambda *_, **__: df)
+    monkeypatch.setattr(
+        cmip6_meteor_data_getter.gcsfs, "GCSFileSystem", lambda *_, **__: object()
+    )
+
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models=["ModelA"],
+        flds=["tas"],
+        tabids=["Amon"],
+        exps=["piControl"],
+    )
+
+    called = {}
+
+    def _monthly(exp, fld, model):
+        called["exp"] = exp
+        called["fld"] = fld
+        called["model"] = model
+        return xr.DataArray([1], dims=["month"])  # minimal
+
+    data_getter.get_single_var_mod_data_monthly = _monthly
+    result = data_getter.make_meteor_training_data(
+        "base", "ModelA", exp_mapper=None, monthly=True
+    )
+
+    assert called["exp"] == "piControl"
+    assert "tas" in result.data_vars
+
+
+def test_make_meteor_training_data_monthly_exp_in_mapper(monkeypatch):
+    df = _make_min_catalog_df("ModelA", "piControl", "tas", "Amon")
+    monkeypatch.setattr(cmip6_meteor_data_getter.pd, "read_csv", lambda *_, **__: df)
+    monkeypatch.setattr(
+        cmip6_meteor_data_getter.gcsfs, "GCSFileSystem", lambda *_, **__: object()
+    )
+
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models=["ModelA"],
+        flds=["tas"],
+        tabids=["Amon"],
+        exps=["piControl"],
+    )
+
+    called = {}
+
+    def _monthly(exp, fld, model):
+        called["exp"] = exp
+        return xr.DataArray([1], dims=["month"])
+
+    data_getter.get_single_var_mod_data_monthly = _monthly
+    result = data_getter.make_meteor_training_data(
+        "base", "ModelA", exp_mapper={"base": "piControl"}, monthly=True
+    )
+
+    assert called["exp"] == "piControl"
+    assert "tas" in result.data_vars
+
+
+def test_make_meteor_training_data_monthly_exp_not_in_mapper(monkeypatch):
+    df = _make_min_catalog_df("ModelA", "piControl", "tas", "Amon")
+    monkeypatch.setattr(cmip6_meteor_data_getter.pd, "read_csv", lambda *_, **__: df)
+    monkeypatch.setattr(
+        cmip6_meteor_data_getter.gcsfs, "GCSFileSystem", lambda *_, **__: object()
+    )
+
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models=["ModelA"],
+        flds=["tas"],
+        tabids=["Amon"],
+        exps=["piControl"],
+    )
+
+    called = {}
+
+    def _monthly(exp, fld, model):
+        called["exp"] = exp
+        return xr.DataArray([1], dims=["month"])
+
+    data_getter.get_single_var_mod_data_monthly = _monthly
+    result = data_getter.make_meteor_training_data(
+        "piControl", "ModelA", exp_mapper={"base": "piControl"}, monthly=True
+    )
+
+    assert called["exp"] == "piControl"
+    assert "tas" in result.data_vars
+
+
+def test_caching(tmp_path):
+    data_getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        flds=["tas", "pr"],
+        exps=["piControl"],
+    )
+    expected_name = "cmip6-ModelA-aer"
+
+    # Missing cache file
+    missing_file = tmp_path / "missing.pkl"
+    is_valid, cached_model, info = data_getter.validate_pattern_scaling_cache(
+        str(missing_file), "ModelA"
+    )
+    assert is_valid is False
+    assert cached_model is None
+    assert "Cache file not found" in info["message"]
+
+    # New format with patternflds
+    new_format_file = tmp_path / "new_format.pkl"
+    with open(new_format_file, "wb") as handle:
+        pickle.dump(
+            {
+                "name": expected_name,
+                "patternflds": {"tas": None, "pr": None},
+            },
+            handle,
+        )
+    is_valid, cached_model, info = data_getter.validate_pattern_scaling_cache(
+        str(new_format_file), "ModelA"
+    )
+    assert is_valid is True
+    assert cached_model is not None
+    assert "Cache valid" in info["message"]
+
+    # Old format with flds attribute
+    old_flds_file = tmp_path / "old_flds.pkl"
+    with open(old_flds_file, "wb") as handle:
+        pickle.dump(OldFormatFlds(expected_name, {"tas": None, "pr": None}), handle)
+    is_valid, cached_model, info = data_getter.validate_pattern_scaling_cache(
+        str(old_flds_file), "ModelA"
+    )
+    assert is_valid is True
+    assert cached_model is not None
+    assert "Cache valid" in info["message"]
+
+    # Old format with patternflds attribute only
+    old_pattern_file = tmp_path / "old_pattern.pkl"
+    with open(old_pattern_file, "wb") as handle:
+        pickle.dump(
+            OldFormatPatternFlds(expected_name, {"tas": None, "pr": None}),
+            handle,
+        )
+    is_valid, cached_model, info = data_getter.validate_pattern_scaling_cache(
+        str(old_pattern_file), "ModelA"
+    )
+    assert is_valid is True
+    assert cached_model is not None
+    assert "Cache valid" in info["message"]
+
+    # Missing field information
+    missing_fields_file = tmp_path / "missing_fields.pkl"
+    with open(missing_fields_file, "wb") as handle:
+        pickle.dump({"name": expected_name}, handle)
+    is_valid, cached_model, info = data_getter.validate_pattern_scaling_cache(
+        str(missing_fields_file), "ModelA"
+    )
+    assert is_valid is False
+    assert cached_model is None
+    assert "missing field information" in info["message"]
+
+    # Missing required fields
+    missing_required_file = tmp_path / "missing_required.pkl"
+    with open(missing_required_file, "wb") as handle:
+        pickle.dump(
+            {"name": expected_name, "patternflds": {"tas": None}}, handle
+        )
+    is_valid, cached_model, info = data_getter.validate_pattern_scaling_cache(
+        str(missing_required_file), "ModelA"
+    )
+    assert is_valid is False
+    assert cached_model is None
+    assert "Missing required fields" in info["message"]
+
+    # Corrupted cache file
+    corrupted_file = tmp_path / "corrupted.pkl"
+    corrupted_file.write_text("not a pickle")
+    is_valid, cached_model, info = data_getter.validate_pattern_scaling_cache(
+        str(corrupted_file), "ModelA"
+    )
+    assert is_valid is False
+    assert cached_model is None
+    assert "Error reading cached file" in info["message"]
 
 # def test_error_handling_for_invalid_experiments_and_fields():
 #     """Test error handling for invalid experiments and fields to hit lines 585-593."""

@@ -8,6 +8,7 @@ Strategy: Use mocks for expensive operations, verify transformations.
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
@@ -359,6 +360,68 @@ def test_model_dictionaries_are_mutable():
         assert "pr" in interface.pattern_models
 
 
+def test_cache():
+    """Test pattern scaling cache hit and noise training cache miss."""
+    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter") as mock_getter_class, patch(
+        "meteor.meteor_interface.MeteorPatternScaling"
+    ) as mock_pattern_class, patch(
+        "meteor.meteor_interface.validate_noise_model_cache"
+    ) as mock_validate_noise, patch(
+        "meteor.meteor_interface.load_emissions_concentrations_from_name"
+    ) as mock_load_emissions, patch(
+        "meteor.meteor_interface.train_noise_model_from_cmip6"
+    ) as mock_train_noise, patch(
+        "meteor.meteor_interface.global_mean"
+    ) as mock_global_mean:
+        mock_getter = MagicMock()
+        mock_getter_class.return_value = mock_getter
+        mock_getter.validate_pattern_scaling_cache.return_value = (
+            True,
+            MagicMock(),
+            {},
+        )
+        mock_validate_noise.return_value = (False, None, {})
+        mock_load_emissions.return_value = ("em", "conc")
+
+        interface = MeteorInterface(
+            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
+        )
+
+        interface._train_pattern_scaling("tas", {"n_modes_pattern": 3}, verbose=False)
+
+        pattern_args, pattern_kwargs = mock_pattern_class.call_args
+        assert pattern_args[2] is None
+        assert pattern_kwargs["ssp_input"] is None
+        assert pattern_kwargs["exp_list"] is None
+
+        monthly_prediction = xr.DataArray(
+            np.zeros((2400, 2, 2)),
+            dims=["month", "lat", "lon"],
+            coords={"month": np.arange(2400), "lat": [0, 1], "lon": [0, 1]},
+        )
+        interface.pattern_models["tas"] = MagicMock()
+        interface.pattern_models["tas"].predict_from_combined_experiment.return_value = {
+            "tas": xr.DataArray(np.zeros(200), dims=["year"])
+        }
+        interface.pattern_models["tas"].to_monthly.return_value = monthly_prediction
+        mock_global_mean.return_value = xr.DataArray(
+            np.zeros(2400), dims=["month"], coords={"month": np.arange(2400)}
+        )
+
+        config = {
+            "n_modes_noise": 5,
+            "lag_order": 2,
+            "use_exog": "all",
+            "training_scenario": "ssp370",
+        }
+        interface._train_noise_model("tas", config, verbose=False)
+
+        mock_train_noise.assert_called_once()
+        _, noise_kwargs = mock_train_noise.call_args
+        assert noise_kwargs["experiments"] == ["historical", "ssp370"]
+        assert len(noise_kwargs["custom_global_temp"]) == 1200
+
+
 def test_generate_requires_training():
     """Test that generate_ensemble_outputs() raises error if not trained."""
     with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
@@ -518,6 +581,93 @@ def test_generate_includes_metadata():
         assert result.metadata["model"] == "TestModel"
 
 
+def test_train_config():
+    """Validate train() configuration logic for auto/manual modes."""
+    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
+        interface = MeteorInterface(
+            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
+        )
+        interface._train_pattern_scaling = MagicMock()
+        interface._train_noise_model = MagicMock()
+
+        interface.train(auto=True, training_scenario="ssp370", verbose=False)
+        assert interface._training_config["tas"]["training_scenario"] == "ssp370"
+
+        interface.train(
+            auto=True,
+            variable_configs={"tas": {"n_modes_noise": 50}},
+            verbose=False,
+        )
+        assert interface._training_config["tas"]["n_modes_noise"] == 50
+
+        interface.train(
+            auto=False,
+            training_scenario="ssp126",
+            variable_configs={"tas": {}},
+            verbose=False,
+        )
+        assert interface._training_config["tas"]["training_scenario"] == "ssp126"
+
+        interface.train(
+            auto=False,
+            training_scenario="ssp126",
+            variable_configs={"tas": {"n_modes_noise": 30}},
+            verbose=False,
+        )
+        config = interface._training_config["tas"]
+        assert config["n_modes_noise"] == 30
+        assert config["training_scenario"] == "ssp126"
+
+
+def test_generate_gridded_climatology_no_noise_single_realization():
+    """Test gridded outputs force single realization without noise."""
+    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
+        interface = MeteorInterface(
+            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
+        )
+
+        interface.noise_models["tas"] = MagicMock()
+
+        monthly_prediction = xr.DataArray(
+            np.zeros((24, 2, 2)),
+            dims=["month", "lat", "lon"],
+            coords={"month": np.arange(24), "lat": [0, 1], "lon": [0, 1]},
+        )
+        monthly_warming = xr.DataArray(
+            np.zeros((24, 2, 2)),
+            dims=["month", "lat", "lon"],
+            coords={"month": np.arange(24), "lat": [0, 1], "lon": [0, 1]},
+        )
+        interface._get_or_compute_pattern_scaling = MagicMock(
+            return_value=(monthly_prediction, monthly_warming)
+        )
+
+        gridded = interface._generate_gridded(
+            variable="tas",
+            scenario="ssp245",
+            start_year=2000,
+            end_year=2001,
+            n_realizations=5,
+            gridded_spec={
+                "annual": [2000],
+                "monthly": [2000],
+                "climatology": [(2000, 2001)],
+            },
+            include_noise=False,
+            verbose=False,
+        )
+
+        interface.noise_models["tas"].generate_realization.assert_not_called()
+
+        annual = gridded["annual"][2000]
+        monthly = gridded["monthly"][2000]
+        climatology = gridded["climatology"]["2000-2001"]
+
+        assert annual.sizes["realization"] == 1
+        assert monthly.sizes["realization"] == 1
+        assert climatology.sizes["realization"] == 1
+
+
 def test_generate_before_training_clear_error():
     """Test that generating before training gives clear error message."""
     with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
@@ -538,3 +688,65 @@ def test_generate_before_training_clear_error():
         # Error message should mention which variable
         assert "not trained" in str(exc_info.value).lower()
         assert "train()" in str(exc_info.value).lower()
+
+
+def test_custom_scenario(tmp_path, capsys):
+    """Test custom scenario handling and save_to in pattern scaling."""
+    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
+        interface = MeteorInterface(
+            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
+        )
+        interface._is_trained["tas"] = True
+        interface.noise_models["tas"] = MagicMock()
+
+        interface._generate_timeseries = MagicMock(
+            return_value={"global": xr.DataArray([0.0], dims=["time"])}
+        )
+
+        save_path = tmp_path / "output.nc"
+        with patch.object(EnsembleOutput, "to_netcdf") as mock_save:
+            interface.generate_ensemble_outputs(
+                scenario="ssp245",
+                start_year=2000,
+                end_year=2000,
+                n_realizations=1,
+                timeseries=["global"],
+                save_to=str(save_path),
+                verbose=False,
+            )
+            mock_save.assert_called_once_with(str(save_path))
+
+        years = np.arange(2000, 2051)
+        em_data = pd.DataFrame({"value": np.zeros(len(years))}, index=years)
+        conc_data = pd.DataFrame({"value": np.zeros(len(years))}, index=years)
+        scenario = {"emissions": em_data, "concentrations": conc_data, "name": "custom"}
+
+        pattern_model = MagicMock()
+        pattern_model.predict_from_combined_experiment.return_value = {
+            "tas": xr.DataArray(np.zeros(10), dims=["year"])
+        }
+        full_monthly = xr.DataArray(
+            np.zeros((4000, 2, 2)),
+            dims=["month", "lat", "lon"],
+            coords={"month": np.arange(4000), "lat": [0, 1], "lon": [0, 1]},
+        )
+        pattern_model.to_monthly.return_value = full_monthly
+        interface.pattern_models["tas"] = pattern_model
+
+        monthly_prediction, monthly_warming, em_used, conc_used = (
+            interface._get_or_compute_pattern_scaling(
+                "tas",
+                scenario,
+                start_year=1990,
+                end_year=2060,
+                verbose=True,
+            )
+        )
+
+        output = capsys.readouterr().out
+        assert "Warning: Emissions data ends at" in output
+        assert "Warning: Emissions data starts at" in output
+        assert em_used.index.max() == 2100
+        assert conc_used.index.max() == 2100
+        assert monthly_prediction.sizes["month"] == 612
+        assert len(monthly_warming) == 612

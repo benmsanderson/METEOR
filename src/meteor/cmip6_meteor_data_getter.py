@@ -106,11 +106,7 @@ def year_mean_monthly(monthly_data: np.ndarray) -> np.ndarray:
         values
     """
     month_weights = np.tile(
-        (
-            np.array([31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31])
-            / 365.0
-            * 12.0
-        ),
+        (np.array([31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]) / 365.0 * 12.0),
         monthly_data.shape[0] // 12,
     )
     mul_weigths = multiply_along_axis(monthly_data, month_weights, 0)
@@ -159,9 +155,7 @@ def year_mean_monthly_xarray(monthly_xarray: xr.DataArray) -> xr.DataArray:
     )
 
 
-def make_xarray_with_correct_dims(
-    fld_names: list, fld_values: list
-) -> xr.Dataset:
+def make_xarray_with_correct_dims(fld_names: list, fld_values: list) -> xr.Dataset:
     """
     Make a dataset for a list of dataArrays over the same dimensions
 
@@ -239,14 +233,9 @@ def initialise_dataframe_and_models(
             for j in range(len(flds)):
                 if "historical" in exps:
                     ii = exps.index("historical")
-                    query_str = (
-                        f"source_id=='{mdl}' &"
-                        f"experiment_id == 'historical'"
-                    )
+                    query_str = f"source_id=='{mdl}' &" f"experiment_id == 'historical'"
                     hist_tmp = df_all1[ii][j].query(query_str)
-                    hmb = sort_member_ids_numerically(
-                        hist_tmp.member_id.unique()
-                    )
+                    hmb = sort_member_ids_numerically(hist_tmp.member_id.unique())
                 else:
                     hmb = []
                 tmp = df_all1[i][j].query(f"source_id=='{mdl}'")
@@ -260,8 +249,7 @@ def initialise_dataframe_and_models(
                         if hmb[0] in mmbs:
                             mmb = hmb[0]
 
-                    tt = df_all1[i][j].query(
-                        f"source_id=='{mdl}' & member_id=='{mmb}'")
+                    tt = df_all1[i][j].query(f"source_id=='{mdl}' & member_id=='{mmb}'")
                     if len(tt) > 0:
                         df_all[i][j].loc[n] = tt.values[0]
                     else:
@@ -281,8 +269,7 @@ def initialise_dataframe_and_models(
             n = n + 1
             # print(f"Model {mdl} has full data")
         else:
-            missing_data_info.append(
-                f"{mdl}: missing {', '.join(model_missing_data)}")
+            missing_data_info.append(f"{mdl}: missing {', '.join(model_missing_data)}")
 
     # Log which models were excluded due to missing data
     if missing_data_info:
@@ -386,8 +373,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         gcs : gcfs.GCSFileSystem
               A GCSFileSystem to load data
         """
-        dbe = self._set_models_flds_tabids_exps_dbe(
-            models, flds, tabids, exps, dbe)
+        dbe = self._set_models_flds_tabids_exps_dbe(models, flds, tabids, exps, dbe)
 
         # Set up caching
         self.enable_cache = enable_cache
@@ -411,15 +397,12 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
 
         if self.enable_cache and os.path.exists(catalog_cache_file):
             # Use cached catalog
-            logging.info("Loading CMIP6 catalog from cache: %s",
-                         catalog_cache_file)
+            logging.info("Loading CMIP6 catalog from cache: %s", catalog_cache_file)
             df = pd.read_csv(catalog_cache_file, low_memory=False)
         else:
             # Download catalog from Google Cloud Storage
             try:
-                logging.info(
-                    "Downloading CMIP6 catalog from Google Cloud Storage..."
-                )
+                logging.info("Downloading CMIP6 catalog from Google Cloud Storage...")
                 df = pd.read_csv(
                     "https://storage.googleapis.com/cmip6/cmip6-zarr-consolidated-stores.csv",
                     low_memory=False,
@@ -481,9 +464,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                 if len(self.filter_models) == 1:
                     model_str = f"Model {self.filter_models[0]} does not "
                 else:
-                    model_str = (
-                        f"Non of the requested models {self.filter_models} "
-                    )
+                    model_str = f"Non of the requested models {self.filter_models} "
             error_msg = model_str + (
                 "have complete data for the requested data combination:\n"
                 "  Fields and Table IDs:\n"
@@ -498,8 +479,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
 
         self.gcs = gcsfs.GCSFileSystem(token="anon")  # nosec
 
-    def _set_models_flds_tabids_exps_dbe(
-            self, models, flds, tabids, exps, dbe):
+    def _set_models_flds_tabids_exps_dbe(self, models, flds, tabids, exps, dbe):
         """
         Private method to set flds and exps and dbe and
         take care of if they are not set then have defaults
@@ -721,19 +701,21 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         if self.enable_cache:
             cached_data = self.cache_handler.load_cmip6_cached_data(
                 "get_single_var_mod_data_yearmean",
-                exp, fld, model, expected_type="DataArray",
+                exp,
+                fld,
+                model,
+                expected_type="DataArray",
             )
             if cached_data is not None:
-                logging.info(
-                    "✓ Using cached yearly data for %s/%s/%s",
-                    model, exp, fld
-                )
+                logging.info("✓ Using cached yearly data for %s/%s/%s", model, exp, fld)
                 return cached_data
 
         # Get monthly data (which may be cached) and compute yearly mean
         logging.info(
             "Computing yearly mean from monthly data for %s/%s/%s...",
-            model, exp, fld,
+            model,
+            exp,
+            fld,
         )
         var_monthly = self.get_single_var_mod_data_monthly(exp, fld, model)
         if var_monthly is None:
@@ -746,12 +728,10 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         var_monthly_subset = var_monthly.isel(month=slice(0, n_years * 12))
 
         # Reshape and compute yearly mean
-        var_yearly = var_monthly_subset.coarsen(
-            month=12, boundary="trim"
-        ).mean()
-        var_yearly = var_yearly.assign_coords(
-            {"month": np.arange(n_years)}
-        ).rename({"month": "year"})
+        var_yearly = var_monthly_subset.coarsen(month=12, boundary="trim").mean()
+        var_yearly = var_yearly.assign_coords({"month": np.arange(n_years)}).rename(
+            {"month": "year"}
+        )
 
         # Cache the yearly data to avoid recomputing
         if self.enable_cache:
@@ -789,19 +769,23 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         if self.enable_cache:
             cached_data = self.cache_handler.load_cmip6_cached_data(
                 "get_single_var_mod_data_monthly",
-                exp, fld, model, expected_type="DataArray",
+                exp,
+                fld,
+                model,
+                expected_type="DataArray",
             )
             if cached_data is not None:
                 logging.info(
-                    "✓ Using cached monthly data for %s/%s/%s",
-                    model, exp, fld
+                    "✓ Using cached monthly data for %s/%s/%s", model, exp, fld
                 )
                 return cached_data
 
         # Original logic
         logging.info(
             "Downloading data from Google Cloud for %s/%s/%s...",
-            model, exp, fld,
+            model,
+            exp,
+            fld,
         )
         ds = self.get_single_var_mod_data(exp, fld, model)
         if ds is None:
@@ -867,8 +851,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         # Try to load from cache first if caching is enabled
         if self.enable_cache:
             cached_data = self.cache_handler.load_cmip6_cached_data(
-                "make_meteor_training_data",
-                exp, model, exp_mapper, monthly=monthly
+                "make_meteor_training_data", exp, model, exp_mapper, monthly=monthly
             )
             if cached_data is not None:
                 return cached_data
@@ -891,8 +874,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                         )
                     )
             elif monthly:
-                fld_values.append(
-                    self.get_single_var_mod_data_monthly(exp, fld, model))
+                fld_values.append(self.get_single_var_mod_data_monthly(exp, fld, model))
             else:
                 fld_values.append(
                     self.get_single_var_mod_data_yearmean(exp, fld, model)
@@ -949,7 +931,10 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         if self.enable_cache:
             cached_data = self.cache_handler.load_cmip6_cached_data(
                 "make_meteor_training_data_composite",
-                exps, model, overlap, monthly=monthly
+                exps,
+                model,
+                overlap,
+                monthly=monthly,
             )
             if cached_data is not None:
                 return cached_data
@@ -963,13 +948,9 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             for exp in exps:
                 if value is None:
                     if monthly:
-                        value = self.get_single_var_mod_data_monthly(
-                            exp, fld, model
-                        )
+                        value = self.get_single_var_mod_data_monthly(exp, fld, model)
                     else:
-                        value = self.get_single_var_mod_data_yearmean(
-                            exp, fld, model
-                        )
+                        value = self.get_single_var_mod_data_yearmean(exp, fld, model)
                 else:
                     if monthly:
                         next_dataset = self.get_single_var_mod_data_monthly(
@@ -1004,7 +985,11 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                                     12 if monthly else 1
                                 )  # Convert years to months if needed
                             value = value.sel(
-                                **{time_dim: slice(0, len(value[time_dim].values) - cut - 1)}
+                                **{
+                                    time_dim: slice(
+                                        0, len(value[time_dim].values) - cut - 1
+                                    )
+                                }
                             )
                     start_time = value[time_dim].values[-1] + 1
 
@@ -1079,13 +1064,11 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         training_data["sulxanom"] = training_data[scenario_train]
 
         print(
-            "   ✅ Training data prepared for experiments: ",
-            list(training_data.keys())
+            "   ✅ Training data prepared for experiments: ", list(training_data.keys())
         )
         return training_data
 
-    def validate_pattern_scaling_cache(
-            self, cache_file, model_name, scenario="aer"):
+    def validate_pattern_scaling_cache(self, cache_file, model_name, scenario="aer"):
         """
         Validate a cached pattern scaling model file.
 
@@ -1150,8 +1133,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                 # New format: dictionary with model data
                 info["found_name"] = cached_data.get("name", "unknown")
                 if "patternflds" in cached_data:
-                    info["found_fields"] = set(
-                        cached_data["patternflds"].keys())
+                    info["found_fields"] = set(cached_data["patternflds"].keys())
             else:
                 # Old format: try to get attributes from object
                 info["found_name"] = getattr(cached_data, "name", "unknown")

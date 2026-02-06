@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
@@ -260,6 +261,52 @@ def test_year_mean_monthly_xarray():
     assert yearly_data.sizes["lat"] == 3
     assert yearly_data.sizes["lon"] == 3
 
+def test_sort_member_ids_with_unparseable_ids():
+    member_ids = np.array([
+        'r1i1p1f1',     # valid
+        'r10i1p1f1',    # valid
+        'not_a_member', # invalid → triggers float("inf")
+        'r2i1p1f1',     # valid
+    ])
+
+    sorted_ids = cmip6_meteor_data_getter.sort_member_ids_numerically(member_ids)
+
+    # 'not_a_member' should end up at the end
+    assert sorted_ids[-1] == 'not_a_member'
+    # valid IDs should be sorted numerically
+    assert sorted_ids[:-1] == ['r1i1p1f1', 'r2i1p1f1', 'r10i1p1f1']
+
+def test_data_query_empty_branch():
+    flds = ['pr']
+    exps = ['historical']
+
+    # Create dataframe with one member, but mismatch so query returns empty
+    df_dummy = pd.DataFrame({
+        'source_id': ['ModelX'],
+        'experiment_id': ['historical'],
+        'member_id': ['r2i1p1f1'],  # will be sorted first as r2
+        'pr': [0.1]
+    })
+
+    # df_all1: list of list of dataframes (exps x flds)
+    df_all1 = [[df_dummy.copy() for _ in flds] for _ in exps]
+
+    # Introduce a mismatch: first sorted member is r1i1p1f1, but only r2 exists
+    def fake_sort_member_ids_numerically(member_ids):
+        # Force it to return 'r1i1p1f1' first
+        return ['r1i1p1f1'] + list(member_ids)
+
+    # Patch the function used inside
+    original_sort = cmip6_meteor_data_getter.sort_member_ids_numerically
+    cmip6_meteor_data_getter.sort_member_ids_numerically = fake_sort_member_ids_numerically
+
+    try:
+        df_all, mdls = cmip6_meteor_data_getter.initialise_dataframe_and_models(df_all1, flds, exps)
+        # The model should be excluded because sufficient_data becomes False
+        assert 'ModelX' not in mdls
+    finally:
+        # Restore original function
+        cmip6_meteor_data_getter.sort_member_ids_numerically = original_sort
 
 # def test_error_handling_for_invalid_experiments_and_fields():
 #     """Test error handling for invalid experiments and fields to hit lines 585-593."""

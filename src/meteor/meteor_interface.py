@@ -51,7 +51,7 @@ def _get_default_config(variable):
         config["transform_type"] = "gamma"
     else:
         # Generic defaults for other variables
-        config["use_exog"] = "temp_only"
+        config["use_exog"] = "none"
         config["transform"] = False
 
     return config
@@ -159,8 +159,10 @@ class MeteorInterface:
         # good performance by default. Users of the low-level Cmip6MeteorDataGetter
         # can control caching behavior directly.
         self.data_getter = Cmip6MeteorDataGetter(
+            models=[self.model],
             exps=data_getter_kwargs.get("exps", default_exps),
             flds=self.variables,
+            tabids=data_getter_kwargs.get("tabids", None),
             dbe=data_getter_kwargs.get("dbe", default_dbe),
             enable_cache=True,
             cache_handler=self.cache_handler,

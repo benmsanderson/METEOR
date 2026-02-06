@@ -23,7 +23,7 @@ cmip6_to_meteor_exp_remapper = {
 }
 
 
-def sort_member_ids_numerically(member_ids):
+def sort_member_ids_numerically(member_ids: np.ndarray) -> list:
     """
     Sort CMIP6 member IDs numerically by the realization number.
 
@@ -32,7 +32,7 @@ def sort_member_ids_numerically(member_ids):
 
     Parameters
     ----------
-    member_ids : array-like
+    member_ids : np.ndarray
         List of member IDs like ['r1i1p1f1', 'r10i1p1f1', 'r2i1p1f1']
 
     Returns
@@ -46,7 +46,7 @@ def sort_member_ids_numerically(member_ids):
     ['r1i1p1f1', 'r2i1p1f1', 'r10i1p1f1']
     """
 
-    def extract_realization_number(member_id):
+    def extract_realization_number(member_id: str) -> int | float:
         """Extract the realization number (r value) from member_id."""
         match = re.match(r"r(\d+)i", member_id)
         if match:
@@ -60,9 +60,9 @@ def multiply_along_axis(array_a, array_b, axis):
     """
     Multiply to arrays along a given axis
 
-    Pure infrastructure function to make multiplying along an axis that is not
-    the last axis along two np.ndarray objects without encountering
-    broadcasting issues
+    Pure infrastructure function to make multiplying along an axis
+    that is not the last axis along two np.ndarray objects without
+    encountering broadcasting issues
 
     Parameters
     ----------
@@ -76,13 +76,13 @@ def multiply_along_axis(array_a, array_b, axis):
     Returns
     -------
     np.ndarray
-        Array/matrix with result of multiplication, and the multiplication axis
-        back where it was
+        Array/matrix with result of multiplication, and the
+        multiplication axis back where it was
     """
     return np.swapaxes(np.swapaxes(array_a, axis, -1) * array_b, -1, axis)
 
 
-def year_mean_monthly(monthly_data):
+def year_mean_monthly(monthly_data: np.ndarray) -> np.ndarray:
     """
     Calculate yearmean from monthly data
 
@@ -93,7 +93,7 @@ def year_mean_monthly(monthly_data):
     Parameters
     ----------
     monthly_data : np.ndarray
-        1 or multiple dimensional np.ndarray with the first dimension being
+        multiple dimensional np.ndarray with the first dimension being
         time and on monthly resolutions running from January to December
         for each year
 
@@ -125,7 +125,7 @@ def year_mean_monthly(monthly_data):
     )
 
 
-def year_mean_monthly_xarray(monthly_xarray):
+def year_mean_monthly_xarray(monthly_xarray: xr.DataArray) -> xr.DataArray:
     """
     Calculate yearmean from monthly xarray dataarray
 
@@ -134,13 +134,13 @@ def year_mean_monthly_xarray(monthly_xarray):
 
     Parameters
     ----------
-    monthly_xarray : xr.dataArray
+    monthly_xarray : xr.DataArray
         with the first dimension being time followed by lat and lon and on
         monthly resolutions running from January to December for each year
 
     Returns
     -------
-    xr.dataArray
+    xr.DataArray
         with same dimensions as before but with the time dimension 12 times
         fewer entries, corresponding to yearly values, this coordinate now
         also no longer has an associated coordinate as it has changed
@@ -159,7 +159,9 @@ def year_mean_monthly_xarray(monthly_xarray):
     )
 
 
-def make_xarray_with_correct_dims(fld_names, fld_values):
+def make_xarray_with_correct_dims(
+    fld_names: list, fld_values: list
+) -> xr.Dataset:
     """
     Make a dataset for a list of dataArrays over the same dimensions
 
@@ -177,7 +179,7 @@ def make_xarray_with_correct_dims(fld_names, fld_values):
     xr.Dataset
     """
     ds = xr.Dataset(
-        data_vars={fld_names[i]: fld_values[i] for i in range(len(fld_names))},
+        data_vars={fld_names[i]: fld_values[i] for i in range(len(fld_names))}
     )
     return ds
 
@@ -247,7 +249,7 @@ def initialise_dataframe_and_models(
                     )
                 else:
                     hmb = []
-                tmp = df_all1[i][j].query("source_id=='" + mdl + "'")
+                tmp = df_all1[i][j].query(f"source_id=='{mdl}'")
                 mmbs = tmp.member_id.unique()
                 if len(mmbs) > 0:
                     # Sort member IDs numerically to prefer r1 over r10, r2,
@@ -708,26 +710,19 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         if self.enable_cache:
             cached_data = self.cache_handler.load_cmip6_cached_data(
                 "get_single_var_mod_data_yearmean",
-                exp,
-                fld,
-                model,
-                expected_type="DataArray",
+                exp, fld, model, expected_type="DataArray",
             )
             if cached_data is not None:
                 logging.info(
                     "✓ Using cached yearly data for %s/%s/%s",
-                    model,
-                    exp,
-                    fld,
+                    model, exp, fld
                 )
                 return cached_data
 
         # Get monthly data (which may be cached) and compute yearly mean
         logging.info(
             "Computing yearly mean from monthly data for %s/%s/%s...",
-            model,
-            exp,
-            fld,
+            model, exp, fld,
         )
         var_monthly = self.get_single_var_mod_data_monthly(exp, fld, model)
         if var_monthly is None:
@@ -775,31 +770,27 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
 
         Returns
         -------
-        xr.DataArrray
-            Monthly data with time dimension preserved and including an extra
-            flat ens dimension
+        xr.DataArray
+            Monthly data with time dimension renamed to "month"
+            including an extra flat ens dimension
         """
         # Try to load from cache first if caching is enabled
         if self.enable_cache:
             cached_data = self.cache_handler.load_cmip6_cached_data(
                 "get_single_var_mod_data_monthly",
-                exp,
-                fld,
-                model,
-                expected_type="DataArray",
+                exp, fld, model, expected_type="DataArray",
             )
             if cached_data is not None:
                 logging.info(
-                    "✓ Using cached monthly data for %s/%s/%s", model, exp, fld
+                    "✓ Using cached monthly data for %s/%s/%s",
+                    model, exp, fld
                 )
                 return cached_data
 
         # Original logic
         logging.info(
             "Downloading data from Google Cloud for %s/%s/%s...",
-            model,
-            exp,
-            fld,
+            model, exp, fld,
         )
         ds = self.get_single_var_mod_data(exp, fld, model)
         if ds is None:
@@ -866,10 +857,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         if self.enable_cache:
             cached_data = self.cache_handler.load_cmip6_cached_data(
                 "make_meteor_training_data",
-                exp,
-                model,
-                exp_mapper,
-                monthly=monthly,
+                exp, model, exp_mapper, monthly=monthly
             )
             if cached_data is not None:
                 return cached_data
@@ -950,10 +938,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         if self.enable_cache:
             cached_data = self.cache_handler.load_cmip6_cached_data(
                 "make_meteor_training_data_composite",
-                exps,
-                model,
-                overlap,
-                monthly=monthly,
+                exps, model, overlap, monthly=monthly
             )
             if cached_data is not None:
                 return cached_data
@@ -968,10 +953,12 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                 if value is None:
                     if monthly:
                         value = self.get_single_var_mod_data_monthly(
-                            exp, fld, model)
+                            exp, fld, model
+                        )
                     else:
                         value = self.get_single_var_mod_data_yearmean(
-                            exp, fld, model)
+                            exp, fld, model
+                        )
                 else:
                     if monthly:
                         next_dataset = self.get_single_var_mod_data_monthly(
@@ -1005,14 +992,8 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
                                 cut = overlap[exp] * (
                                     12 if monthly else 1
                                 )  # Convert years to months if needed
-
                             value = value.sel(
-                                **{
-                                    time_dim: slice(
-                                        0, len(
-                                            value[time_dim].values) - cut - 1
-                                    )
-                                }
+                                **{time_dim: slice(0, len(value[time_dim].values) - cut - 1)}
                             )
                     start_time = value[time_dim].values[-1] + 1
 
@@ -1087,9 +1068,9 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         training_data["sulxanom"] = training_data[scenario_train]
 
         print(
-            f"   ✅ Training data prepared for experiments: {
-                list(
-                    training_data.keys())}")
+            "   ✅ Training data prepared for experiments: ",
+            list(training_data.keys())
+        )
         return training_data
 
     def validate_pattern_scaling_cache(

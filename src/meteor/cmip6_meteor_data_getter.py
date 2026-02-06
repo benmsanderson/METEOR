@@ -600,6 +600,17 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             True if the model has full data for at least on ensemble member
             False otherwise
         """
+        if self.filter_models is not None and model not in self.filter_models:
+            logging.warning(
+                "Model %s was not among the requested models provided in "
+                "%s initialisation. Available ones are %s.\n"
+                "Reinitialise the object to include "
+                "this %s if you want to use it.",
+                model,
+                self.__class__.__name__,
+                self.filter_models,
+                model,
+            )
         if model in self.models:
             return True
         return False

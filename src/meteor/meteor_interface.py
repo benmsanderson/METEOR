@@ -51,7 +51,7 @@ def _get_default_config(variable):
         config["transform_type"] = "gamma"
     else:
         # Generic defaults for other variables
-        config["use_exog"] = "temp_only"
+        config["use_exog"] = "none"
         config["transform"] = False
 
     return config

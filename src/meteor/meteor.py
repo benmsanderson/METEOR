@@ -10,8 +10,9 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from . import pattern_logic_lib, scm_forcer_engine
+from . import pattern_logic_lib
 from .geo_data_utils import global_mean
+from .scm_engine_tools.abstract_scm_forcer_engine import SCMFacade
 
 LOGGER = logging.getLogger(__name__)
 
@@ -227,6 +228,7 @@ class MeteorPatternScaling:
         ssp_input=None,
         anom_timescales=None,
         cache_dir=None,
+        scm_forcer_engine_dict=None,
     ):  # pylint: disable=too-many-arguments, too-many-positional-arguments
         """
         Initialise Pattern Scaling object
@@ -309,9 +311,8 @@ class MeteorPatternScaling:
                 "exp_list is required when training a new model "
                 "(not loading from cache)"
             )
-
-        sefps = scm_forcer_engine.ScmEngineForPatternScaling(None)
-        scaling = sefps.run_to_get_scaling(exp_list)
+        self.scm_facade = SCMFacade(scm_forcer_engine_dict)
+        scaling = self.scm_facade.run_to_get_scaling(exp_list)
         self.exp_forc_dict = {exp: scaling[i] for i, exp in enumerate(exp_list)}
         self.dacanom = read_training_data(
             get_training_file_from_exp, exp_list, from_file=from_file
@@ -404,7 +405,7 @@ class MeteorPatternScaling:
             )
         exp = anom_exps[0]
         exp_index = self.exp_list.index(exp)
-        sefps = scm_forcer_engine.ScmEngineForPatternScaling(ssp_input)
+        sefps = scm_engine_factory(self.scm_forcer_engine_type, ssp_input)
         start_index = sefps.cfg.emstart - sefps.cfg.nystart
         em_len = sefps.cfg.nyend - sefps.cfg.emstart + 1
         forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
@@ -526,7 +527,7 @@ class MeteorPatternScaling:
             "concentrations_data": concentrations_data,
             "emissions_data": emissions_data,
         }
-        sefps = scm_forcer_engine.ScmEngineForPatternScaling(cfg)
+        sefps = scm_engine_factory(self.scm_forcer_engine_type, cfg)
         forcing_series = sefps.run_and_return_per_forcer_results(self.exp_list)
 
         predicted = self._predict_combined_experiment_from_forcer_series(

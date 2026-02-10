@@ -150,7 +150,7 @@ def run_single_experiment(pamset, input_h):
     return ce_handler.forc
 
 
-class ScmEngineForPatternScaling:
+class CiceroscmEngineForPatternScaling:
     """
     Class to support handling scm-scaling and forcing
     timeseries creation for a pattern scaling object
@@ -178,7 +178,7 @@ class ScmEngineForPatternScaling:
             cfg = {}
 
         # Validate and set defaults for all config parameters
-        cfg = _validate_and_set_defaults(cfg)
+        exp_cfg, pam_cfg = _validate_and_set_defaults(cfg)
 
         # Load default data files if not provided
         if "concentrations_data" not in cfg:

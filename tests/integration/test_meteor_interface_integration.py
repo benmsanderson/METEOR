@@ -18,7 +18,15 @@ def test_meteor_interface_integration_pr(test_data_dir):
     # Train the model using the simple dataset
     meteor.train(
         variable_configs={
-            "pr": {"n_modes_noise": 4, "lag_order": 1, "n_modes_pattern": 3}
+            "pr": {
+                "n_modes_noise": 4,
+                "lag_order": 1,
+                "n_modes_pattern": 3,
+                "use_exog": "none",
+                "use_picontrol_baseline": True,
+                "transform": True,
+                "transform_type": "gamma",
+            }
         },
         auto=False,
         verbose=False,

@@ -161,7 +161,9 @@ class MeteorInterface:
         # can control caching behavior directly.
         self.data_getter = Cmip6MeteorDataGetter(
             exps=data_getter_kwargs.get("exps", default_exps),
-            flds=self.variables,
+            flds=list(
+                set(self.variables).union({"tas"})
+            ),  # Always include 'tas' for noise model exog
             dbe=data_getter_kwargs.get("dbe", default_dbe),
             enable_cache=True,
             cache_handler=self.cache_handler,
@@ -228,6 +230,12 @@ class MeteorInterface:
             print(f"Training METEOR emulator for {self.model}")
             print(f"Variables: {', '.join(self.variables)}")
             print("=" * 60)
+
+        if "tas" not in self.variables:
+            if verbose:  # pragma: no cover
+                print("\n🔧 Training tas pattern scaling only")
+            config = _get_default_config("tas")
+            self._train_pattern_scaling("tas", config, verbose=verbose)
 
         for variable in self.variables:
             if verbose:  # pragma: no cover
@@ -769,7 +777,6 @@ class MeteorInterface:
                 em_data,
                 conc_data,
                 temp_scaling_ts,
-                verbose=verbose,
             )
 
         # Convert to monthly
@@ -803,6 +810,7 @@ class MeteorInterface:
 
         return monthly_prediction_sliced, monthly_warming_sliced, em_data, conc_data
 
+    # TODO - possibly add verbosity?
     def _compute_timeseries_scaling(
         self,
         variable,
@@ -811,7 +819,6 @@ class MeteorInterface:
         em_data,
         conc_data,
         temp_scaling_ts,
-        verbose=True,
     ):
         """
         Compute scaling factor for time series outputs based on pattern scaling.

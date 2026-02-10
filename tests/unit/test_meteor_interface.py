@@ -30,7 +30,9 @@ def interface_factory():
         mock_getter = MagicMock()
         mock_getter_class.return_value = mock_getter
 
-        def _make_interface(model="TestModel", variables=("tas",), cache_dir="/tmp/test"):
+        def _make_interface(
+            model="TestModel", variables=("tas",), cache_dir="/tmp/test"
+        ):
             interface = MeteorInterface(
                 model=model, variables=list(variables), cache_dir=cache_dir
             )

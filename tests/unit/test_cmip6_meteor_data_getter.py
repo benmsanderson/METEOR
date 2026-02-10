@@ -75,7 +75,9 @@ def _make_banana_getter(**kwargs):
 
 
 def _make_empty_catalog_cache(tmp_path):
-    cache_handler = CacheHandler(cache_dir=str(tmp_path / "empty-cache"), purpose="cmip6")
+    cache_handler = CacheHandler(
+        cache_dir=str(tmp_path / "empty-cache"), purpose="cmip6"
+    )
     empty_df = pd.DataFrame(
         columns=[
             "activity_id",
@@ -533,9 +535,7 @@ def test_get_single_var_mod_data_yearmean_cache_hit(light_cache_handler, caplog)
     )
 
     caplog.set_level("INFO")
-    result = data_getter.get_single_var_mod_data_yearmean(
-        "piControl", "tas", "CanESM5"
-    )
+    result = data_getter.get_single_var_mod_data_yearmean("piControl", "tas", "CanESM5")
     assert isinstance(result, xr.DataArray)
     assert "Using cached yearly data" in caplog.text
 
@@ -572,9 +572,7 @@ def test_get_single_var_mod_data_yearmean_saves_cache(light_cache_handler):
     data_getter.enable_cache = True
     data_getter.get_single_var_mod_data_monthly = lambda *_args, **_kwargs: monthly
 
-    result = data_getter.get_single_var_mod_data_yearmean(
-        "piControl", "tas", "CanESM5"
-    )
+    result = data_getter.get_single_var_mod_data_yearmean("piControl", "tas", "CanESM5")
     assert result is not None
     assert cache.saved is True
 
@@ -589,9 +587,8 @@ def test_get_single_var_mod_data_monthly_none(light_cache_handler):
     data_getter.get_single_var_mod_data = lambda *_args, **_kwargs: None
 
     assert (
-        data_getter.get_single_var_mod_data_monthly(
-            "piControl", "tas", "CanESM5"
-        ) is None
+        data_getter.get_single_var_mod_data_monthly("piControl", "tas", "CanESM5")
+        is None
     )
 
 
@@ -617,9 +614,7 @@ def test_get_single_var_mod_data_monthly_renames_lat_lon(light_cache_handler):
     )
     data_getter.get_single_var_mod_data = lambda *_args, **_kwargs: ds
 
-    monthly = data_getter.get_single_var_mod_data_monthly(
-        "piControl", "tas", "CanESM5"
-    )
+    monthly = data_getter.get_single_var_mod_data_monthly("piControl", "tas", "CanESM5")
     assert "lat" in monthly.dims
     assert "lon" in monthly.dims
     assert "latitude" not in monthly.dims
@@ -647,9 +642,7 @@ def test_get_single_var_mod_data_monthly_saves_cache(light_cache_handler):
     data_getter.enable_cache = True
     data_getter.get_single_var_mod_data = lambda *_args, **_kwargs: ds
 
-    result = data_getter.get_single_var_mod_data_monthly(
-        "piControl", "tas", "CanESM5"
-    )
+    result = data_getter.get_single_var_mod_data_monthly("piControl", "tas", "CanESM5")
     assert result is not None
     assert cache.saved is True
 
@@ -667,9 +660,7 @@ def test_make_meteor_training_data_cache_hit(light_cache_handler):
     assert isinstance(result, xr.Dataset)
 
 
-def test_make_meteor_training_data_default_exp_mapper_monthly(
-    light_cache_handler
-):
+def test_make_meteor_training_data_default_exp_mapper_monthly(light_cache_handler):
     data_getter = _make_light_cache_getter(
         light_cache_handler,
         flds=["tas"],
@@ -717,9 +708,7 @@ def test_make_meteor_training_data_monthly_exp_in_mapper(light_cache_handler):
     assert "tas" in result.data_vars
 
 
-def test_make_meteor_training_data_monthly_exp_not_in_mapper(
-    light_cache_handler
-):
+def test_make_meteor_training_data_monthly_exp_not_in_mapper(light_cache_handler):
     data_getter = _make_light_cache_getter(
         light_cache_handler,
         flds=["tas"],
@@ -778,10 +767,7 @@ def test_caching(tmp_path):
     # Old format with flds attribute
     old_flds_file = tmp_path / "old_flds.pkl"
     with open(old_flds_file, "wb") as handle:
-        pickle.dump(
-            OldFormatFlds(expected_name, {"tas": None, "pr": None}),
-            handle
-        )
+        pickle.dump(OldFormatFlds(expected_name, {"tas": None, "pr": None}), handle)
     is_valid, cached_model, info = data_getter.validate_pattern_scaling_cache(
         str(old_flds_file), "ModelA"
     )

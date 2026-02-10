@@ -17,6 +17,22 @@ The changes listed in this file are categorised as follows:
 [Unreleased]
 ---------------------
 
+### Added
+
+- (`#60 <https://github.com/benmsanderson/METEOR/pull/60>`_) Added ``models`` and ``tabids`` parameters to ``Cmip6MeteorDataGetter`` to allow filtering by specific climate models and querying different CMIP6 table IDs (defaults to Amon but no longer hardcoded)
+- (`#60 <https://github.com/benmsanderson/METEOR/pull/60>`_) Added type hints to function signatures in ``cmip6_meteor_data_getter.py`` and ``meteor_interface.py``
+- (`#60 <https://github.com/benmsanderson/METEOR/pull/60>`_) Added comprehensive test coverage for new functionality and some old missing tests in ``cmip6_meteor_data_getter.py``
+
+### Changed
+
+- (`#60 <https://github.com/benmsanderson/METEOR/pull/60>`_) Improved docstrings and error messages throughout ``cmip6_meteor_data_getter.py`` for better clarity and detailed information about missing data
+- (`#60 <https://github.com/benmsanderson/METEOR/pull/60>`_) Refactored ``_set_fld_exps_dbe`` to ``_set_models_flds_tabids_exps_dbe`` to support new model and table ID filtering capabilities
+
+### Fixed
+
+- (`#60 <https://github.com/benmsanderson/METEOR/pull/60>`_) Fixed default behavior for noise modelling - changed ``use_exog`` from ``"temp_only"`` to ``"none"`` for non-temperature/precipitation variables to avoid unintended use of temperature as an exogenous variable in noise models for other variables
+
+
 [Version 1.6.0]
 -----------------------------
 

@@ -1,5 +1,8 @@
 import os
 
+import numpy as np
+import xarray as xr
+
 from meteor.ensemble_output import EnsembleOutput, VariableOutput
 from meteor.meteor_interface import MeteorInterface
 
@@ -57,6 +60,28 @@ def test_meteor_interface_integration_pr(test_data_dir):
     # assert ensemble.pr.sizes["lat"] == 5
     # assert ensemble.pr.sizes["ensemble"] == 10
     # assert ensemble.pr.sizes["time"] == 102  # 2000 to 2100 inclusive
+    # temp_ts_mock = xr.DataArray(
+    #     data=np.linspace(0, 4, 351),  # Mock temperature time series
+    #     dims=["year"],
+    #     coords={"year": np.arange(1750, 2101)},  # Years from 1750 to 2100
+    # )
+
+    # ensemble_scaled = meteor.generate_ensemble_outputs(
+    #     scenario="ssp245",
+    #     start_year=2015,
+    #     end_year=2035,
+    #     n_realizations=2,
+    #     timeseries=["global", "regional:EAS"],
+    #     gridded={"annual": list(range(2020, 2026))},
+    #     temp_scaling_ts = temp_ts_mock,
+    # )
+    # assert isinstance(ensemble_scaled, EnsembleOutput)
+    # assert ensemble_scaled.variables is not None
+    # assert ensemble.metadata["scenario"] == "ssp245"
+    # assert ensemble.metadata["n_realizations"] == 10
+    # assert ensemble.metadata["model"] == "CanESM5"
+    # assert ensemble.metadata["year_range"] == "2015-2035"
+    # assert isinstance(ensemble.variables["pr"], VariableOutput)
 
 
 def test_meteor_interface_integration_tas(test_data_dir):
@@ -114,3 +139,25 @@ def test_meteor_interface_integration_tas(test_data_dir):
     # assert ensemble.tas.sizes["lat"] == 5
     # assert ensemble.tas.sizes["ensemble"] == 10
     # assert ensemble.tas.sizes["time"] == 102  # 2000 to 2100 inclusive
+    temp_ts_mock = xr.DataArray(
+        data=np.linspace(0, 4, 351),  # Mock temperature time series
+        dims=["year"],
+        coords={"year": np.arange(1750, 2101)},  # Years from 1750 to 2100
+    )
+
+    ensemble_scaled = meteor.generate_ensemble_outputs(
+        scenario="ssp245",
+        start_year=2015,
+        end_year=2035,
+        n_realizations=2,
+        timeseries=["global", "regional:EAS"],
+        gridded={"annual": list(range(2020, 2026))},
+        temp_scaling_ts=temp_ts_mock,
+    )
+    assert isinstance(ensemble_scaled, EnsembleOutput)
+    assert ensemble_scaled.variables is not None
+    assert ensemble.metadata["scenario"] == "ssp245"
+    assert ensemble.metadata["n_realizations"] == 10
+    assert ensemble.metadata["model"] == "CanESM5"
+    assert ensemble.metadata["year_range"] == "2015-2035"
+    assert isinstance(ensemble.variables["tas"], VariableOutput)

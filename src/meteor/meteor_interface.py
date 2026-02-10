@@ -16,6 +16,7 @@ from .ensemble_output import EnsembleOutput, VariableOutput
 from .geo_data_utils import (
     create_region_mask,
     extract_point,
+    get_time_name,
     global_mean,
     regional_mean,
 )
@@ -458,6 +459,7 @@ class MeteorInterface:
         include_noise=True,
         save_to=None,
         custom_regions=None,
+        temp_scaling_ts=None,
         verbose=True,
     ):
         """
@@ -576,6 +578,7 @@ class MeteorInterface:
                     timeseries,
                     custom_regions=custom_regions,
                     include_noise=include_noise,
+                    temp_scaling_ts=temp_scaling_ts,
                     verbose=verbose,
                 )
 
@@ -591,6 +594,7 @@ class MeteorInterface:
                     n_realizations,
                     gridded,
                     include_noise=include_noise,
+                    temp_scaling_ts=temp_scaling_ts,
                     verbose=verbose,
                 )
 
@@ -635,7 +639,13 @@ class MeteorInterface:
         return ensemble
 
     def _get_or_compute_pattern_scaling(
-        self, variable, scenario, start_year, end_year, verbose=True
+        self,
+        variable,
+        scenario,
+        start_year,
+        end_year,
+        verbose=True,
+        temp_scaling_ts=None,
     ):
         """
         Get pattern scaling results from cache or compute if not cached.
@@ -745,16 +755,27 @@ class MeteorInterface:
         )
         annual_prediction = climate_prediction[variable]
 
+        # Determine base year
+        if hasattr(annual_prediction, "year"):
+            base_year = int(annual_prediction.year[0])
+        else:
+            base_year = 1750  # Default assumption
+
+        if temp_scaling_ts is not None:
+            annual_prediction = self._compute_timeseries_scaling(
+                variable,
+                annual_prediction,
+                base_year,
+                em_data,
+                conc_data,
+                temp_scaling_ts,
+                verbose=verbose,
+            )
+
         # Convert to monthly
         full_monthly_prediction = pattern_model.to_monthly(
             annual_prediction, start_year=0
         )
-
-        # Determine base year
-        if hasattr(full_monthly_prediction, "year"):
-            base_year = int(full_monthly_prediction.year[0])
-        else:
-            base_year = 1750  # Default assumption
 
         # Compute global mean for noise model
         full_monthly_warming = global_mean(full_monthly_prediction).values
@@ -782,6 +803,83 @@ class MeteorInterface:
 
         return monthly_prediction_sliced, monthly_warming_sliced, em_data, conc_data
 
+    def _compute_timeseries_scaling(
+        self,
+        variable,
+        annual_prediction,
+        base_year,
+        em_data,
+        conc_data,
+        temp_scaling_ts,
+        verbose=True,
+    ):
+        """
+        Compute scaling factor for time series outputs based on pattern scaling.
+
+        This is used to adjust the noise variability to match the forced response
+        of the pattern scaling prediction for the specific scenario and time range.
+
+        Parameters
+        ----------
+        variable : str
+            Climate variable ('tas', 'pr')
+        scenario : str
+            Scenario name ('ssp245', 'ssp585', etc.)
+        start_year : int
+            Start year for slicing
+        end_year : int
+            End year for slicing (inclusive)
+        temp_scaling_ts : np.array
+            Time series of global mean temperature from pattern scaling prediction
+        verbose : bool
+            Print status messages
+        Returns
+        -------
+        np.ndarray
+            Scaling factor to apply to noise variability
+        """
+        # TODO do some cutting to correct values to match the time range of the temp_scaling_ts if needed
+        if hasattr(annual_prediction, "year"):
+            annual_prediction_base = annual_prediction.sel(year=base_year)
+        else:
+            annual_prediction_base = annual_prediction[
+                0
+            ]  # Assuming first value corresponds to start_year
+        annual_prediction_anomaly = annual_prediction - annual_prediction_base
+        temperature_input_base = temp_scaling_ts.sel(
+            year=base_year
+        )  # Assuming first value corresponds to start_year
+        if variable == "tas":
+            annual_temp_prediction_gm_anomaly = global_mean(annual_prediction_anomaly)
+        else:
+            annual_temp_prediction = self.pattern_models[
+                "tas"
+            ].predict_from_combined_experiment(em_data, conc_data, ["tas"])["tas"]
+            if hasattr(annual_temp_prediction, "year"):
+                annual_temp_prediction_base = annual_temp_prediction.sel(year=base_year)
+            else:
+                annual_temp_prediction_base = annual_temp_prediction[
+                    0
+                ]  # Assuming first value corresponds to start_year
+            annual_temp_prediction_gm_anomaly = global_mean(
+                annual_temp_prediction - annual_temp_prediction_base
+            )
+        temperature_input_anomaly = temp_scaling_ts - temperature_input_base
+
+        temp_scaling = np.where(
+            annual_temp_prediction_gm_anomaly.values != 0,
+            temperature_input_anomaly.values / annual_temp_prediction_gm_anomaly.values,
+            1.0,
+        )
+        print(temp_scaling.shape)
+        temp_scaling = xr.DataArray(
+            temp_scaling,
+            dims=annual_prediction_anomaly[
+                get_time_name(annual_prediction_anomaly)
+            ].dims,
+        )
+        return annual_prediction_base + annual_prediction_anomaly * temp_scaling
+
     def _generate_timeseries(
         self,
         variable,
@@ -792,6 +890,7 @@ class MeteorInterface:
         aggregations,
         custom_regions=None,
         include_noise=True,
+        temp_scaling_ts=None,
         verbose=True,
     ):
         """
@@ -836,7 +935,12 @@ class MeteorInterface:
 
         # Get pattern scaling results
         pattern_result = self._get_or_compute_pattern_scaling(
-            variable, scenario, start_year, end_year, verbose
+            variable,
+            scenario,
+            start_year,
+            end_year,
+            temp_scaling_ts=temp_scaling_ts,
+            verbose=verbose,
         )
         monthly_prediction = pattern_result[0]
         monthly_warming = pattern_result[1]
@@ -1175,6 +1279,7 @@ class MeteorInterface:
         n_realizations,
         gridded_spec,
         include_noise=True,
+        temp_scaling_ts=None,
         verbose=True,
     ):
         """
@@ -1197,7 +1302,12 @@ class MeteorInterface:
         # Get pattern scaling results (from cache or compute)
         pattern_result = (
             self._get_or_compute_pattern_scaling(  # pylint: disable=unused-variable
-                variable, scenario, start_year, end_year, verbose
+                variable,
+                scenario,
+                start_year,
+                end_year,
+                temp_scaling_ts=temp_scaling_ts,
+                verbose=verbose,
             )
         )
         monthly_prediction = pattern_result[0]

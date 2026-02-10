@@ -16,18 +16,37 @@ from meteor.ensemble_output import EnsembleOutput
 from meteor.meteor_interface import MeteorInterface, _get_default_config
 
 
+def _set_trained(interface, variables):
+    for var in variables:
+        interface._is_trained[var] = True
+        interface.pattern_models[var] = MagicMock()
+        interface.noise_models[var] = MagicMock()
+
+
 @pytest.fixture
-def mock_interface():
+def interface_factory():
+    """Factory for MeteorInterface instances with mocked data getter."""
+    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter") as mock_getter_class:
+        mock_getter = MagicMock()
+        mock_getter_class.return_value = mock_getter
+
+        def _make_interface(model="TestModel", variables=("tas",), cache_dir="/tmp/test"):
+            interface = MeteorInterface(
+                model=model, variables=list(variables), cache_dir=cache_dir
+            )
+            return interface, mock_getter
+
+        yield _make_interface
+
+
+@pytest.fixture
+def mock_interface(interface_factory):
     """Create MeteorInterface with mocked data getter."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
-        interface = MeteorInterface(
-            model="TestModel", variables=["tas", "pr"], cache_dir="/tmp/test_cache"
-        )
-        # Mock the pattern models and noise models to avoid training
-        interface.pattern_models = {"tas": MagicMock(), "pr": MagicMock()}
-        interface.noise_models = {"tas": MagicMock(), "pr": MagicMock()}
-        interface._is_trained = {"tas": True, "pr": True}
-        yield interface
+    interface, _ = interface_factory(
+        model="TestModel", variables=("tas", "pr"), cache_dir="/tmp/test_cache"
+    )
+    _set_trained(interface, ["tas", "pr"])
+    yield interface
 
 
 def test_get_default_config():
@@ -249,115 +268,92 @@ def test_pr_not_converted_to_anomalies(mock_interface):
     ), "Scenario data should be loaded"
 
 
-def test_train_initializes_state_tracking():
+def test_train_initializes_state_tracking(interface_factory):
     """Test that MeteorInterface initializes training state tracking."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter") as mock_getter_class:
-        mock_getter = MagicMock()
-        mock_getter_class.return_value = mock_getter
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
 
-        interface = MeteorInterface(
-            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
-        )
+    # Check that training state is initialized
+    assert hasattr(interface, "_is_trained")
+    assert "tas" in interface._is_trained
+    assert not interface._is_trained["tas"]
 
-        # Check that training state is initialized
-        assert hasattr(interface, "_is_trained")
-        assert "tas" in interface._is_trained
-        assert not interface._is_trained["tas"]
-
-        # Check that model storage is initialized
-        assert hasattr(interface, "pattern_models")
-        assert hasattr(interface, "noise_models")
-        assert isinstance(interface.pattern_models, dict)
-        assert isinstance(interface.noise_models, dict)
+    # Check that model storage is initialized
+    assert hasattr(interface, "pattern_models")
+    assert hasattr(interface, "noise_models")
+    assert isinstance(interface.pattern_models, dict)
+    assert isinstance(interface.noise_models, dict)
 
 
-def test_train_tracks_multiple_variables():
+def test_train_tracks_multiple_variables(interface_factory):
     """Test that training state is tracked per-variable."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter") as mock_getter_class:
-        mock_getter = MagicMock()
-        mock_getter_class.return_value = mock_getter
+    interface, _ = interface_factory(model="TestModel", variables=("tas", "pr"))
 
-        interface = MeteorInterface(
-            model="TestModel", variables=["tas", "pr"], cache_dir="/tmp/test"
-        )
+    # Initially, no variables are trained
+    assert not interface._is_trained["tas"]
+    assert not interface._is_trained["pr"]
 
-        # Initially, no variables are trained
-        assert not interface._is_trained["tas"]
-        assert not interface._is_trained["pr"]
+    # Simulate training tas only (actual training is integration test)
+    interface._is_trained["tas"] = True
+    interface.pattern_models["tas"] = MagicMock()
+    interface.noise_models["tas"] = MagicMock()
 
-        # Simulate training tas only (actual training is integration test)
-        interface._is_trained["tas"] = True
-        interface.pattern_models["tas"] = MagicMock()
-        interface.noise_models["tas"] = MagicMock()
-
-        # Check that tas is trained but pr is not
-        assert interface._is_trained["tas"]
-        assert not interface._is_trained["pr"]
-        assert "tas" in interface.pattern_models
-        assert "pr" not in interface.pattern_models
+    # Check that tas is trained but pr is not
+    assert interface._is_trained["tas"]
+    assert not interface._is_trained["pr"]
+    assert "tas" in interface.pattern_models
+    assert "pr" not in interface.pattern_models
 
 
-def test_training_config_storage():
+def test_training_config_storage(interface_factory):
     """Test that training configuration is stored."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter") as mock_getter_class:
-        mock_getter = MagicMock()
-        mock_getter_class.return_value = mock_getter
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
 
-        interface = MeteorInterface(
-            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
-        )
+    # Check that training config dictionary exists
+    assert hasattr(interface, "_training_config")
+    assert isinstance(interface._training_config, dict)
 
-        # Check that training config dictionary exists
-        assert hasattr(interface, "_training_config")
-        assert isinstance(interface._training_config, dict)
+    # Simulate setting a config (actual training is integration test)
+    interface._training_config["tas"] = {
+        "n_modes_pattern": 10,
+        "n_modes_noise": 40,
+        "training_scenario": "ssp245",
+    }
 
-        # Simulate setting a config (actual training is integration test)
-        interface._training_config["tas"] = {
-            "n_modes_pattern": 10,
-            "n_modes_noise": 40,
-            "training_scenario": "ssp245",
-        }
-
-        # Verify it's stored
-        assert "tas" in interface._training_config
-        assert interface._training_config["tas"]["n_modes_pattern"] == 10
-        assert interface._training_config["tas"]["n_modes_noise"] == 40
+    # Verify it's stored
+    assert "tas" in interface._training_config
+    assert interface._training_config["tas"]["n_modes_pattern"] == 10
+    assert interface._training_config["tas"]["n_modes_noise"] == 40
 
 
-def test_train_multiple_variables():
+def test_train_multiple_variables(interface_factory):
     """Test training multiple variables."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter") as mock_getter_class:
-        mock_getter = MagicMock()
-        mock_getter_class.return_value = mock_getter
-        mock_getter.validate_pattern_scaling_cache.return_value = (False, None, {})
-        mock_getter.validate_noise_model_cache.return_value = (False, None, {})
+    interface, mock_getter = interface_factory(
+        model="TestModel", variables=("tas", "pr")
+    )
+    mock_getter.validate_pattern_scaling_cache.return_value = (False, None, {})
+    mock_getter.validate_noise_model_cache.return_value = (False, None, {})
+    assert interface is not None
 
 
-def test_model_dictionaries_are_mutable():
+def test_model_dictionaries_are_mutable(interface_factory):
     """Test that model storage dictionaries can be populated."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter") as mock_getter_class:
-        mock_getter = MagicMock()
-        mock_getter_class.return_value = mock_getter
+    interface, _ = interface_factory(model="TestModel", variables=("tas", "pr"))
 
-        interface = MeteorInterface(
-            model="TestModel", variables=["tas", "pr"], cache_dir="/tmp/test"
-        )
+    # Initially empty
+    assert len(interface.pattern_models) == 0
+    assert len(interface.noise_models) == 0
 
-        # Initially empty
-        assert len(interface.pattern_models) == 0
-        assert len(interface.noise_models) == 0
+    # Simulate populating after training (actual training is integration test)
+    interface.pattern_models["tas"] = MagicMock()
+    interface.pattern_models["pr"] = MagicMock()
+    interface.noise_models["tas"] = MagicMock()
+    interface.noise_models["pr"] = MagicMock()
 
-        # Simulate populating after training (actual training is integration test)
-        interface.pattern_models["tas"] = MagicMock()
-        interface.pattern_models["pr"] = MagicMock()
-        interface.noise_models["tas"] = MagicMock()
-        interface.noise_models["pr"] = MagicMock()
-
-        # Verify they're populated
-        assert len(interface.pattern_models) == 2
-        assert len(interface.noise_models) == 2
-        assert "tas" in interface.pattern_models
-        assert "pr" in interface.pattern_models
+    # Verify they're populated
+    assert len(interface.pattern_models) == 2
+    assert len(interface.noise_models) == 2
+    assert "tas" in interface.pattern_models
+    assert "pr" in interface.pattern_models
 
 
 def test_cache():
@@ -427,331 +423,293 @@ def test_cache():
         assert len(noise_kwargs["custom_global_temp"]) == 1200
 
 
-def test_generate_requires_training():
+def test_generate_requires_training(interface_factory):
     """Test that generate_ensemble_outputs() raises error if not trained."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
-        interface = MeteorInterface(
-            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
-        )
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
 
-        # Try to generate without training
-        with pytest.raises(RuntimeError, match="not trained"):
-            interface.generate_ensemble_outputs(
-                scenario="ssp245",
-                start_year=2020,
-                end_year=2050,
-                n_realizations=10,
-                timeseries=["global"],
-            )
-        empty_impacts = interface._apply_impacts(
-            np.array([290.0]), "tas", {"unknown_impact": 5}
-        )
-        assert isinstance(empty_impacts, dict)
-        assert len(empty_impacts) == 0
-
-
-def test_generate_with_noise_false_forces_single_realization():
-    """Test that include_noise=False forces n_realizations=1."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
-        interface = MeteorInterface(
-            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
-        )
-
-        # Mark as trained
-        interface._is_trained["tas"] = True
-        interface.pattern_models["tas"] = MagicMock()
-        interface.noise_models["tas"] = MagicMock()
-
-        # Mock the internal generation method to capture arguments
-        call_args = {}
-
-        def capture_args(*args, **kwargs):
-            call_args["args"] = args
-            call_args["kwargs"] = kwargs
-            # Return minimal valid structure
-            return {"global": xr.DataArray([290.0])}
-
-        interface._generate_timeseries = capture_args
-
-        # Call generate with include_noise=False but n_realizations=100
+    # Try to generate without training
+    with pytest.raises(RuntimeError, match="not trained"):
         interface.generate_ensemble_outputs(
             scenario="ssp245",
             start_year=2020,
-            end_year=2020,
-            n_realizations=100,
+            end_year=2050,
+            n_realizations=10,
             timeseries=["global"],
-            include_noise=False,
-            verbose=False,
         )
+    empty_impacts = interface._apply_impacts(
+        np.array([290.0]), "tas", {"unknown_impact": 5}
+    )
+    assert isinstance(empty_impacts, dict)
+    assert len(empty_impacts) == 0
 
-        # Should have forced n_realizations to 1
-        # _generate_timeseries(variable, scenario, start_year, end_year, n_realizations, aggregations, ...)
-        assert (
-            call_args["args"][4] == 1
-        )  # n_realizations is 5th positional arg (index 4)
+
+def test_generate_with_noise_false_forces_single_realization(interface_factory):
+    """Test that include_noise=False forces n_realizations=1."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+
+    # Mark as trained
+    _set_trained(interface, ["tas"])
+
+    # Mock the internal generation method to capture arguments
+    call_args = {}
+
+    def capture_args(*args, **kwargs):
+        call_args["args"] = args
+        call_args["kwargs"] = kwargs
+        # Return minimal valid structure
+        return {"global": xr.DataArray([290.0])}
+
+    interface._generate_timeseries = capture_args
+
+    # Call generate with include_noise=False but n_realizations=100
+    interface.generate_ensemble_outputs(
+        scenario="ssp245",
+        start_year=2020,
+        end_year=2020,
+        n_realizations=100,
+        timeseries=["global"],
+        include_noise=False,
+        verbose=False,
+    )
+
+    # Should have forced n_realizations to 1
+    # _generate_timeseries(variable, scenario, start_year, end_year, n_realizations, aggregations, ...)
+    assert call_args["args"][4] == 1
 
 
-def test_generate_returns_ensemble_output():
+def test_generate_returns_ensemble_output(interface_factory):
     """Test that generate_ensemble_outputs() returns EnsembleOutput container."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
-        interface = MeteorInterface(
-            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
-        )
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
 
-        interface._is_trained["tas"] = True
-        interface.pattern_models["tas"] = MagicMock()
-        interface.noise_models["tas"] = MagicMock()
+    _set_trained(interface, ["tas"])
 
-        # Mock generation to return minimal data
-        interface._generate_timeseries = MagicMock(
-            return_value={"global": xr.DataArray([290.0], dims=["time"])}
-        )
+    # Mock generation to return minimal data
+    interface._generate_timeseries = MagicMock(
+        return_value={"global": xr.DataArray([290.0], dims=["time"])}
+    )
 
-        result = interface.generate_ensemble_outputs(
-            scenario="ssp245",
-            start_year=2020,
-            end_year=2020,
-            n_realizations=1,
-            timeseries=["global"],
-            verbose=False,
-        )
+    result = interface.generate_ensemble_outputs(
+        scenario="ssp245",
+        start_year=2020,
+        end_year=2020,
+        n_realizations=1,
+        timeseries=["global"],
+        verbose=False,
+    )
 
-        # Should return EnsembleOutput
-
-        assert isinstance(result, EnsembleOutput)
-        assert "tas" in result
+    # Should return EnsembleOutput
+    assert isinstance(result, EnsembleOutput)
+    assert "tas" in result
 
 
-def test_generate_populates_timeseries():
+def test_generate_populates_timeseries(interface_factory):
     """Test that generate_ensemble_outputs() populates timeseries outputs."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
-        interface = MeteorInterface(
-            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
-        )
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
 
-        interface._is_trained["tas"] = True
-        interface.pattern_models["tas"] = MagicMock()
-        interface.noise_models["tas"] = MagicMock()
+    _set_trained(interface, ["tas"])
 
-        # Mock generation to return test data
-        mock_timeseries = {
-            "global": xr.DataArray([290.0, 290.5, 291.0], dims=["time"]),
-            "regional:EAS": xr.DataArray([289.0, 289.5, 290.0], dims=["time"]),
-        }
-        interface._generate_timeseries = MagicMock(return_value=mock_timeseries)
+    # Mock generation to return test data
+    mock_timeseries = {
+        "global": xr.DataArray([290.0, 290.5, 291.0], dims=["time"]),
+        "regional:EAS": xr.DataArray([289.0, 289.5, 290.0], dims=["time"]),
+    }
+    interface._generate_timeseries = MagicMock(return_value=mock_timeseries)
 
-        result = interface.generate_ensemble_outputs(
+    result = interface.generate_ensemble_outputs(
+        scenario="ssp245",
+        start_year=2020,
+        end_year=2022,
+        n_realizations=5,
+        timeseries=["global", "regional:EAS"],
+        verbose=False,
+    )
+
+    # Check timeseries were populated
+    assert "global" in result["tas"].timeseries
+    assert "regional:EAS" in result["tas"].timeseries
+    assert len(result["tas"].timeseries["global"]) == 3
+
+
+def test_generate_includes_metadata(interface_factory):
+    """Test that generate_ensemble_outputs() includes metadata in output."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+
+    _set_trained(interface, ["tas"])
+
+    interface._generate_timeseries = MagicMock(
+        return_value={"global": xr.DataArray([290.0])}
+    )
+
+    result = interface.generate_ensemble_outputs(
+        scenario="ssp370",
+        start_year=2030,
+        end_year=2080,
+        n_realizations=25,
+        timeseries=["global"],
+        verbose=False,
+    )
+
+    # Check metadata
+    assert result.metadata["scenario"] == "ssp370"
+    assert result.metadata["year_range"] == "2030-2080"
+    assert result.metadata["n_realizations"] == 25
+    assert result.metadata["model"] == "TestModel"
+
+
+def test_train_config(interface_factory):
+    """Validate train() configuration logic for auto/manual modes."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+    interface._train_pattern_scaling = MagicMock()
+    interface._train_noise_model = MagicMock()
+
+    interface.train(auto=True, training_scenario="ssp370", verbose=False)
+    assert interface._training_config["tas"]["training_scenario"] == "ssp370"
+
+    interface.train(
+        auto=True,
+        variable_configs={"tas": {"n_modes_noise": 50}},
+        verbose=False,
+    )
+    assert interface._training_config["tas"]["n_modes_noise"] == 50
+
+    interface.train(
+        auto=False,
+        training_scenario="ssp126",
+        variable_configs={"tas": {}},
+        verbose=False,
+    )
+    assert interface._training_config["tas"]["training_scenario"] == "ssp126"
+
+    interface.train(
+        auto=False,
+        training_scenario="ssp126",
+        variable_configs={"tas": {"n_modes_noise": 30}},
+        verbose=False,
+    )
+    config = interface._training_config["tas"]
+    assert config["n_modes_noise"] == 30
+    assert config["training_scenario"] == "ssp126"
+
+
+def test_generate_gridded_climatology_no_noise_single_realization(interface_factory):
+    """Test gridded outputs force single realization without noise."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+
+    interface.noise_models["tas"] = MagicMock()
+
+    monthly_prediction = xr.DataArray(
+        np.zeros((24, 2, 2)),
+        dims=["month", "lat", "lon"],
+        coords={"month": np.arange(24), "lat": [0, 1], "lon": [0, 1]},
+    )
+    monthly_warming = xr.DataArray(
+        np.zeros((24, 2, 2)),
+        dims=["month", "lat", "lon"],
+        coords={"month": np.arange(24), "lat": [0, 1], "lon": [0, 1]},
+    )
+    interface._get_or_compute_pattern_scaling = MagicMock(
+        return_value=(monthly_prediction, monthly_warming)
+    )
+
+    gridded = interface._generate_gridded(
+        variable="tas",
+        scenario="ssp245",
+        start_year=2000,
+        end_year=2001,
+        n_realizations=5,
+        gridded_spec={
+            "annual": [2000],
+            "monthly": [2000],
+            "climatology": [(2000, 2001)],
+        },
+        include_noise=False,
+        verbose=False,
+    )
+
+    interface.noise_models["tas"].generate_realization.assert_not_called()
+
+    annual = gridded["annual"][2000]
+    monthly = gridded["monthly"][2000]
+    climatology = gridded["climatology"]["2000-2001"]
+
+    assert annual.sizes["realization"] == 1
+    assert monthly.sizes["realization"] == 1
+    assert climatology.sizes["realization"] == 1
+
+
+def test_generate_before_training_clear_error(interface_factory):
+    """Test that generating before training gives clear error message."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas", "pr"))
+
+    # Try to generate without training
+    with pytest.raises(RuntimeError) as exc_info:
+        interface.generate_ensemble_outputs(
             scenario="ssp245",
             start_year=2020,
-            end_year=2022,
-            n_realizations=5,
-            timeseries=["global", "regional:EAS"],
-            verbose=False,
-        )
-
-        # Check timeseries were populated
-        assert "global" in result["tas"].timeseries
-        assert "regional:EAS" in result["tas"].timeseries
-        assert len(result["tas"].timeseries["global"]) == 3
-
-
-def test_generate_includes_metadata():
-    """Test that generate_ensemble_outputs() includes metadata in output."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
-        interface = MeteorInterface(
-            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
-        )
-
-        interface._is_trained["tas"] = True
-        interface.pattern_models["tas"] = MagicMock()
-        interface.noise_models["tas"] = MagicMock()
-
-        interface._generate_timeseries = MagicMock(
-            return_value={"global": xr.DataArray([290.0])}
-        )
-
-        result = interface.generate_ensemble_outputs(
-            scenario="ssp370",
-            start_year=2030,
-            end_year=2080,
-            n_realizations=25,
+            end_year=2050,
+            n_realizations=10,
             timeseries=["global"],
-            verbose=False,
         )
 
-        # Check metadata
-        assert result.metadata["scenario"] == "ssp370"
-        assert result.metadata["year_range"] == "2030-2080"
-        assert result.metadata["n_realizations"] == 25
-        assert result.metadata["model"] == "TestModel"
+    # Error message should mention which variable
+    assert "not trained" in str(exc_info.value).lower()
+    assert "train()" in str(exc_info.value).lower()
 
 
-def test_train_config():
-    """Validate train() configuration logic for auto/manual modes."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
-        interface = MeteorInterface(
-            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
-        )
-        interface._train_pattern_scaling = MagicMock()
-        interface._train_noise_model = MagicMock()
+def test_custom_scenario(tmp_path, capsys, interface_factory):
+    """Test custom scenario handling and save_to in pattern scaling."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+    interface._is_trained["tas"] = True
+    interface.noise_models["tas"] = MagicMock()
 
-        interface.train(auto=True, training_scenario="ssp370", verbose=False)
-        assert interface._training_config["tas"]["training_scenario"] == "ssp370"
+    interface._generate_timeseries = MagicMock(
+        return_value={"global": xr.DataArray([0.0], dims=["time"])}
+    )
 
-        interface.train(
-            auto=True,
-            variable_configs={"tas": {"n_modes_noise": 50}},
-            verbose=False,
-        )
-        assert interface._training_config["tas"]["n_modes_noise"] == 50
-
-        interface.train(
-            auto=False,
-            training_scenario="ssp126",
-            variable_configs={"tas": {}},
-            verbose=False,
-        )
-        assert interface._training_config["tas"]["training_scenario"] == "ssp126"
-
-        interface.train(
-            auto=False,
-            training_scenario="ssp126",
-            variable_configs={"tas": {"n_modes_noise": 30}},
-            verbose=False,
-        )
-        config = interface._training_config["tas"]
-        assert config["n_modes_noise"] == 30
-        assert config["training_scenario"] == "ssp126"
-
-
-def test_generate_gridded_climatology_no_noise_single_realization():
-    """Test gridded outputs force single realization without noise."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
-        interface = MeteorInterface(
-            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
-        )
-
-        interface.noise_models["tas"] = MagicMock()
-
-        monthly_prediction = xr.DataArray(
-            np.zeros((24, 2, 2)),
-            dims=["month", "lat", "lon"],
-            coords={"month": np.arange(24), "lat": [0, 1], "lon": [0, 1]},
-        )
-        monthly_warming = xr.DataArray(
-            np.zeros((24, 2, 2)),
-            dims=["month", "lat", "lon"],
-            coords={"month": np.arange(24), "lat": [0, 1], "lon": [0, 1]},
-        )
-        interface._get_or_compute_pattern_scaling = MagicMock(
-            return_value=(monthly_prediction, monthly_warming)
-        )
-
-        gridded = interface._generate_gridded(
-            variable="tas",
+    save_path = tmp_path / "output.nc"
+    with patch.object(EnsembleOutput, "to_netcdf") as mock_save:
+        interface.generate_ensemble_outputs(
             scenario="ssp245",
             start_year=2000,
-            end_year=2001,
-            n_realizations=5,
-            gridded_spec={
-                "annual": [2000],
-                "monthly": [2000],
-                "climatology": [(2000, 2001)],
-            },
-            include_noise=False,
+            end_year=2000,
+            n_realizations=1,
+            timeseries=["global"],
+            save_to=str(save_path),
             verbose=False,
         )
+        mock_save.assert_called_once_with(str(save_path))
 
-        interface.noise_models["tas"].generate_realization.assert_not_called()
+    years = np.arange(2000, 2051)
+    em_data = pd.DataFrame({"value": np.zeros(len(years))}, index=years)
+    conc_data = pd.DataFrame({"value": np.zeros(len(years))}, index=years)
+    scenario = {"emissions": em_data, "concentrations": conc_data, "name": "custom"}
 
-        annual = gridded["annual"][2000]
-        monthly = gridded["monthly"][2000]
-        climatology = gridded["climatology"]["2000-2001"]
+    pattern_model = MagicMock()
+    pattern_model.predict_from_combined_experiment.return_value = {
+        "tas": xr.DataArray(np.zeros(10), dims=["year"])
+    }
+    full_monthly = xr.DataArray(
+        np.zeros((4000, 2, 2)),
+        dims=["month", "lat", "lon"],
+        coords={"month": np.arange(4000), "lat": [0, 1], "lon": [0, 1]},
+    )
+    pattern_model.to_monthly.return_value = full_monthly
+    interface.pattern_models["tas"] = pattern_model
 
-        assert annual.sizes["realization"] == 1
-        assert monthly.sizes["realization"] == 1
-        assert climatology.sizes["realization"] == 1
-
-
-def test_generate_before_training_clear_error():
-    """Test that generating before training gives clear error message."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
-        interface = MeteorInterface(
-            model="TestModel", variables=["tas", "pr"], cache_dir="/tmp/test"
+    monthly_prediction, monthly_warming, em_used, conc_used = (
+        interface._get_or_compute_pattern_scaling(
+            "tas",
+            scenario,
+            start_year=1990,
+            end_year=2060,
+            verbose=True,
         )
+    )
 
-        # Try to generate without training
-        with pytest.raises(RuntimeError) as exc_info:
-            interface.generate_ensemble_outputs(
-                scenario="ssp245",
-                start_year=2020,
-                end_year=2050,
-                n_realizations=10,
-                timeseries=["global"],
-            )
-
-        # Error message should mention which variable
-        assert "not trained" in str(exc_info.value).lower()
-        assert "train()" in str(exc_info.value).lower()
-
-
-def test_custom_scenario(tmp_path, capsys):
-    """Test custom scenario handling and save_to in pattern scaling."""
-    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
-        interface = MeteorInterface(
-            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
-        )
-        interface._is_trained["tas"] = True
-        interface.noise_models["tas"] = MagicMock()
-
-        interface._generate_timeseries = MagicMock(
-            return_value={"global": xr.DataArray([0.0], dims=["time"])}
-        )
-
-        save_path = tmp_path / "output.nc"
-        with patch.object(EnsembleOutput, "to_netcdf") as mock_save:
-            interface.generate_ensemble_outputs(
-                scenario="ssp245",
-                start_year=2000,
-                end_year=2000,
-                n_realizations=1,
-                timeseries=["global"],
-                save_to=str(save_path),
-                verbose=False,
-            )
-            mock_save.assert_called_once_with(str(save_path))
-
-        years = np.arange(2000, 2051)
-        em_data = pd.DataFrame({"value": np.zeros(len(years))}, index=years)
-        conc_data = pd.DataFrame({"value": np.zeros(len(years))}, index=years)
-        scenario = {"emissions": em_data, "concentrations": conc_data, "name": "custom"}
-
-        pattern_model = MagicMock()
-        pattern_model.predict_from_combined_experiment.return_value = {
-            "tas": xr.DataArray(np.zeros(10), dims=["year"])
-        }
-        full_monthly = xr.DataArray(
-            np.zeros((4000, 2, 2)),
-            dims=["month", "lat", "lon"],
-            coords={"month": np.arange(4000), "lat": [0, 1], "lon": [0, 1]},
-        )
-        pattern_model.to_monthly.return_value = full_monthly
-        interface.pattern_models["tas"] = pattern_model
-
-        monthly_prediction, monthly_warming, em_used, conc_used = (
-            interface._get_or_compute_pattern_scaling(
-                "tas",
-                scenario,
-                start_year=1990,
-                end_year=2060,
-                verbose=True,
-            )
-        )
-
-        output = capsys.readouterr().out
-        assert "Warning: Emissions data ends at" in output
-        assert "Warning: Emissions data starts at" in output
-        assert em_used.index.max() == 2100
-        assert conc_used.index.max() == 2100
-        assert monthly_prediction.sizes["month"] == 612
-        assert len(monthly_warming) == 612
+    output = capsys.readouterr().out
+    assert "Warning: Emissions data ends at" in output
+    assert "Warning: Emissions data starts at" in output
+    assert em_used.index.max() == 2100
+    assert conc_used.index.max() == 2100
+    assert monthly_prediction.sizes["month"] == 612
+    assert len(monthly_warming) == 612

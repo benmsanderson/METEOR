@@ -12,7 +12,21 @@ import xarray as xr
 
 def find_suitable_cache_location():
     """
-    Determine a suitable cache directory location.
+    Determine a suitable cache directory location based on the
+    installation type. Attempts to locate the repository root
+    by searching for common markers (setup.py, .git, README.md)
+    in the directory hierarchy starting from the current file's location.
+    This approach works well for development environments (git clones).
+
+    If a repository root is found, the cache directory is created within the
+    repository at `.cache/`. If no repository root is found (e.g.,
+    when the package is installed via pip), the cache directory
+    falls back to the user's home directory at `~/.meteor/cache/`.
+
+    Returns:
+        str: The absolute path to the suitable cache directory.
+             - For development installations: `<repo_root>/.cache`
+             - For pip-installed packages: `~/.meteor/cache`
     """
     # Try to locate the repository root by looking for setup.py, .git, etc.
     # This works well for development environments (git clones).

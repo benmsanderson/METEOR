@@ -349,8 +349,10 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             exps except for experiments starting with 'ssp' which will be set
             to 'ScenarioMIP'
         cache_dir : str, optional
-            Directory to store cached data. If None, defaults to
-            ~/.meteor/cmip6_cache
+            Directory to store cached data. If None, the cache directory will
+            be set to a default location depending on the installation type:
+             - For development installations: `<repo_root>/.cache`
+             - For pip-installed packages: `~/.meteor/cache`
         enable_cache : bool, optional
             Whether to enable automatic caching. Default is False.
             Set to True to cache downloaded data locally for faster subsequent

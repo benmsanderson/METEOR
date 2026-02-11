@@ -23,10 +23,12 @@ def find_suitable_cache_location():
     when the package is installed via pip), the cache directory
     falls back to the user's home directory at `~/.meteor/cache/`.
 
-    Returns:
-        str: The absolute path to the suitable cache directory.
-             - For development installations: `<repo_root>/.cache`
-             - For pip-installed packages: `~/.meteor/cache`
+    Returns
+    -------
+    str
+        The absolute path to the suitable cache directory.
+        - For development installations: `<repo_root>/.cache`
+        - For pip-installed packages: `~/.meteor/cache`
     """
     # Try to locate the repository root by looking for setup.py, .git, etc.
     # This works well for development environments (git clones).

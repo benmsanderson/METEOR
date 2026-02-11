@@ -5,6 +5,7 @@ Focus: Test critical new logic with clear behavior expectations.
 Strategy: Use mocks for expensive operations, verify transformations.
 """
 
+import re
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -573,7 +574,9 @@ def test_compute_timeseries_scaling():
         temp_scaling_ts = xr.DataArray(np.array([2.0, 2.0]), dims=["year"])
         with pytest.raises(
             ValueError,
-            match="temp_scaling_ts temporal extent must match annual_prediction time dimension",
+            match=re.escape(
+                "temp_scaling_ts temporal extent (2) must match annual_prediction time dimension (1)"
+            ),
         ):
             interface._compute_timeseries_scaling(
                 "tas", annual_prediction, 0, em_data, conc_data, temp_scaling_ts

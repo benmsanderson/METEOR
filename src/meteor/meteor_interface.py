@@ -856,7 +856,7 @@ class MeteorInterface:
             annual_prediction[get_time_name(annual_prediction)]
         ):
             raise ValueError(
-                "temp_scaling_ts temporal extent must match annual_prediction time dimension"
+                f"temp_scaling_ts temporal extent ({len(temp_scaling_ts.year)}) must match annual_prediction time dimension ({len(annual_prediction[get_time_name(annual_prediction)])})"
             )
         if base_year not in temp_scaling_ts.year:
             raise ValueError(

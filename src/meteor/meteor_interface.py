@@ -819,6 +819,7 @@ class MeteorInterface:
         em_data,
         conc_data,
         temp_scaling_ts,
+        verbose=False,
     ):
         """
         Compute scaling factor for time series outputs based on pattern scaling.
@@ -845,6 +846,22 @@ class MeteorInterface:
         np.ndarray
             Scaling factor to apply to noise variability
         """
+        if verbose:  # pragma: no cover
+            print("      → Computing time series scaling factor...")
+        if not isinstance(temp_scaling_ts, xr.DataArray):
+            raise ValueError("temp_scaling_ts must be an xarray DataArray")
+        if not hasattr(temp_scaling_ts, "year"):
+            raise ValueError("temp_scaling_ts must have a 'year' coordinate")
+        if not len(temp_scaling_ts.year) == len(
+            annual_prediction[get_time_name(annual_prediction)]
+        ):
+            raise ValueError(
+                "temp_scaling_ts temporal extent must match annual_prediction time dimension"
+            )
+        if base_year not in temp_scaling_ts.year:
+            raise ValueError(
+                f"base_year {base_year} not found in temp_scaling_ts years"
+            )
         # TODO do some cutting to correct values to match the time range of the temp_scaling_ts if needed
         if hasattr(annual_prediction, "year"):
             annual_prediction_base = annual_prediction.sel(year=base_year)

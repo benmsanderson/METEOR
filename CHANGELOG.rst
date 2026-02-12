@@ -71,6 +71,8 @@ The changes listed in this file are categorised as follows:
     - Unit tests for pattern logic library (``tests/unit/test_pattern_logic_lib.py``)
     - Enhanced noise generator tests with 4D ensemble support
     - Test coverage increased to 90%+
+- **Global temperature timeseries scaling**
+    - Support for scaling underlaying annual patterns by user-provided global temperature trajectories
 
 ### Changed
 

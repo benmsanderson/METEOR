@@ -88,6 +88,10 @@ class MeteorNoiseGenerator:
         self.diagnostic_X_features = None
         self.diagnostic_t_glob = None
         self.diagnostic_time = None
+
+        # Model performance metrics (set during fit)
+        self.seasonal_r2 = None
+        self.total_variance_explained = None
         self.diagnostic_seasonal_coef = None
         self.diagnostic_seasonal_intercept = None
         self.diagnostic_Y_data = None
@@ -336,11 +340,13 @@ class MeteorNoiseGenerator:
         self.variable_name = variable_name
         self.fitted = True
 
-        # Compute seasonal model R² (variance explained by temperature-dependent harmonics)
+        # Compute seasonal model R² (variance explained by
+        # temperature-dependent harmonics)
         seasonal_r2 = self.seasonal_model.score(X, Y)
         pca_var_explained = self.pca.explained_variance_ratio_.sum()
 
-        # Total variance explained = seasonal + (remaining fraction × PCA)
+        # Total variance explained = seasonal component +
+        # (remaining fraction × PCA)
         total_var_explained = seasonal_r2 + (1 - seasonal_r2) * pca_var_explained
 
         # Store for access
@@ -350,9 +356,7 @@ class MeteorNoiseGenerator:
         print("Noise generator fitted successfully.")
         print(f"   - PCA modes: {self.n_modes}")
         print(f"   - Seasonal model R²: {seasonal_r2:.2%}")
-        print(
-            f"   - Anomaly variance explained (PCA): {pca_var_explained:.2%}"
-        )
+        print(f"   - Anomaly variance explained (PCA): {pca_var_explained:.2%}")
         print(f"   - Total variance explained: {total_var_explained:.2%}")
         print(f"   - VARX lag order: {self.lag_order}")
         if self.use_exog == "all":

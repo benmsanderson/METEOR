@@ -888,7 +888,7 @@ class MeteorInterface:
             ]  # Assuming first value corresponds to base_year
         annual_prediction_anomaly = annual_prediction - annual_prediction_base
         temperature_input_base = temp_scaling_ts.sel(year=base_year)
-        if verbose and temperature_input_base != 0: # pragma: no cover
+        if verbose and temperature_input_base != 0:  # pragma: no cover
             print(
                 f"The baseline scaling temperature is non-zero ({temperature_input_base})"
             )

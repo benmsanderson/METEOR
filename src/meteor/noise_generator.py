@@ -183,6 +183,7 @@ class MeteorNoiseGenerator:
         custom_global_temp=None,
         picontrol_baseline=None,
         save_diagnostics=False,
+        verbose=False,
     ):
         """
         Fit the noise generator to monthly climate data.
@@ -206,6 +207,8 @@ class MeteorNoiseGenerator:
             If True, saves the X features matrix, global mean, and time arrays
             to self.diagnostic_X_features, self.diagnostic_t_glob, and
             self.diagnostic_time for debugging purposes.
+        verbose : bool, default False
+            If True, prints variance decomposition statistics after fitting.
         """
         # Extract the variable data
         if variable_name not in monthly_data:
@@ -353,18 +356,19 @@ class MeteorNoiseGenerator:
         self.seasonal_r2 = seasonal_r2
         self.total_variance_explained = total_var_explained
 
-        print("Noise generator fitted successfully.")
-        print(f"   - PCA modes: {self.n_modes}")
-        print(f"   - Seasonal model R²: {seasonal_r2:.2%}")
-        print(f"   - Anomaly variance explained (PCA): {pca_var_explained:.2%}")
-        print(f"   - Total variance explained: {total_var_explained:.2%}")
-        print(f"   - VARX lag order: {self.lag_order}")
-        if self.use_exog == "all":
-            print("   - Exogenous vars: t_glob, annual_cos, annual_sin")
-        elif self.use_exog == "temp_only":
-            print("   - Exogenous vars: t_glob only")
-        else:
-            print("   - Exogenous vars: none (pure VAR)")
+        if verbose:
+            print("Noise generator fitted successfully.")
+            print(f"   - PCA modes: {self.n_modes}")
+            print(f"   - Seasonal model R²: {seasonal_r2:.2%}")
+            print(f"   - Anomaly variance explained (PCA): {pca_var_explained:.2%}")
+            print(f"   - Total variance explained: {total_var_explained:.2%}")
+            print(f"   - VARX lag order: {self.lag_order}")
+            if self.use_exog == "all":
+                print("   - Exogenous vars: t_glob, annual_cos, annual_sin")
+            elif self.use_exog == "temp_only":
+                print("   - Exogenous vars: t_glob only")
+            else:
+                print("   - Exogenous vars: none (pure VAR)")
 
     # pylint: disable=too-many-locals
     def generate_stochastic_pcs(
@@ -1117,6 +1121,7 @@ def train_noise_model_from_cmip6(
     use_picontrol_baseline=True,
     save_diagnostics=False,
     use_exog="temp_only",
+    verbose=False,
 ):
     """
     Train a noise generator from CMIP6 data.
@@ -1160,6 +1165,8 @@ def train_noise_model_from_cmip6(
         - 'all': Use temperature, annual_cos, annual_sin (may cause spurious seasonality)
         - 'temp_only': Use only temperature (recommended)
         - 'none': Pure VAR with no exogenous variables
+    verbose : bool, default False
+        If True, prints variance decomposition statistics after fitting.
 
     Returns
     -------
@@ -1211,6 +1218,7 @@ def train_noise_model_from_cmip6(
         custom_global_temp=custom_global_temp,
         picontrol_baseline=picontrol_baseline,
         save_diagnostics=save_diagnostics,
+        verbose=verbose,
     )
     # Cache if requested
     if cache_dir is not None:

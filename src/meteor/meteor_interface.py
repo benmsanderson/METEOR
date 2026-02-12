@@ -895,7 +895,6 @@ class MeteorInterface:
             temperature_input_anomaly.values / annual_temp_prediction_gm_anomaly.values,
             1.0,
         )
-        print(temp_scaling.shape)
         temp_scaling = xr.DataArray(
             temp_scaling,
             dims=annual_prediction_anomaly[

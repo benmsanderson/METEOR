@@ -510,7 +510,7 @@ class MeteorInterface:
             Format: {'name': {'lat': (min, max), 'lon': (min, max)}}
         save_to : str, optional
             Path to save outputs to netCDF
-        temp_scaling: xr.DataArray, optional
+        temp_scaling_ts: xr.DataArray, optional
             Should be one-dimensional xr.DataArray with dimension year, giving a
             timeseries of global mean temperatures to scale to. The timeseries length
             needs to match the scenario length of the scenario that is being generated

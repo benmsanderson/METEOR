@@ -91,11 +91,17 @@ def test_meteor_interface_integration_pr(test_data_dir):
     )
     assert isinstance(ensemble_scaled, EnsembleOutput)
     assert ensemble_scaled.variables is not None
-    assert ensemble.metadata["scenario"] == "ssp245"
-    assert ensemble.metadata["n_realizations"] == 10
-    assert ensemble.metadata["model"] == "CanESM5"
-    assert ensemble.metadata["year_range"] == "2015-2035"
-    assert isinstance(ensemble.variables["pr"], VariableOutput)
+    assert ensemble_scaled.metadata["scenario"] == "ssp245"
+    assert ensemble_scaled.metadata["n_realizations"] == 2
+    assert ensemble_scaled.metadata["model"] == "CanESM5"
+    assert ensemble_scaled.metadata["year_range"] == "2015-2035"
+    assert isinstance(ensemble_scaled.variables["pr"], VariableOutput)
+    base_value = ensemble["pr"].timeseries["global"][0][0]
+    assert not np.allclose(
+        ensemble["pr"].timeseries["global"][0] - base_value,
+        ensemble_scaled["pr"].timeseries["global"][0] - base_value,
+    )
+    # assert global_mean()
 
 
 def test_meteor_interface_integration_tas(test_data_dir):
@@ -138,14 +144,14 @@ def test_meteor_interface_integration_tas(test_data_dir):
     # Check that the ensemble output has the expected shape
     assert isinstance(ensemble, EnsembleOutput)
     assert ensemble.variables is not None
-    print(ensemble.variables)
-    print(ensemble.metadata)
+    # print(ensemble.variables)
+    # print(ensemble.metadata)
     assert ensemble.metadata["scenario"] == "ssp245"
     assert ensemble.metadata["n_realizations"] == 10
     assert ensemble.metadata["model"] == "CanESM5"
     assert ensemble.metadata["year_range"] == "2015-2035"
     assert isinstance(ensemble.variables["tas"], VariableOutput)
-    print(ensemble.variables["tas"].impacts)
+    # print(ensemble.variables["tas"].impacts)
     assert ensemble.variables["tas"].impacts["hdd"]["global"].shape == (
         10,
         21,
@@ -170,8 +176,19 @@ def test_meteor_interface_integration_tas(test_data_dir):
     )
     assert isinstance(ensemble_scaled, EnsembleOutput)
     assert ensemble_scaled.variables is not None
-    assert ensemble.metadata["scenario"] == "ssp245"
-    assert ensemble.metadata["n_realizations"] == 10
-    assert ensemble.metadata["model"] == "CanESM5"
-    assert ensemble.metadata["year_range"] == "2015-2035"
-    assert isinstance(ensemble.variables["tas"], VariableOutput)
+    assert ensemble_scaled.metadata["scenario"] == "ssp245"
+    assert ensemble_scaled.metadata["n_realizations"] == 2
+    assert ensemble_scaled.metadata["model"] == "CanESM5"
+    assert ensemble_scaled.metadata["year_range"] == "2015-2035"
+    assert isinstance(ensemble_scaled.variables["tas"], VariableOutput)
+
+    # Testing that scaling mostly worked
+    pred_scaled = temp_ts_mock.values[2015 - 1750 : 2036 - 1750]
+    ann_mean_scaled = np.average(
+        ensemble_scaled["tas"].timeseries["global"][0].reshape(-1, 12), axis=1
+    )
+    ann_mean_unscaled = np.average(
+        ensemble["tas"].timeseries["global"][0].reshape(-1, 12), axis=1
+    )
+    assert np.allclose(pred_scaled, ann_mean_scaled, atol=0.5)
+    assert not np.allclose(ann_mean_scaled, ann_mean_unscaled, atol=1.2)

@@ -510,6 +510,12 @@ class MeteorInterface:
             Format: {'name': {'lat': (min, max), 'lon': (min, max)}}
         save_to : str, optional
             Path to save outputs to netCDF
+        temp_scaling: xr.DataArray, optional
+            Should be one-dimensional xr.DataArray with dimension year, giving a
+            timeseries of global mean temperatures to scale to. The timeseries length
+            needs to match the scenario length of the scenario that is being generated
+            at generation (default is 1750-2100) and needs to include the base_year (default 1750).
+            This is used to scale the annual pattern from teh MeteorPatternScaling prediction.
         verbose : bool, optional
             Print progress messages (default True)
 
@@ -831,14 +837,25 @@ class MeteorInterface:
         ----------
         variable : str
             Climate variable ('tas', 'pr')
-        scenario : str
-            Scenario name ('ssp245', 'ssp585', etc.)
-        start_year : int
-            Start year for slicing
-        end_year : int
-            End year for slicing (inclusive)
-        temp_scaling_ts : np.array
+        annual_prediction : xr.DataArray
+            Annual prediction from the MeteorPatternScaling to be scaled
+        base_year : int
+            Base year for scaling, to make sure only anomalies are scaled
+        em_data : pd.DataFrame
+            Emissions input data to drive MetorPatternScaling, to be used
+            to generate temperature predictions for the scaling if the variable
+            is not tas
+        conc_data : pd.DataFrame
+            Concentrations input data to drive MetorPatternScaling, to be used
+            to generate temperature predictions for the scaling if the variable
+            is not tas
+        temp_scaling_ts : xr.DataArray
             Time series of global mean temperature from pattern scaling prediction
+            Should be one-dimensional xr.DataArray with dimension year, giving a
+            timeseries of global mean temperatures to scale to. The timeseries length
+            needs to match the scenario length of the scenario that is being generated
+            at generation (default is 1750-2100) and needs to include the base_year (default 1750).
+            This is used to scale the annual pattern from teh MeteorPatternScaling prediction.
         verbose : bool
             Print status messages
         Returns
@@ -868,11 +885,14 @@ class MeteorInterface:
         else:
             annual_prediction_base = annual_prediction[
                 0
-            ]  # Assuming first value corresponds to start_year
+            ]  # Assuming first value corresponds to base_year
         annual_prediction_anomaly = annual_prediction - annual_prediction_base
-        temperature_input_base = temp_scaling_ts.sel(
-            year=base_year
-        )  # Assuming first value corresponds to start_year
+        temperature_input_base = temp_scaling_ts.sel(year=base_year)
+        if verbose and temperature_input_base != 0: # pragma: no cover
+            print(
+                f"The baseline scaling temperature is non-zero ({temperature_input_base})"
+            )
+            print("This value will be subtracted from the timeseries when scaling")
         if variable == "tas":
             annual_temp_prediction_gm_anomaly = global_mean(annual_prediction_anomaly)
         else:

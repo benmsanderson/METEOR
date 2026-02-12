@@ -51,7 +51,7 @@ def test_get_default_config():
     assert generic_config["n_modes_pattern"] == 3
     assert generic_config["n_modes_noise"] == 40
     assert generic_config["training_scenario"] == "ssp245"
-    assert generic_config["use_exog"] == "temp_only"
+    assert generic_config["use_exog"] == "none"
     assert not generic_config["transform"]
 
 

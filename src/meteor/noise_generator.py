@@ -1211,7 +1211,6 @@ def train_noise_model_from_cmip6(
     noise_gen = MeteorNoiseGenerator(
         n_modes=n_modes, lag_order=lag_order, use_exog=use_exog
     )
-    print(n_modes, lag_order)
     noise_gen.fit(
         monthly_data,
         variable_name,

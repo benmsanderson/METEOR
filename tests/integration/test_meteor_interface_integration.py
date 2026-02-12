@@ -28,7 +28,6 @@ def test_meteor_interface_integration_pr(test_data_dir):
                 "transform_type": "gamma",
             }
         },
-        auto=False,
         verbose=False,
     )
     assert meteor._is_trained["pr"] is True

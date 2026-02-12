@@ -89,7 +89,7 @@ class MeteorInterface:
     ...     variables='pr',
     ...     cache_dir='./cache'
     ... )
-    >>> emulator.train(auto=True)
+    >>> emulator.train()
     >>> ensemble = emulator.generate_ensemble_outputs(
     ...     scenario='ssp245',
     ...     start_year=2020,
@@ -104,7 +104,7 @@ class MeteorInterface:
     ...     variables=['tas', 'pr'],
     ...     cache_dir='./cache'
     ... )
-    >>> emulator.train(auto=True)
+    >>> emulator.train()
     >>> ensemble = emulator.generate_ensemble_outputs(
     ...     scenario='ssp245',
     ...     start_year=2020,
@@ -182,16 +182,12 @@ class MeteorInterface:
         self._training_config = {}
         self._is_trained = {var: False for var in self.variables}
 
-    def train(
-        self, auto=True, training_scenario="ssp245", variable_configs=None, verbose=True
-    ):
+    def train(self, training_scenario="ssp245", variable_configs=None, verbose=True):
         """
         Train pattern scaling and noise models for all variables.
 
         Parameters
         ----------
-        auto : bool, optional
-            Use automatic smart defaults (default True)
         training_scenario : str, optional
             Default scenario for training noise models (default 'ssp245').
             Can be overridden per-variable in variable_configs.
@@ -211,7 +207,7 @@ class MeteorInterface:
         Examples
         --------
         >>> # Automatic training with smart defaults
-        >>> emulator.train(auto=True)
+        >>> emulator.train()
         >>>
         >>> # Custom training scenario for all variables
         >>> emulator.train(training_scenario='ssp370')
@@ -242,19 +238,14 @@ class MeteorInterface:
                 print(f"\n🔧 Training {variable.upper()}...")
 
             # Get configuration with hybrid precedence
-            if auto:
-                config = _get_default_config(variable)
-                # Override with method parameter if different from default
-                if training_scenario != "ssp245":
-                    config["training_scenario"] = training_scenario
-                # Override with variable-specific config if provided
-                if variable_configs and variable in variable_configs:
-                    config.update(variable_configs[variable])
-            else:
-                config = variable_configs.get(variable, {}) if variable_configs else {}
-                # Apply method parameter as default if not in config
-                if "training_scenario" not in config:
-                    config["training_scenario"] = training_scenario
+
+            config = _get_default_config(variable)
+            # Override with method parameter if different from default
+            if training_scenario != "ssp245":
+                config["training_scenario"] = training_scenario
+            # Override with variable-specific config if provided
+            if variable_configs and variable in variable_configs:
+                config.update(variable_configs[variable])
             self._training_config[variable] = config
 
             # Train pattern scaling

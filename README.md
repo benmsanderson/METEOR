@@ -29,7 +29,7 @@ emulator = MeteorInterface(
     variables=['tas', 'pr'],
     cache_dir='./cache'
 )
-emulator.train(auto=True, verbose=True)
+emulator.train(verbose=True)
 
 # Generate ensemble
 ensemble = emulator.generate_ensemble_outputs(

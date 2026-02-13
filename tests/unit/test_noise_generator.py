@@ -375,13 +375,36 @@ def test_baseline_handling():
     data = data.expand_dims({"ens": [1]})
 
     generator = MeteorNoiseGenerator(n_modes=2, lag_order=1)
+    assert generator.diagnostic_X_features is None
+    assert generator.diagnostic_t_glob is None
+    assert generator.diagnostic_time is None
+    assert generator.diagnostic_seasonal_coef is None
+    assert generator.diagnostic_seasonal_intercept is None
+    assert generator.diagnostic_Y_data is None
+    assert generator.seasonal_r2 is None
+    assert generator.total_variance_explained is None
 
     # Test with numeric baseline
     generator.fit(data, "tas", picontrol_baseline=15.0)
+    s_r2_1 = generator.seasonal_r2
+    var_exp_1 = generator.total_variance_explained
+    assert s_r2_1 is not None
+    assert var_exp_1 is not None
+    assert s_r2_1 > 0  # Should have some seasonal skill
+    assert var_exp_1 > 0  # Should explain some variance
+    assert var_exp_1 <= 1.0  # Variance explained should be between 0 and 1
     generator.fit(data, "tas", picontrol_baseline=None)
+    s_r2_2 = generator.seasonal_r2
+    var_exp_2 = generator.total_variance_explained
+    assert np.allclose(s_r2_1, s_r2_2)  # Should be baseline-independent
+    assert np.allclose(
+        var_exp_1, var_exp_2
+    )  # Should be different with different baselines
     # Test with array-like baseline (tests lines 170-177)
     baseline_array = np.array([14.5, 15.0, 14.8])
     generator.fit(data, "tas", picontrol_baseline=baseline_array)
+    assert np.allclose(generator.seasonal_r2, s_r2_1)
+    assert np.allclose(generator.total_variance_explained, var_exp_1)
 
 
 def test_custom_global_temp_validation_error():

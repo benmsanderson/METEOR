@@ -5,6 +5,7 @@ Focus: Test critical new logic with clear behavior expectations.
 Strategy: Use mocks for expensive operations, verify transformations.
 """
 
+import re
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -715,3 +716,75 @@ def test_custom_scenario(tmp_path, capsys, interface_factory):
     assert conc_used.index.max() == 2100
     assert monthly_prediction.sizes["month"] == 612
     assert len(monthly_warming) == 612
+        # Try to generate without training
+        with pytest.raises(RuntimeError) as exc_info:
+            interface.generate_ensemble_outputs(
+                scenario="ssp245",
+                start_year=2020,
+                end_year=2050,
+                n_realizations=10,
+                timeseries=["global"],
+            )
+
+        # Error message should mention which variable
+        assert "not trained" in str(exc_info.value).lower()
+        assert "train()" in str(exc_info.value).lower()
+
+
+def test_compute_timeseries_scaling():
+    """Test that _compute_timeseries_scaling_factor() computes expected scaling."""
+    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter"):
+        interface = MeteorInterface(
+            model="TestModel", variables=["tas"], cache_dir="/tmp/test"
+        )
+
+        # Mock the data and pattern scaling components
+        em_data = xr.DataArray(np.array([290.0]), dims=["time"])
+        conc_data = xr.DataArray(np.array([400.0]), dims=["time"])
+        temp_scaling_ts = xr.DataArray(np.array([2.0]), dims=["time"])
+        annual_prediction = xr.DataArray(
+            np.array([[[1.0]]]),
+            dims=["year", "lat", "lon"],
+            coords={"year": [0], "lat": [0], "lon": [0]},
+        )
+
+        # Call the method
+        with pytest.raises(
+            ValueError, match="temp_scaling_ts must be an xarray DataArray"
+        ):
+            interface._compute_timeseries_scaling(
+                "tas", annual_prediction, 0, em_data, conc_data, 2.0
+            )
+        with pytest.raises(
+            ValueError, match="temp_scaling_ts must have a 'year' coordinate"
+        ):
+            interface._compute_timeseries_scaling(
+                "tas", annual_prediction, 0, em_data, conc_data, temp_scaling_ts
+            )
+        temp_scaling_ts = xr.DataArray(np.array([2.0, 2.0]), dims=["year"])
+        with pytest.raises(
+            ValueError,
+            match=re.escape(
+                "temp_scaling_ts temporal extent (2) must match annual_prediction time dimension (1)"
+            ),
+        ):
+            interface._compute_timeseries_scaling(
+                "tas", annual_prediction, 0, em_data, conc_data, temp_scaling_ts
+            )
+        temp_scaling_ts = xr.DataArray(
+            np.array([2.0]), dims=["year"], coords={"year": [2000]}
+        )
+        with pytest.raises(
+            ValueError, match="base_year 0 not found in temp_scaling_ts years"
+        ):
+            interface._compute_timeseries_scaling(
+                "tas", annual_prediction, 0, em_data, conc_data, temp_scaling_ts
+            )
+        temp_scaling_ts = xr.DataArray(
+            np.array([2.0]), dims=["year"], coords={"year": [0]}
+        )
+        scaling_factor = interface._compute_timeseries_scaling(
+            "tas", annual_prediction, 0, em_data, conc_data, temp_scaling_ts
+        )
+        assert scaling_factor.shape == (1, 1, 1)
+        assert np.isclose(scaling_factor.values[0, 0, 0], 1.0)

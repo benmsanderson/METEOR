@@ -16,6 +16,7 @@ from .ensemble_output import EnsembleOutput, VariableOutput
 from .geo_data_utils import (
     create_region_mask,
     extract_point,
+    get_time_name,
     global_mean,
     regional_mean,
 )
@@ -88,7 +89,7 @@ class MeteorInterface:
     ...     variables='pr',
     ...     cache_dir='./cache'
     ... )
-    >>> emulator.train(auto=True)
+    >>> emulator.train()
     >>> ensemble = emulator.generate_ensemble_outputs(
     ...     scenario='ssp245',
     ...     start_year=2020,
@@ -103,7 +104,7 @@ class MeteorInterface:
     ...     variables=['tas', 'pr'],
     ...     cache_dir='./cache'
     ... )
-    >>> emulator.train(auto=True)
+    >>> emulator.train()
     >>> ensemble = emulator.generate_ensemble_outputs(
     ...     scenario='ssp245',
     ...     start_year=2020,
@@ -161,8 +162,10 @@ class MeteorInterface:
         self.data_getter = Cmip6MeteorDataGetter(
             models=[self.model],
             exps=data_getter_kwargs.get("exps", default_exps),
-            flds=self.variables,
             tabids=data_getter_kwargs.get("tabids", None),
+            flds=list(
+                set(self.variables).union({"tas"})
+            ),  # Always include 'tas' for noise model exog
             dbe=data_getter_kwargs.get("dbe", default_dbe),
             enable_cache=True,
             cache_handler=self.cache_handler,
@@ -181,16 +184,12 @@ class MeteorInterface:
         self._training_config = {}
         self._is_trained = {var: False for var in self.variables}
 
-    def train(
-        self, auto=True, training_scenario="ssp245", variable_configs=None, verbose=True
-    ):
+    def train(self, training_scenario="ssp245", variable_configs=None, verbose=True):
         """
         Train pattern scaling and noise models for all variables.
 
         Parameters
         ----------
-        auto : bool, optional
-            Use automatic smart defaults (default True)
         training_scenario : str, optional
             Default scenario for training noise models (default 'ssp245').
             Can be overridden per-variable in variable_configs.
@@ -210,7 +209,7 @@ class MeteorInterface:
         Examples
         --------
         >>> # Automatic training with smart defaults
-        >>> emulator.train(auto=True)
+        >>> emulator.train()
         >>>
         >>> # Custom training scenario for all variables
         >>> emulator.train(training_scenario='ssp370')
@@ -230,24 +229,25 @@ class MeteorInterface:
             print(f"Variables: {', '.join(self.variables)}")
             print("=" * 60)
 
+        if "tas" not in self.variables:
+            if verbose:  # pragma: no cover
+                print("\n🔧 Training tas pattern scaling only")
+            config = _get_default_config("tas")
+            self._train_pattern_scaling("tas", config, verbose=verbose)
+
         for variable in self.variables:
             if verbose:  # pragma: no cover
                 print(f"\n🔧 Training {variable.upper()}...")
 
             # Get configuration with hybrid precedence
-            if auto:
-                config = _get_default_config(variable)
-                # Override with method parameter if different from default
-                if training_scenario != "ssp245":
-                    config["training_scenario"] = training_scenario
-                # Override with variable-specific config if provided
-                if variable_configs and variable in variable_configs:
-                    config.update(variable_configs[variable])
-            else:
-                config = variable_configs.get(variable, {}) if variable_configs else {}
-                # Apply method parameter as default if not in config
-                if "training_scenario" not in config:
-                    config["training_scenario"] = training_scenario
+
+            config = _get_default_config(variable)
+            # Override with method parameter if different from default
+            if training_scenario != "ssp245":
+                config["training_scenario"] = training_scenario
+            # Override with variable-specific config if provided
+            if variable_configs and variable in variable_configs:
+                config.update(variable_configs[variable])
             self._training_config[variable] = config
 
             # Train pattern scaling
@@ -460,7 +460,8 @@ class MeteorInterface:
         include_noise: bool = True,
         save_to: str | None = None,
         custom_regions: dict | None = None,
-        verbose: bool = True,
+        temp_scaling_ts: xr.DataArray | None=None,
+        verbose:bool =True,
     ):
         """
         Generate ensemble outputs for all variables.
@@ -506,6 +507,12 @@ class MeteorInterface:
         custom_regions : dict, optional
             Custom region definitions for 'regional:custom:NAME' aggregations.
             Format: {'name': {'lat': (min, max), 'lon': (min, max)}}
+        temp_scaling_ts: xr.DataArray, optional
+            Should be one-dimensional xr.DataArray with dimension year, giving a
+            timeseries of global mean temperatures to scale to. The timeseries length
+            needs to match the scenario length of the scenario that is being generated
+            at generation (default is 1750-2100) and needs to include the base_year (default 1750).
+            This is used to scale the annual pattern from teh MeteorPatternScaling prediction.
         verbose : bool, optional
             Print progress messages (default True)
 
@@ -582,6 +589,7 @@ class MeteorInterface:
                     timeseries,
                     custom_regions=custom_regions,
                     include_noise=include_noise,
+                    temp_scaling_ts=temp_scaling_ts,
                     verbose=verbose,
                 )
 
@@ -597,6 +605,7 @@ class MeteorInterface:
                     n_realizations,
                     gridded,
                     include_noise=include_noise,
+                    temp_scaling_ts=temp_scaling_ts,
                     verbose=verbose,
                 )
 
@@ -641,7 +650,13 @@ class MeteorInterface:
         return ensemble
 
     def _get_or_compute_pattern_scaling(
-        self, variable, scenario, start_year, end_year, verbose=True
+        self,
+        variable,
+        scenario,
+        start_year,
+        end_year,
+        verbose=True,
+        temp_scaling_ts=None,
     ):
         """
         Get pattern scaling results from cache or compute if not cached.
@@ -751,16 +766,26 @@ class MeteorInterface:
         )
         annual_prediction = climate_prediction[variable]
 
+        # Determine base year
+        if hasattr(annual_prediction, "year"):
+            base_year = int(annual_prediction.year[0])
+        else:
+            base_year = 1750  # Default assumption
+
+        if temp_scaling_ts is not None:
+            annual_prediction = self._compute_timeseries_scaling(
+                variable,
+                annual_prediction,
+                base_year,
+                em_data,
+                conc_data,
+                temp_scaling_ts,
+            )
+
         # Convert to monthly
         full_monthly_prediction = pattern_model.to_monthly(
             annual_prediction, start_year=0
         )
-
-        # Determine base year
-        if hasattr(full_monthly_prediction, "year"):
-            base_year = int(full_monthly_prediction.year[0])
-        else:
-            base_year = 1750  # Default assumption
 
         # Compute global mean for noise model
         full_monthly_warming = global_mean(full_monthly_prediction).values
@@ -788,6 +813,113 @@ class MeteorInterface:
 
         return monthly_prediction_sliced, monthly_warming_sliced, em_data, conc_data
 
+    # TODO - possibly add verbosity?
+    def _compute_timeseries_scaling(
+        self,
+        variable,
+        annual_prediction,
+        base_year,
+        em_data,
+        conc_data,
+        temp_scaling_ts,
+        verbose=False,
+    ):
+        """
+        Compute scaling factor for time series outputs based on pattern scaling.
+
+        This is used to adjust the noise variability to match the forced response
+        of the pattern scaling prediction for the specific scenario and time range.
+
+        Parameters
+        ----------
+        variable : str
+            Climate variable ('tas', 'pr')
+        annual_prediction : xr.DataArray
+            Annual prediction from the MeteorPatternScaling to be scaled
+        base_year : int
+            Base year for scaling, to make sure only anomalies are scaled
+        em_data : pd.DataFrame
+            Emissions input data to drive MetorPatternScaling, to be used
+            to generate temperature predictions for the scaling if the variable
+            is not tas
+        conc_data : pd.DataFrame
+            Concentrations input data to drive MetorPatternScaling, to be used
+            to generate temperature predictions for the scaling if the variable
+            is not tas
+        temp_scaling_ts : xr.DataArray
+            Time series of global mean temperature from pattern scaling prediction
+            Should be one-dimensional xr.DataArray with dimension year, giving a
+            timeseries of global mean temperatures to scale to. The timeseries length
+            needs to match the scenario length of the scenario that is being generated
+            at generation (default is 1750-2100) and needs to include the base_year (default 1750).
+            This is used to scale the annual pattern from teh MeteorPatternScaling prediction.
+        verbose : bool
+            Print status messages
+        Returns
+        -------
+        np.ndarray
+            Scaling factor to apply to noise variability
+        """
+        if verbose:  # pragma: no cover
+            print("      → Computing time series scaling factor...")
+        if not isinstance(temp_scaling_ts, xr.DataArray):
+            raise ValueError("temp_scaling_ts must be an xarray DataArray")
+        if not hasattr(temp_scaling_ts, "year"):
+            raise ValueError("temp_scaling_ts must have a 'year' coordinate")
+        if not len(temp_scaling_ts.year) == len(
+            annual_prediction[get_time_name(annual_prediction)]
+        ):
+            raise ValueError(
+                f"temp_scaling_ts temporal extent ({len(temp_scaling_ts.year)}) must match annual_prediction time dimension ({len(annual_prediction[get_time_name(annual_prediction)])})"
+            )
+        if base_year not in temp_scaling_ts.year:
+            raise ValueError(
+                f"base_year {base_year} not found in temp_scaling_ts years"
+            )
+        # TODO do some cutting to correct values to match the time range of the temp_scaling_ts if needed
+        if hasattr(annual_prediction, "year"):
+            annual_prediction_base = annual_prediction.sel(year=base_year)
+        else:
+            annual_prediction_base = annual_prediction[
+                0
+            ]  # Assuming first value corresponds to base_year
+        annual_prediction_anomaly = annual_prediction - annual_prediction_base
+        temperature_input_base = temp_scaling_ts.sel(year=base_year)
+        if verbose and temperature_input_base != 0:  # pragma: no cover
+            print(
+                f"The baseline scaling temperature is non-zero ({temperature_input_base})"
+            )
+            print("This value will be subtracted from the timeseries when scaling")
+        if variable == "tas":
+            annual_temp_prediction_gm_anomaly = global_mean(annual_prediction_anomaly)
+        else:
+            annual_temp_prediction = self.pattern_models[
+                "tas"
+            ].predict_from_combined_experiment(em_data, conc_data, ["tas"])["tas"]
+            if hasattr(annual_temp_prediction, "year"):
+                annual_temp_prediction_base = annual_temp_prediction.sel(year=base_year)
+            else:
+                annual_temp_prediction_base = annual_temp_prediction[
+                    0
+                ]  # Assuming first value corresponds to start_year
+            annual_temp_prediction_gm_anomaly = global_mean(
+                annual_temp_prediction - annual_temp_prediction_base
+            )
+        temperature_input_anomaly = temp_scaling_ts - temperature_input_base
+
+        temp_scaling = np.where(
+            annual_temp_prediction_gm_anomaly.values != 0,
+            temperature_input_anomaly.values / annual_temp_prediction_gm_anomaly.values,
+            1.0,
+        )
+        temp_scaling = xr.DataArray(
+            temp_scaling,
+            dims=annual_prediction_anomaly[
+                get_time_name(annual_prediction_anomaly)
+            ].dims,
+        )
+        return annual_prediction_base + annual_prediction_anomaly * temp_scaling
+
     def _generate_timeseries(
         self,
         variable,
@@ -798,6 +930,7 @@ class MeteorInterface:
         aggregations,
         custom_regions=None,
         include_noise=True,
+        temp_scaling_ts=None,
         verbose=True,
     ):
         """
@@ -842,7 +975,12 @@ class MeteorInterface:
 
         # Get pattern scaling results
         pattern_result = self._get_or_compute_pattern_scaling(
-            variable, scenario, start_year, end_year, verbose
+            variable,
+            scenario,
+            start_year,
+            end_year,
+            temp_scaling_ts=temp_scaling_ts,
+            verbose=verbose,
         )
         monthly_prediction = pattern_result[0]
         monthly_warming = pattern_result[1]
@@ -1181,6 +1319,7 @@ class MeteorInterface:
         n_realizations,
         gridded_spec,
         include_noise=True,
+        temp_scaling_ts=None,
         verbose=True,
     ):
         """
@@ -1203,7 +1342,12 @@ class MeteorInterface:
         # Get pattern scaling results (from cache or compute)
         pattern_result = (
             self._get_or_compute_pattern_scaling(  # pylint: disable=unused-variable
-                variable, scenario, start_year, end_year, verbose
+                variable,
+                scenario,
+                start_year,
+                end_year,
+                temp_scaling_ts=temp_scaling_ts,
+                verbose=verbose,
             )
         )
         monthly_prediction = pattern_result[0]

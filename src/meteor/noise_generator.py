@@ -659,8 +659,8 @@ class MeteorNoiseGenerator:
         lons_normalized = lons % 360
 
         # Find nearest latitude
-        print(lats)
-        print(target_lat)
+        # print(lats)
+        # print(target_lat)
         lat_idx = np.argmin(np.abs(lats - target_lat))
 
         # Find nearest longitude

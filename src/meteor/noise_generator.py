@@ -85,16 +85,17 @@ class MeteorNoiseGenerator:
         self._regional_eof_projections = {}
 
         # Diagnostic outputs (optional, set during fit)
-        self.diagnostic_X_features = None
-        self.diagnostic_t_glob = None
-        self.diagnostic_time = None
+        self.diagnostics = {}
+        self.diagnostics["X_features"] = None
+        self.diagnostics["t_glob"] = None
+        self.diagnostics["time"] = None
 
         # Model performance metrics (set during fit)
-        self.seasonal_r2 = None
-        self.total_variance_explained = None
-        self.diagnostic_seasonal_coef = None
-        self.diagnostic_seasonal_intercept = None
-        self.diagnostic_Y_data = None
+        self.diagnostics["seasonal_r2"] = None
+        self.diagnostics["total_variance_explained"] = None
+        self.diagnostics["seasonal_coef"] = None
+        self.diagnostics["seasonal_intercept"] = None
+        self.diagnostics["Y_data"] = None
 
     def _fix_coords_to_np(self):
         """Ensure coordinates are NumPy arrays for serialization."""
@@ -205,8 +206,8 @@ class MeteorNoiseGenerator:
             falls back to using first 42 years of training data as baseline.
         save_diagnostics : bool, default False
             If True, saves the X features matrix, global mean, and time arrays
-            to self.diagnostic_X_features, self.diagnostic_t_glob, and
-            self.diagnostic_time for debugging purposes.
+            to self.diagnostics dictionary with corresponding titles, 
+            X_features, t_glob, and time for debugging purposes.
         verbose : bool, default False
             If True, prints variance decomposition statistics after fitting.
         """
@@ -273,9 +274,9 @@ class MeteorNoiseGenerator:
 
         # Save diagnostic outputs if requested
         if save_diagnostics:
-            self.diagnostic_X_features = X.copy()
-            self.diagnostic_t_glob = t_glob.copy()
-            self.diagnostic_time = time.copy()
+            self.diagnostics["X_features"] = X.copy()
+            self.diagnostics["t_glob"] = t_glob.copy()
+            self.diagnostics["time"] = time.copy()
             print("   📊 Diagnostic outputs saved:")
             print(f"      X_features shape: {X.shape}")
             print(f"      t_glob shape: {t_glob.shape}")
@@ -293,9 +294,9 @@ class MeteorNoiseGenerator:
 
         # Save additional diagnostic outputs if requested
         if save_diagnostics:
-            self.diagnostic_seasonal_coef = self.seasonal_model.coef_.copy()
-            self.diagnostic_seasonal_intercept = self.seasonal_model.intercept_.copy()
-            self.diagnostic_Y_data = Y.copy()
+            self.diagnostics["seasonal_coef"] = self.seasonal_model.coef_.copy()
+            self.diagnostics["seasonal_intercept"] = self.seasonal_model.intercept_.copy()
+            self.diagnostics["Y_data"] = Y.copy()
             print("   📊 Seasonal model diagnostics saved:")
             print(
                 f"      Coefficients shape: {self.seasonal_model.coef_.shape} (gridpoints × features)"
@@ -353,8 +354,8 @@ class MeteorNoiseGenerator:
         total_var_explained = seasonal_r2 + (1 - seasonal_r2) * pca_var_explained
 
         # Store for access
-        self.seasonal_r2 = seasonal_r2
-        self.total_variance_explained = total_var_explained
+        self.diagnostics["seasonal_r2"] = seasonal_r2
+        self.diagnostics["total_variance_explained"] = total_var_explained
 
         if verbose:
             print("Noise generator fitted successfully.")

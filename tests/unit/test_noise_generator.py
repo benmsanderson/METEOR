@@ -380,22 +380,26 @@ def test_baseline_handling():
     assert generator.diagnostics["time"] is None
     assert generator.diagnostics["seasonal_coef"] is None
     assert generator.diagnostics["seasonal_intercept"] is None
-    assert generator.diagnostics["Y_data"] is  None
+    assert generator.diagnostics["Y_data"] is None
     assert generator.diagnostics["seasonal_r2"] is None
     assert generator.diagnostics["total_variance_explained"] is None
 
     # Test with numeric baseline
-    generator.fit(data, "tas", picontrol_baseline=15.0,)
+    generator.fit(
+        data,
+        "tas",
+        picontrol_baseline=15.0,
+    )
     assert generator.diagnostics["X_features"] is None
     assert generator.diagnostics["t_glob"] is None
     assert generator.diagnostics["time"] is None
     assert generator.diagnostics["seasonal_coef"] is None
     assert generator.diagnostics["seasonal_intercept"] is None
-    assert generator.diagnostics["Y_data"] is  None
+    assert generator.diagnostics["Y_data"] is None
     assert generator.diagnostics["seasonal_r2"] is not None
     assert generator.diagnostics["total_variance_explained"] is not None
     s_r2_1 = generator.diagnostics["seasonal_r2"]
-    var_exp_1 = generator.diagnostics["total_variance_explained"] 
+    var_exp_1 = generator.diagnostics["total_variance_explained"]
     assert s_r2_1 is not None
     assert var_exp_1 is not None
     assert s_r2_1 > 0  # Should have some seasonal skill
@@ -403,7 +407,7 @@ def test_baseline_handling():
     assert var_exp_1 <= 1.0  # Variance explained should be between 0 and 1
     generator.fit(data, "tas", picontrol_baseline=None)
     s_r2_2 = generator.diagnostics["seasonal_r2"]
-    var_exp_2 = generator.diagnostics["total_variance_explained"] 
+    var_exp_2 = generator.diagnostics["total_variance_explained"]
     assert np.allclose(s_r2_1, s_r2_2)  # Should be baseline-independent
     assert np.allclose(
         var_exp_1, var_exp_2
@@ -412,7 +416,7 @@ def test_baseline_handling():
     baseline_array = np.array([14.5, 15.0, 14.8])
     generator.fit(data, "tas", picontrol_baseline=baseline_array)
     assert np.allclose(generator.diagnostics["seasonal_r2"], s_r2_1)
-    assert np.allclose(generator.diagnostics["total_variance_explained"] , var_exp_1)
+    assert np.allclose(generator.diagnostics["total_variance_explained"], var_exp_1)
 
 
 def test_custom_global_temp_validation_error():

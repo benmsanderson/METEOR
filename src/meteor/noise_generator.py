@@ -206,7 +206,7 @@ class MeteorNoiseGenerator:
             falls back to using first 42 years of training data as baseline.
         save_diagnostics : bool, default False
             If True, saves the X features matrix, global mean, and time arrays
-            to self.diagnostics dictionary with corresponding titles, 
+            to self.diagnostics dictionary with corresponding titles,
             X_features, t_glob, and time for debugging purposes.
         verbose : bool, default False
             If True, prints variance decomposition statistics after fitting.
@@ -295,7 +295,9 @@ class MeteorNoiseGenerator:
         # Save additional diagnostic outputs if requested
         if save_diagnostics:
             self.diagnostics["seasonal_coef"] = self.seasonal_model.coef_.copy()
-            self.diagnostics["seasonal_intercept"] = self.seasonal_model.intercept_.copy()
+            self.diagnostics["seasonal_intercept"] = (
+                self.seasonal_model.intercept_.copy()
+            )
             self.diagnostics["Y_data"] = Y.copy()
             print("   📊 Seasonal model diagnostics saved:")
             print(

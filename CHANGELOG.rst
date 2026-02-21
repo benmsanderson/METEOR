@@ -63,6 +63,7 @@ The changes listed in this file are categorised as follows:
     - Separate stochastic PC generation via ``generate_stochastic_pcs()``
     - Exogenous variable support in VARX models via ``use_exog`` parameter
     - Diagnostic output saving with ``save_diagnostics=True``
+    - Added accessible variance decomposition metrics for model evaluation
 - **Comprehensive test coverage**
     - Unit tests for ``MeteorInterface`` (``tests/unit/test_meteor_interface.py``)
     - Unit tests for variable transforms (``tests/unit/test_variable_transforms.py``)
@@ -92,6 +93,7 @@ The changes listed in this file are categorised as follows:
     - Better error handling for cache operations
     - Support for composite scenario training data
     - sorting for ensemble members in correct numerical order
+    - More effective building of initial datasets avoiding fragmented pandas
 - **Updated `ScmEngineForPatternScaling` configuration**
     - New ``ScmEngineConfigurations`` dataclass for managing SCM inputs
     - ``_validate_and_set_defaults()`` method for configuration validation

@@ -52,7 +52,7 @@ def _get_default_config(variable):
         config["transform_type"] = "gamma"
     else:
         # Generic defaults for other variables
-        config["use_exog"] = "temp_only"
+        config["use_exog"] = "none"
         config["transform"] = False
 
     return config
@@ -416,6 +416,7 @@ class MeteorInterface:
                 use_exog=config["use_exog"],
                 custom_global_temp=monthly_warming_trimmed,  # ✅ Pass pattern prediction
                 cache_dir=os.path.join(self.cache_handler.cache_dir, "noise_models"),
+                verbose=verbose,
             )
 
     def _fit_transform(self, variable, transform_config):

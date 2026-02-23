@@ -225,7 +225,7 @@ def initialise_dataframe_and_models(
         sufficient_data = True
         model_missing_data = []
         model_rows = []
-        for i in range(len(exps)):
+        for i, _ in enumerate(exps):
             model_rows.append([None] * len(flds))
 
             # find first variable for expt/model
@@ -250,7 +250,7 @@ def initialise_dataframe_and_models(
 
                     tt = df_all1[i][j].query(f"source_id=='{mdl}' & member_id=='{mmb}'")
 
-                    if len(tt) < 0:
+                    if len(tt) == 0:
                         # Data query returned empty - this shouldn't happen
                         # given mmbs check
                         model_missing_data.append(f"{flds[j]}@{exps[i]}")
@@ -271,9 +271,7 @@ def initialise_dataframe_and_models(
                 for j in range(len(flds)):
                     df_all_rows[i][j].append(model_rows[i][j])
         else:
-            missing_data_info.append(
-                f"{mdl}: missing {', '.join(model_missing_data)}"
-            )
+            missing_data_info.append(f"{mdl}: missing {', '.join(model_missing_data)}")
 
     # Log which models were excluded due to missing data
     if missing_data_info:

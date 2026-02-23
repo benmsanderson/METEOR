@@ -163,3 +163,5 @@ streamlit/*
 bulk_cache_checkpoint.json
 
 paper_figures/*
+
+notebooks/output_data/*

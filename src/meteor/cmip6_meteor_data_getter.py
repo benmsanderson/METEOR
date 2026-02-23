@@ -208,27 +208,26 @@ def initialise_dataframe_and_models(
     """
     mdls1 = df_all1[0][0].source_id.unique()
     mdls1 = sorted(mdls1)
-    df_all = []
-    cnames = df_all1[0][0].columns
+    # Collect rows as lists, then build DataFrames at end
+    df_all_rows = []
     if mdl_skipmbrs is None:
         mdl_skipmbrs = {"NorESM2-LM": ["r1i1p1f1"]}
     for i in range(len(exps)):
-        # tmp = []
-        # for fld in flds:
-        #    tmp.append(pd.DataFrame(columns=cnames))
-        tmp = [pd.DataFrame(columns=cnames) for j in range(len(flds))]
-        df_all.append(tmp)
+        tmp = [[] for j in range(len(flds))]
+        df_all_rows.append(tmp)
 
     mdls = []
     missing_data_info = []  # Track which models are missing which data
 
-    n = 0
     for mdl in mdls1:  # pylint: disable=too-many-nested-blocks
 
         # Test that one ensemble member has all data:
         sufficient_data = True
         model_missing_data = []
-        for i, _ in enumerate(exps):
+        model_rows = []
+        for i in range(len(exps)):
+            model_rows.append([None] * len(flds))
+
             # find first variable for expt/model
             for j, _ in enumerate(flds):
                 if "historical" in exps:
@@ -250,26 +249,31 @@ def initialise_dataframe_and_models(
                             mmb = hmb[0]
 
                     tt = df_all1[i][j].query(f"source_id=='{mdl}' & member_id=='{mmb}'")
-                    if len(tt) > 0:
-                        df_all[i][j].loc[n] = tt.values[0]
-                    else:
+
+                    if len(tt) < 0:
                         # Data query returned empty - this shouldn't happen
                         # given mmbs check
                         model_missing_data.append(f"{flds[j]}@{exps[i]}")
                         sufficient_data = False
+                    model_rows[i][j] = tt.iloc[0].to_dict()
                 else:
                     # No member data found for this field/experiment
                     # combination
+                    mmb = -1
+                    model_rows[i][j] = None
                     model_missing_data.append(f"{flds[j]}@{exps[i]}")
                     sufficient_data = False
             # add model to final list
 
         if sufficient_data:
             mdls.append(mdl)
-            n = n + 1
-            # print(f"Model {mdl} has full data")
+            for i in range(len(exps)):
+                for j in range(len(flds)):
+                    df_all_rows[i][j].append(model_rows[i][j])
         else:
-            missing_data_info.append(f"{mdl}: missing {', '.join(model_missing_data)}")
+            missing_data_info.append(
+                f"{mdl}: missing {', '.join(model_missing_data)}"
+            )
 
     # Log which models were excluded due to missing data
     if missing_data_info:
@@ -279,6 +283,16 @@ def initialise_dataframe_and_models(
             # Show first 10
             "\n".join(f"  - {info}" for info in missing_data_info),
         )
+    # Build DataFrames from collected rows
+    df_all = []
+    for i in range(len(exps)):
+        tmp = []
+        for j in range(len(flds)):
+            if len(df_all_rows[i][j]) > 0:
+                tmp.append(pd.DataFrame(df_all_rows[i][j]))
+            else:
+                tmp.append(pd.DataFrame(columns=df_all1[0][0].columns))
+        df_all.append(tmp)
 
     return df_all, mdls
 

@@ -716,19 +716,20 @@ def test_custom_scenario(tmp_path, capsys, interface_factory):
     assert conc_used.index.max() == 2100
     assert monthly_prediction.sizes["month"] == 612
     assert len(monthly_warming) == 612
-        # Try to generate without training
-        with pytest.raises(RuntimeError) as exc_info:
-            interface.generate_ensemble_outputs(
-                scenario="ssp245",
-                start_year=2020,
-                end_year=2050,
-                n_realizations=10,
-                timeseries=["global"],
-            )
 
-        # Error message should mention which variable
-        assert "not trained" in str(exc_info.value).lower()
-        assert "train()" in str(exc_info.value).lower()
+    # Try to generate without training
+    with pytest.raises(RuntimeError) as exc_info:
+        interface.generate_ensemble_outputs(
+            scenario="ssp245",
+            start_year=2020,
+            end_year=2050,
+            n_realizations=10,
+            timeseries=["global"],
+        )
+
+    # Error message should mention which variable
+    assert "not trained" in str(exc_info.value).lower()
+    assert "train()" in str(exc_info.value).lower()
 
 
 def test_compute_timeseries_scaling():

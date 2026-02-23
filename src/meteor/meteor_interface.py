@@ -460,8 +460,8 @@ class MeteorInterface:
         include_noise: bool = True,
         save_to: str | None = None,
         custom_regions: dict | None = None,
-        temp_scaling_ts: xr.DataArray | None=None,
-        verbose:bool =True,
+        temp_scaling_ts: xr.DataArray | None = None,
+        verbose: bool = True,
     ):
         """
         Generate ensemble outputs for all variables.

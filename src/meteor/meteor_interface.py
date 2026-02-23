@@ -140,11 +140,7 @@ class MeteorInterface:
             Additional arguments for Cmip6MeteorDataGetter
         """
         # Normalize variables to list
-        if isinstance(variables, str):
-            self.variables = [variables]
-        else:
-            self.variables = list(variables)
-
+        self.variables = [variables] if isinstance(variables, str) else list(variables)
         self.model = model
         self.cache_handler = CacheHandler(
             purpose="general",
@@ -156,16 +152,31 @@ class MeteorInterface:
         default_exps = ["piControl", "historical", "ssp245", "abrupt-4xCO2"]
         default_dbe = ["CMIP", "CMIP", "ScenarioMIP", "CMIP"]
 
+        # Always request 'tas' (needed for noise model exog)
+        flds_to_request = self.variables.copy()
+        needs_tas = "tas" not in flds_to_request
+        if needs_tas:
+            flds_to_request.append("tas")
+
+        # Match tabids length to flds if provided
+        tabids_for_flds_to_request = data_getter_kwargs.get("tabids")
+        if tabids_for_flds_to_request is not None:
+            tabids_for_flds_to_request = (
+                [tabids_for_flds_to_request]
+                if isinstance(tabids_for_flds_to_request, str)
+                else list(tabids_for_flds_to_request)
+            )
+            if needs_tas:
+                tabids_for_flds_to_request.append("Amon")
+
         # Note: We explicitly enable caching for the high-level interface to provide
         # good performance by default. Users of the low-level Cmip6MeteorDataGetter
         # can control caching behavior directly.
         self.data_getter = Cmip6MeteorDataGetter(
             models=[self.model],
             exps=data_getter_kwargs.get("exps", default_exps),
-            tabids=data_getter_kwargs.get("tabids", None),
-            flds=list(
-                set(self.variables).union({"tas"})
-            ),  # Always include 'tas' for noise model exog
+            tabids=tabids_for_flds_to_request,
+            flds=flds_to_request,
             dbe=data_getter_kwargs.get("dbe", default_dbe),
             enable_cache=True,
             cache_handler=self.cache_handler,

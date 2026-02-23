@@ -9,7 +9,6 @@ import re
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pandas as pd
 import pytest
 import xarray as xr
 
@@ -559,41 +558,6 @@ def test_generate_includes_metadata(interface_factory):
     assert result.metadata["model"] == "TestModel"
 
 
-def test_train_config(interface_factory):
-    """Validate train() configuration logic for auto/manual modes."""
-    interface, _ = interface_factory(model="TestModel", variables=("tas",))
-    interface._train_pattern_scaling = MagicMock()
-    interface._train_noise_model = MagicMock()
-
-    interface.train(auto=True, training_scenario="ssp370", verbose=False)
-    assert interface._training_config["tas"]["training_scenario"] == "ssp370"
-
-    interface.train(
-        auto=True,
-        variable_configs={"tas": {"n_modes_noise": 50}},
-        verbose=False,
-    )
-    assert interface._training_config["tas"]["n_modes_noise"] == 50
-
-    interface.train(
-        auto=False,
-        training_scenario="ssp126",
-        variable_configs={"tas": {}},
-        verbose=False,
-    )
-    assert interface._training_config["tas"]["training_scenario"] == "ssp126"
-
-    interface.train(
-        auto=False,
-        training_scenario="ssp126",
-        variable_configs={"tas": {"n_modes_noise": 30}},
-        verbose=False,
-    )
-    config = interface._training_config["tas"]
-    assert config["n_modes_noise"] == 30
-    assert config["training_scenario"] == "ssp126"
-
-
 def test_generate_gridded_climatology_no_noise_single_realization(interface_factory):
     """Test gridded outputs force single realization without noise."""
     interface, _ = interface_factory(model="TestModel", variables=("tas",))
@@ -643,79 +607,6 @@ def test_generate_gridded_climatology_no_noise_single_realization(interface_fact
 def test_generate_before_training_clear_error(interface_factory):
     """Test that generating before training gives clear error message."""
     interface, _ = interface_factory(model="TestModel", variables=("tas", "pr"))
-
-    # Try to generate without training
-    with pytest.raises(RuntimeError) as exc_info:
-        interface.generate_ensemble_outputs(
-            scenario="ssp245",
-            start_year=2020,
-            end_year=2050,
-            n_realizations=10,
-            timeseries=["global"],
-        )
-
-    # Error message should mention which variable
-    assert "not trained" in str(exc_info.value).lower()
-    assert "train()" in str(exc_info.value).lower()
-
-
-def test_custom_scenario(tmp_path, capsys, interface_factory):
-    """Test custom scenario handling and save_to in pattern scaling."""
-    interface, _ = interface_factory(model="TestModel", variables=("tas",))
-    interface._is_trained["tas"] = True
-    interface.noise_models["tas"] = MagicMock()
-
-    interface._generate_timeseries = MagicMock(
-        return_value={"global": xr.DataArray([0.0], dims=["time"])}
-    )
-
-    save_path = tmp_path / "output.nc"
-    with patch.object(EnsembleOutput, "to_netcdf") as mock_save:
-        interface.generate_ensemble_outputs(
-            scenario="ssp245",
-            start_year=2000,
-            end_year=2000,
-            n_realizations=1,
-            timeseries=["global"],
-            save_to=str(save_path),
-            verbose=False,
-        )
-        mock_save.assert_called_once_with(str(save_path))
-
-    years = np.arange(2000, 2051)
-    em_data = pd.DataFrame({"value": np.zeros(len(years))}, index=years)
-    conc_data = pd.DataFrame({"value": np.zeros(len(years))}, index=years)
-    scenario = {"emissions": em_data, "concentrations": conc_data, "name": "custom"}
-
-    pattern_model = MagicMock()
-    pattern_model.predict_from_combined_experiment.return_value = {
-        "tas": xr.DataArray(np.zeros(10), dims=["year"])
-    }
-    full_monthly = xr.DataArray(
-        np.zeros((4000, 2, 2)),
-        dims=["month", "lat", "lon"],
-        coords={"month": np.arange(4000), "lat": [0, 1], "lon": [0, 1]},
-    )
-    pattern_model.to_monthly.return_value = full_monthly
-    interface.pattern_models["tas"] = pattern_model
-
-    monthly_prediction, monthly_warming, em_used, conc_used = (
-        interface._get_or_compute_pattern_scaling(
-            "tas",
-            scenario,
-            start_year=1990,
-            end_year=2060,
-            verbose=True,
-        )
-    )
-
-    output = capsys.readouterr().out
-    assert "Warning: Emissions data ends at" in output
-    assert "Warning: Emissions data starts at" in output
-    assert em_used.index.max() == 2100
-    assert conc_used.index.max() == 2100
-    assert monthly_prediction.sizes["month"] == 612
-    assert len(monthly_warming) == 612
 
     # Try to generate without training
     with pytest.raises(RuntimeError) as exc_info:

@@ -6,6 +6,7 @@ import logging
 import os
 import pickle  # nosec B403
 import re
+from typing import Iterable
 
 import gcsfs
 import numpy as np
@@ -23,7 +24,7 @@ cmip6_to_meteor_exp_remapper = {
 }
 
 
-def sort_member_ids_numerically(member_ids: np.ndarray) -> list:
+def sort_member_ids_numerically(member_ids: Iterable[str]) -> list[str]:
     """
     Sort CMIP6 member IDs numerically by the realization number.
 
@@ -32,12 +33,12 @@ def sort_member_ids_numerically(member_ids: np.ndarray) -> list:
 
     Parameters
     ----------
-    member_ids : np.ndarray
+    member_ids : Iterable[str]
         List of member IDs like ['r1i1p1f1', 'r10i1p1f1', 'r2i1p1f1']
 
     Returns
     -------
-    list
+    list[str]
         Member IDs sorted numerically by realization number (r value)
 
     Examples

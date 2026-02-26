@@ -39,7 +39,7 @@ def _get_default_config(variable):
         "n_modes_noise": 40,
         "lag_order": 2,
         "use_picontrol_baseline": True,
-        "training_scenario": "ssp245",  # ✅ Add default training scenario
+        "training_scenario": "ssp245",
     }
 
     # Variable-specific defaults
@@ -140,11 +140,7 @@ class MeteorInterface:
             Additional arguments for Cmip6MeteorDataGetter
         """
         # Normalize variables to list
-        if isinstance(variables, str):
-            self.variables = [variables]
-        else:
-            self.variables = list(variables)
-
+        self.variables = [variables] if isinstance(variables, str) else list(variables)
         self.model = model
         self.cache_handler = CacheHandler(
             purpose="general",
@@ -156,14 +152,31 @@ class MeteorInterface:
         default_exps = ["piControl", "historical", "ssp245", "abrupt-4xCO2"]
         default_dbe = ["CMIP", "CMIP", "ScenarioMIP", "CMIP"]
 
+        # Always request 'tas' (needed for noise model exog)
+        flds_to_request = self.variables.copy()
+        needs_tas = "tas" not in flds_to_request
+        if needs_tas:
+            flds_to_request.append("tas")
+
+        # Match tabids length to flds if provided
+        tabids_for_flds_to_request = data_getter_kwargs.get("tabids")
+        if tabids_for_flds_to_request is not None:
+            tabids_for_flds_to_request = (
+                [tabids_for_flds_to_request]
+                if isinstance(tabids_for_flds_to_request, str)
+                else list(tabids_for_flds_to_request)
+            )
+            if needs_tas:
+                tabids_for_flds_to_request.append("Amon")
+
         # Note: We explicitly enable caching for the high-level interface to provide
         # good performance by default. Users of the low-level Cmip6MeteorDataGetter
         # can control caching behavior directly.
         self.data_getter = Cmip6MeteorDataGetter(
+            models=[self.model],
             exps=data_getter_kwargs.get("exps", default_exps),
-            flds=list(
-                set(self.variables).union({"tas"})
-            ),  # Always include 'tas' for noise model exog
+            tabids=tabids_for_flds_to_request,
+            flds=flds_to_request,
             dbe=data_getter_kwargs.get("dbe", default_dbe),
             enable_cache=True,
             cache_handler=self.cache_handler,
@@ -449,18 +462,18 @@ class MeteorInterface:
 
     def generate_ensemble_outputs(
         self,
-        scenario,
-        start_year,
-        end_year,
-        n_realizations,
-        timeseries=None,
-        gridded=None,
+        scenario: str | dict,
+        start_year: int,
+        end_year: int,
+        n_realizations: int = 1,
+        timeseries: str | list[str] | None = None,
+        gridded: dict[str, int | list[int]] | None = None,
         impacts=None,
-        include_noise=True,
-        save_to=None,
-        custom_regions=None,
-        temp_scaling_ts=None,
-        verbose=True,
+        include_noise: bool = True,
+        save_to: str | None = None,
+        custom_regions: dict | None = None,
+        temp_scaling_ts: xr.DataArray | None = None,
+        verbose: bool = True,
     ):
         """
         Generate ensemble outputs for all variables.
@@ -479,15 +492,16 @@ class MeteorInterface:
             First year of output
         end_year : int
             Last year of output (inclusive)
-        n_realizations : int
+        n_realizations : int, optional
             Number of ensemble members to generate. Ignored if include_noise=False.
-        timeseries : list of str, optional
+            Default is 1.
+        timeseries : str or list of str, optional
             Spatial aggregations for time series output. Options:
             - 'global' : Global mean
             - 'regional:CODE' : AR6 region (e.g., 'regional:EAS')
-            - 'regional:custom:NAME' : Custom region (requires custom_regions dict)
+            - 'regional:custom:NAME' : Custom region (requires custom_regions)
             - 'point:LAT,LON' : Specific location (e.g., 'point:19.0,72.8')
-        gridded : dict, optional
+        gridded : dict[str, int | list[int]], optional
             Gridded output specification. Keys:
             - 'annual' : list of years for annual means
             - 'monthly' : True for all monthly fields (memory intensive!)
@@ -502,6 +516,9 @@ class MeteorInterface:
             Format: {'name': {'lat': (min, max), 'lon': (min, max)}}
         save_to : str, optional
             Path to save outputs to netCDF
+        custom_regions : dict, optional
+            Custom region definitions for 'regional:custom:NAME' aggregations.
+            Format: {'name': {'lat': (min, max), 'lon': (min, max)}}
         temp_scaling_ts: xr.DataArray, optional
             Should be one-dimensional xr.DataArray with dimension year, giving a
             timeseries of global mean temperatures to scale to. The timeseries length

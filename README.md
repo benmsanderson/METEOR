@@ -11,7 +11,7 @@ METEOR is a fast spatial climate emulator that generates large ensembles of mont
 git clone https://github.com/benmsanderson/METEOR.git
 cd METEOR
 make first-venv
-make clean  
+make clean
 make virtual-environment
 source venv/bin/activate
 ```
@@ -141,12 +141,12 @@ make test                 # run the full testsuite
 make test-pypi-install    # test whether installing from PyPI works
 make test-install         # test installing works
 make virtual-environment  # update venv, create a new venv if it doesn't exist make
-make first-venv           # create a new virtual environment for the very first repo 
+make first-venv           # create a new virtual environment for the very first repo
 ```
 
 ### Contributing
 1. Create feature branch from `main`
-2. Add tests for new functionality  
+2. Add tests for new functionality
 3. Ensure all tests pass (`make checks`)
 4. Update documentation as needed
 5. Submit pull request

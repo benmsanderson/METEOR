@@ -311,6 +311,7 @@ def cache_data_combination(
         compression_level_to_use = compression_level if enable_compression else 6
         if cache_dir:
             data_getter = Cmip6MeteorDataGetter(
+                models=[model],
                 cache_dir=str(cache_dir),
                 exps=[scenario],
                 flds=[variable],
@@ -320,6 +321,7 @@ def cache_data_combination(
             )
         else:
             data_getter = Cmip6MeteorDataGetter(
+                models=[model],
                 exps=[scenario],
                 flds=[variable],
                 enable_cache=True,  # Explicitly enable caching for bulk download

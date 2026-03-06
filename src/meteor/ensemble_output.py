@@ -129,7 +129,7 @@ class EnsembleOutput:
                         dim="year"
                     )
                     stacked = stacked.assign_coords(year=years)
-                    ds[f"{var_name}_grid_{safe_name}"] = stacked
+                    ds[f"{var_name}_grid_{safe_name}"] = (stacked.dims, stacked.data)
 
                 elif isinstance(grid_array, dict) and grid_name == "monthly":
                     years = sorted(grid_array.keys())
@@ -141,7 +141,7 @@ class EnsembleOutput:
                                     for y in years
                                     for m in range(1, 13)]
                     stacked = stacked.drop_vars(['date', 'year', 'month']).assign_coords(date=date_vals).transpose("date", "realization", "lat", "lon")
-                    ds[f"{var_name}_grid_{safe_name}"] = stacked
+                    ds[f"{var_name}_grid_{safe_name}"] = (stacked.dims, stacked.data)
 
                 else:
                     ds[f"{var_name}_grid_{safe_name}"] = grid_array

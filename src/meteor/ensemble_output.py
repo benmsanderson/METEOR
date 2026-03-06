@@ -119,15 +119,43 @@ class EnsembleOutput:
             # Create dataset for this variable
             ds = xr.Dataset()
 
+            # Do gridded variables first, because the timeseries variables just return arrays without start/end year information
+            for grid_name, grid_array in var_data.gridded.items():
+                safe_name = str(grid_name).replace("-", "_").replace(":", "_")
+                if isinstance(grid_array, dict) and grid_name == "annual":
+                    years = sorted(grid_array.keys())
+                    stacked = xr.concat(
+                        [grid_array[y] for y in years],
+                        dim="year"
+                    )
+                    stacked = stacked.assign_coords(year=years)
+                    ds[f"{var_name}_grid_{safe_name}"] = stacked
+
+                elif isinstance(grid_array, dict) and grid_name == "monthly":
+                    years = sorted(grid_array.keys())
+                    stacked = xr.concat(
+                                [grid_array[y] for y in years],
+                                dim="year").assign_coords(year=years)
+                    stacked = stacked.stack(date=("year", "month"))
+                    date_vals = [y * 100 + m
+                                    for y in years
+                                    for m in range(1, 13)]
+                    stacked = stacked.drop_vars(['date', 'year', 'month']).assign_coords(date=date_vals).transpose("date", "realization", "lat", "lon")
+                    ds[f"{var_name}_grid_{safe_name}"] = stacked
+
+                else:
+                    ds[f"{var_name}_grid_{safe_name}"] = grid_array
+
             # Add time series
             for ts_name, ts_array in var_data.timeseries.items():
                 safe_name = ts_name.replace(":", "_").replace(".", "p")
-                ds[f"{var_name}_{safe_name}"] = ts_array
-
-            # Add gridded outputs
-            for grid_name, grid_array in var_data.gridded.items():
-                safe_name = str(grid_name).replace("-", "_").replace(":", "_")
-                ds[f"{var_name}_grid_{safe_name}"] = grid_array
+                if ts_array.ndim == 1:
+                    dims = ("date",)
+                elif ts_array.ndim == 2:
+                    dims = ("realization", "date")
+                else:
+                    raise ValueError(f"Unexpected dimensions for {ts_name}: {ts_array.shape}")
+                ds[f"{var_name}_{safe_name}"] = (dims, ts_array)
 
             # Add impacts if requested
             if include_impacts:

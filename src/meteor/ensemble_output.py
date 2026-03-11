@@ -137,21 +137,24 @@ class EnsembleOutput:
                     date_vals = [y * 100 + m for y in years for m in range(1, 13)]
                     stacked = (
                         stacked.drop_vars(["date", "year", "month"])
-                        .assign_coords(date=date_vals)
-                        .transpose("date", "realization", "lat", "lon")
+                        .assign_coords(month=date_vals)
+                        .transpose("month", "realization", "lat", "lon")
                     )
                     ds[f"{var_name}_grid_{safe_name}"] = (stacked.dims, stacked.data)
 
                 else:
-                    ds[f"{var_name}_grid_{safe_name}"] = (grid_array.dims, grid_array.data)
+                    ds[f"{var_name}_grid_{safe_name}"] = (
+                        grid_array.dims,
+                        grid_array.data,
+                    )
 
             # Add time series
             for ts_name, ts_array in var_data.timeseries.items():
                 safe_name = ts_name.replace(":", "_").replace(".", "p")
                 if ts_array.ndim == 1:
-                    dims = ("date",)
+                    dims = ("month",)
                 elif ts_array.ndim == 2:
-                    dims = ("realization", "date")
+                    dims = ("realization", "month")
                 else:
                     raise ValueError(
                         f"Unexpected dimensions for {ts_name}: {ts_array.shape}"
@@ -163,7 +166,10 @@ class EnsembleOutput:
                 for impact_name, impact_dict in var_data.impacts.items():
                     for agg_name, impact_array in impact_dict.items():
                         safe_agg = agg_name.replace(":", "_").replace(".", "p")
-                        ds[f"{var_name}_{impact_name}_{safe_agg}"] = (impact_array.dims, impact_array.data)
+                        ds[f"{var_name}_{impact_name}_{safe_agg}"] = (
+                            impact_array.dims,
+                            impact_array.data,
+                        )
 
             datasets[var_name] = ds
 

@@ -17,21 +17,6 @@ The changes listed in this file are categorised as follows:
 [Unreleased]
 ---------------------
 
-### Added
-
-- (`#60 <https://github.com/benmsanderson/METEOR/pull/60>`_) Added ``models`` and ``tabids`` parameters to ``Cmip6MeteorDataGetter`` to allow filtering by specific climate models and querying different CMIP6 table IDs (defaults to Amon but no longer hardcoded)
-- (`#60 <https://github.com/benmsanderson/METEOR/pull/60>`_) Added type hints to function signatures in ``cmip6_meteor_data_getter.py`` and ``meteor_interface.py``
-- (`#60 <https://github.com/benmsanderson/METEOR/pull/60>`_) Added comprehensive test coverage for new functionality and some old missing tests in ``cmip6_meteor_data_getter.py``
-
-### Changed
-
-- (`#60 <https://github.com/benmsanderson/METEOR/pull/60>`_) Improved docstrings and error messages throughout ``cmip6_meteor_data_getter.py`` for better clarity and detailed information about missing data
-- (`#60 <https://github.com/benmsanderson/METEOR/pull/60>`_) Refactored ``_set_fld_exps_dbe`` to ``_set_models_flds_tabids_exps_dbe`` to support new model and table ID filtering capabilities
-
-### Fixed
-
-- (`#60 <https://github.com/benmsanderson/METEOR/pull/60>`_) Fixed default behavior for noise modelling - changed ``use_exog`` from ``"temp_only"`` to ``"none"`` for non-temperature/precipitation variables to avoid unintended use of temperature as an exogenous variable in noise models for other variables
-
 
 [Version 1.6.0]
 -----------------------------
@@ -73,6 +58,10 @@ The changes listed in this file are categorised as follows:
     - Configurable compression levels (1-9) with zlib compression
     - ~45% storage reduction for typical CMIP6 data
     - Enabled by default with ``compression_level=4``
+    - Added ``models`` and ``tabids`` parameters to ``Cmip6MeteorDataGetter`` to allow filtering by specific climate models and querying different CMIP6 table IDs (defaults to Amon but no longer hardcoded)
+    - Added type hints to function signatures in ``cmip6_meteor_data_getter.py`` and ``meteor_interface.py``
+    - Added comprehensive test coverage for new functionality and some old missing tests in ``cmip6_meteor_data_getter.py``
+    
 - **Enhanced noise model capabilities**
     - Regional mean generation with AR6 region support via ``generate_regional_mean_realizations()``
     - Point-based extraction for city-scale projections
@@ -110,6 +99,9 @@ The changes listed in this file are categorised as follows:
     - Support for composite scenario training data
     - sorting for ensemble members in correct numerical order
     - More effective building of initial datasets avoiding fragmented pandas
+    - Improved docstrings and error messages throughout ``cmip6_meteor_data_getter.py`` for better clarity and detailed information about missing data
+    - Refactored ``_set_fld_exps_dbe`` to ``_set_models_flds_tabids_exps_dbe`` to support new model and table ID filtering capabilities
+
 - **Updated `ScmEngineForPatternScaling` configuration**
     - New ``ScmEngineConfigurations`` dataclass for managing SCM inputs
     - ``_validate_and_set_defaults()`` method for configuration validation
@@ -143,6 +135,7 @@ The changes listed in this file are categorised as follows:
 - Noise model fitting with short time series (added minimum length check)
 - Error handling in gamma distribution fitting for edge cases
 - Configuration validation in SCM engine (nystart/emstart/nyend relationships)
+- Fixed default behavior for noise modelling - changed ``use_exog`` from ``"temp_only"`` to ``"none"`` for non-temperature/precipitation variables to avoid unintended use of temperature as an exogenous variable in noise models for other variables
 
 ### Storage Optimization
 

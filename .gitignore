@@ -5,6 +5,7 @@ __pycache__
 .env
 .cache/
 cache/
+data/
 
 #Tempfiles
 *~

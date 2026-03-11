@@ -243,6 +243,7 @@ def test_global_mean_auto_coordinate_detection():
     result = geo_data_utils.global_mean(renamed_data)
     assert result.ndim == 0  # Spatial dims should be removed
 
+
 def test_extend_temperature_anomaly_timeseries_for_scaling():
     # Create a simple temperature anomaly timeseries with a gap
     temp_anomaly = xr.DataArray(
@@ -252,7 +253,7 @@ def test_extend_temperature_anomaly_timeseries_for_scaling():
     annual_temp_prediction_gm_anomaly = xr.DataArray(
         [0.1, 0.2, 0.3, 0.4, 0.5], dims=["year"], coords={"year": target_years}
     )
-  
+
     extended = geo_data_utils.extend_temeperature_anomaly_timeseries_for_scaling(
         annual_temp_prediction_gm_anomaly, temp_anomaly
     )
@@ -261,6 +262,7 @@ def test_extend_temperature_anomaly_timeseries_for_scaling():
     assert extended[0] == 0.1  # Year before base should be same as base
     assert extended[2] == 0.2
     assert extended[3] == 0.3
-    assert extended[4] == 0.5  # Year after last should be same as annual_temp_prediction_gm_anomaly
+    assert (
+        extended[4] == 0.5
+    )  # Year after last should be same as annual_temp_prediction_gm_anomaly
     assert extended.coords["year"].values.tolist() == target_years.tolist()
-

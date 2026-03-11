@@ -656,9 +656,7 @@ def test_compute_timeseries_scaling():
         temp_scaling_ts = xr.DataArray(np.array([2.0, 2.0]), dims=["year"])
         with pytest.raises(
             ValueError,
-            match=re.escape(
-                "temp_scaling_ts must have a 'year' coordinate"
-            ),
+            match=re.escape("temp_scaling_ts must have a 'year' coordinate"),
         ):
             interface._compute_timeseries_scaling(
                 "tas", annual_prediction, 0, em_data, conc_data, temp_scaling_ts
@@ -667,8 +665,8 @@ def test_compute_timeseries_scaling():
             np.array([2.0]), dims=["year"], coords={"year": [2000]}
         )
         scaled = interface._compute_timeseries_scaling(
-                "tas", annual_prediction, 0, em_data, conc_data, temp_scaling_ts
-            )
+            "tas", annual_prediction, 0, em_data, conc_data, temp_scaling_ts
+        )
         assert scaled.shape == (1, 1, 1)
         assert np.isclose(scaled.values[0, 0, 0], 1.0)
         temp_scaling_ts = xr.DataArray(

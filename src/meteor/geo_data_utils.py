@@ -494,7 +494,7 @@ def list_ar6_regions():  # pragma: no cover
 def extend_temeperature_anomaly_timeseries_for_scaling(
     annual_temp_prediction_anomaly_gm,
     temperature_input_anomaly,
-):  
+):
     """
     Extend temperature anomaly time series for scaling beyond the range of the input data.
 
@@ -509,12 +509,20 @@ def extend_temeperature_anomaly_timeseries_for_scaling(
     temperature_input_anomaly : xarray.DataArray
         Temperature anomaly time series used for scaling (relative to base year)
     """
-    years_prediction = annual_temp_prediction_anomaly_gm[get_time_name(annual_temp_prediction_anomaly_gm)].values
-    years_input = temperature_input_anomaly[get_time_name(temperature_input_anomaly)].values
-    temperature_input_anomaly_extended = np.copy(annual_temp_prediction_anomaly_gm.values)
+    years_prediction = annual_temp_prediction_anomaly_gm[
+        get_time_name(annual_temp_prediction_anomaly_gm)
+    ].values
+    years_input = temperature_input_anomaly[
+        get_time_name(temperature_input_anomaly)
+    ].values
+    temperature_input_anomaly_extended = np.copy(
+        annual_temp_prediction_anomaly_gm.values
+    )
     for i, year in enumerate(years_prediction):
         if year in years_input:
-            temperature_input_anomaly_extended[i] = temperature_input_anomaly.sel({get_time_name(temperature_input_anomaly): year}).values
+            temperature_input_anomaly_extended[i] = temperature_input_anomaly.sel(
+                {get_time_name(temperature_input_anomaly): year}
+            ).values
     temperature_input_anomaly_extended = xr.DataArray(
         data=temperature_input_anomaly_extended,
         coords={get_time_name(annual_temp_prediction_anomaly_gm): years_prediction},

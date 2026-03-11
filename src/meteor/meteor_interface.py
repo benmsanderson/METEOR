@@ -15,11 +15,11 @@ from .cmip6_meteor_data_getter import Cmip6MeteorDataGetter
 from .ensemble_output import EnsembleOutput, VariableOutput
 from .geo_data_utils import (
     create_region_mask,
+    extend_temeperature_anomaly_timeseries_for_scaling,
     extract_point,
     get_time_name,
     global_mean,
     regional_mean,
-    extend_temeperature_anomaly_timeseries_for_scaling
 )
 from .impacts import DegreeDaysCalculator
 from .meteor import MeteorPatternScaling
@@ -879,8 +879,8 @@ class MeteorInterface:
             raise ValueError("temp_scaling_ts must be an xarray DataArray")
         if not hasattr(temp_scaling_ts, "year"):
             raise ValueError("temp_scaling_ts must have a 'year' coordinate")
-        if not "year" in temp_scaling_ts.coords:
-            raise ValueError("temp_scaling_ts must have a 'year' coordinate")       
+        if "year" not in temp_scaling_ts.coords:
+            raise ValueError("temp_scaling_ts must have a 'year' coordinate")
 
         # TODO do some cutting to correct values to match the time range of the temp_scaling_ts if needed
         if hasattr(annual_prediction, "year"):
@@ -916,10 +916,11 @@ class MeteorInterface:
             )
         temperature_input_anomaly = temp_scaling_ts - temperature_input_base
         if len(temperature_input_anomaly) != len(annual_temp_prediction_gm_anomaly):
-            temperature_input_anomaly = extend_temeperature_anomaly_timeseries_for_scaling(
-                annual_temp_prediction_gm_anomaly,
-                temperature_input_anomaly,
-                base_year=base_year,
+            temperature_input_anomaly = (
+                extend_temeperature_anomaly_timeseries_for_scaling(
+                    annual_temp_prediction_gm_anomaly,
+                    temperature_input_anomaly,
+                )
             )
         print(temp_scaling_ts.shape)
         print(temperature_input_anomaly.shape, annual_temp_prediction_gm_anomaly.shape)

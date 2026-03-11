@@ -19,6 +19,7 @@ from .geo_data_utils import (
     get_time_name,
     global_mean,
     regional_mean,
+    extend_temeperature_anomaly_timeseries_for_scaling
 )
 from .impacts import DegreeDaysCalculator
 from .meteor import MeteorPatternScaling
@@ -878,16 +879,9 @@ class MeteorInterface:
             raise ValueError("temp_scaling_ts must be an xarray DataArray")
         if not hasattr(temp_scaling_ts, "year"):
             raise ValueError("temp_scaling_ts must have a 'year' coordinate")
-        if not len(temp_scaling_ts.year) == len(
-            annual_prediction[get_time_name(annual_prediction)]
-        ):
-            raise ValueError(
-                f"temp_scaling_ts temporal extent ({len(temp_scaling_ts.year)}) must match annual_prediction time dimension ({len(annual_prediction[get_time_name(annual_prediction)])})"
-            )
-        if base_year not in temp_scaling_ts.year:
-            raise ValueError(
-                f"base_year {base_year} not found in temp_scaling_ts years"
-            )
+        if not "year" in temp_scaling_ts.coords:
+            raise ValueError("temp_scaling_ts must have a 'year' coordinate")       
+
         # TODO do some cutting to correct values to match the time range of the temp_scaling_ts if needed
         if hasattr(annual_prediction, "year"):
             annual_prediction_base = annual_prediction.sel(year=base_year)
@@ -896,7 +890,10 @@ class MeteorInterface:
                 0
             ]  # Assuming first value corresponds to base_year
         annual_prediction_anomaly = annual_prediction - annual_prediction_base
-        temperature_input_base = temp_scaling_ts.sel(year=base_year)
+        if base_year not in temp_scaling_ts.year:
+            temperature_input_base = global_mean(annual_prediction_base)
+        else:
+            temperature_input_base = temp_scaling_ts.sel(year=base_year)
         if verbose and temperature_input_base != 0:  # pragma: no cover
             print(
                 f"The baseline scaling temperature is non-zero ({temperature_input_base})"
@@ -918,7 +915,14 @@ class MeteorInterface:
                 annual_temp_prediction - annual_temp_prediction_base
             )
         temperature_input_anomaly = temp_scaling_ts - temperature_input_base
-
+        if len(temperature_input_anomaly) != len(annual_temp_prediction_gm_anomaly):
+            temperature_input_anomaly = extend_temeperature_anomaly_timeseries_for_scaling(
+                annual_temp_prediction_gm_anomaly,
+                temperature_input_anomaly,
+                base_year=base_year,
+            )
+        print(temp_scaling_ts.shape)
+        print(temperature_input_anomaly.shape, annual_temp_prediction_gm_anomaly.shape)
         temp_scaling = np.where(
             annual_temp_prediction_gm_anomaly.values != 0,
             temperature_input_anomaly.values / annual_temp_prediction_gm_anomaly.values,

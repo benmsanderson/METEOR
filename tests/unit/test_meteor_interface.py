@@ -657,7 +657,7 @@ def test_compute_timeseries_scaling():
         with pytest.raises(
             ValueError,
             match=re.escape(
-                "temp_scaling_ts temporal extent (2) must match annual_prediction time dimension (1)"
+                "temp_scaling_ts must have a 'year' coordinate"
             ),
         ):
             interface._compute_timeseries_scaling(
@@ -666,12 +666,11 @@ def test_compute_timeseries_scaling():
         temp_scaling_ts = xr.DataArray(
             np.array([2.0]), dims=["year"], coords={"year": [2000]}
         )
-        with pytest.raises(
-            ValueError, match="base_year 0 not found in temp_scaling_ts years"
-        ):
-            interface._compute_timeseries_scaling(
+        scaled = interface._compute_timeseries_scaling(
                 "tas", annual_prediction, 0, em_data, conc_data, temp_scaling_ts
             )
+        assert scaled.shape == (1, 1, 1)
+        assert np.isclose(scaled.values[0, 0, 0], 1.0)
         temp_scaling_ts = xr.DataArray(
             np.array([2.0]), dims=["year"], coords={"year": [0]}
         )

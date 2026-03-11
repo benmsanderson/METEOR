@@ -143,6 +143,7 @@ The changes listed in this file are categorised as follows:
 - Noise model fitting with short time series (added minimum length check)
 - Error handling in gamma distribution fitting for edge cases
 - Configuration validation in SCM engine (nystart/emstart/nyend relationships)
+- Ensemble saving to netCDF can handle annual and monthly gridded data in same Dataset (#68)
 
 ### Storage Optimization
 

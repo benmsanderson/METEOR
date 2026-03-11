@@ -124,29 +124,24 @@ class EnsembleOutput:
                 safe_name = str(grid_name).replace("-", "_").replace(":", "_")
                 if isinstance(grid_array, dict) and grid_name == "annual":
                     years = sorted(grid_array.keys())
-                    stacked = xr.concat([grid_array[y] for y in years], dim="year")
-                    stacked = stacked.assign_coords(year=years)
-                    ds[f"{var_name}_grid_{safe_name}"] = (stacked.dims, stacked.data)
-
-                elif isinstance(grid_array, dict) and grid_name == "monthly":
-                    years = sorted(grid_array.keys())
                     stacked = xr.concat(
                         [grid_array[y] for y in years], dim="year"
                     ).assign_coords(year=years)
-                    stacked = stacked.stack(date=("year", "month"))
-                    date_vals = [y * 100 + m for y in years for m in range(1, 13)]
-                    stacked = (
-                        stacked.drop_vars(["date", "year", "month"])
-                        .assign_coords(month=date_vals)
-                        .transpose("month", "realization", "lat", "lon")
-                    )
-                    ds[f"{var_name}_grid_{safe_name}"] = (stacked.dims, stacked.data)
+                    ds[f"{var_name}_grid_{safe_name}"] = stacked
+
+                elif isinstance(grid_array, dict) and grid_name == "monthly":
+                    years = sorted(grid_array.keys())
+                    slices = []
+                    for y in years:
+                        da = grid_array[y]
+                        yyyymm = [y * 100 + m for m in range(1, 13)]
+                        slices.append(da.assign_coords(month=yyyymm))
+                    stacked = xr.concat(slices, dim="month")
+                    stacked = stacked.transpose("month", "realization", "lat", "lon")
+                    ds[f"{var_name}_grid_{safe_name}"] = stacked
 
                 else:
-                    ds[f"{var_name}_grid_{safe_name}"] = (
-                        grid_array.dims,
-                        grid_array.data,
-                    )
+                    ds[f"{var_name}_grid_{safe_name}"] = grid_array
 
             # Add time series
             for ts_name, ts_array in var_data.timeseries.items():

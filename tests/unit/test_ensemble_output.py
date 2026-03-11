@@ -392,3 +392,140 @@ def test_to_netcdf_multiple_variables():
 
     if os.path.exists(tmp_path):
         os.remove(tmp_path)
+
+
+def test_to_netcdf_annual_gridded():
+    """Test saving only annual gridded data to netCDF."""
+    lats = [-30.0, 0.0, 30.0, 60.0]
+    lons = [0.0, 120.0, 240.0]
+    var_tas = VariableOutput("tas")
+    var_tas.gridded["annual"] = {
+        2020: xr.DataArray(
+            np.random.standard_normal(size=(5, 4, 3)),
+            dims=["realization", "lat", "lon"],
+            coords={"lat": lats, "lon": lons},
+        )
+    }
+
+    ensemble = EnsembleOutput({"tas": var_tas})
+
+    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    with patch("builtins.print"):
+        ensemble.to_netcdf(tmp_path, include_impacts=False)
+
+    loaded = xr.open_dataset(tmp_path)
+    assert "tas_grid_annual" in loaded.data_vars
+    arr = loaded["tas_grid_annual"]
+    assert arr.sizes["year"] == 1
+    assert arr.sizes["realization"] == 5
+    assert arr.sizes["lat"] == 4
+    assert arr.sizes["lon"] == 3
+    # Verify coordinate values are preserved
+    assert arr.coords["year"].values[0] == 2020
+    np.testing.assert_array_equal(arr.coords["lat"].values, lats)
+    np.testing.assert_array_equal(arr.coords["lon"].values, lons)
+    loaded.close()
+
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+
+
+def test_to_netcdf_monthly_gridded():
+    """Test saving only monthly gridded data to netCDF."""
+    lats = [-30.0, 0.0, 30.0, 60.0]
+    lons = [0.0, 120.0, 240.0]
+    var_pr = VariableOutput("pr")
+    var_pr.gridded["monthly"] = {
+        2020: xr.DataArray(
+            np.random.standard_normal(size=(5, 12, 4, 3)),
+            dims=["realization", "month", "lat", "lon"],
+            coords={"month": np.arange(1, 13), "lat": lats, "lon": lons},
+        )
+    }
+
+    ensemble = EnsembleOutput({"pr": var_pr})
+
+    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    with patch("builtins.print"):
+        ensemble.to_netcdf(tmp_path, include_impacts=False)
+
+    loaded = xr.open_dataset(tmp_path)
+    assert "pr_grid_monthly" in loaded.data_vars
+    arr = loaded["pr_grid_monthly"]
+    assert arr.sizes["month"] == 12
+    assert arr.sizes["realization"] == 5
+    assert arr.sizes["lat"] == 4
+    assert arr.sizes["lon"] == 3
+    # Verify YYYYMM encoding and spatial coords
+    assert arr.coords["month"].values[0] == 202001
+    assert arr.coords["month"].values[-1] == 202012
+    np.testing.assert_array_equal(arr.coords["lat"].values, lats)
+    np.testing.assert_array_equal(arr.coords["lon"].values, lons)
+    loaded.close()
+
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+
+
+def test_to_netcdf_annual_and_monthly_gridded():
+    """Test saving both annual and monthly gridded data to netCDF."""
+    years = [2025, 2026]
+    lats = [-45.0, 0.0, 45.0]
+    lons = [0.0, 180.0]
+
+    var_tas = VariableOutput("tas")
+    var_tas.gridded["annual"] = {
+        y: xr.DataArray(
+            np.random.standard_normal(size=(3, 3, 2)),
+            dims=["realization", "lat", "lon"],
+            coords={"lat": lats, "lon": lons},
+        )
+        for y in years
+    }
+    var_tas.gridded["monthly"] = {
+        y: xr.DataArray(
+            np.random.standard_normal(size=(3, 12, 3, 2)),
+            dims=["realization", "month", "lat", "lon"],
+            coords={"month": np.arange(1, 13), "lat": lats, "lon": lons},
+        )
+        for y in years
+    }
+
+    ensemble = EnsembleOutput({"tas": var_tas})
+
+    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    with patch("builtins.print"):
+        ensemble.to_netcdf(tmp_path, include_impacts=False)
+
+    loaded = xr.open_dataset(tmp_path)
+
+    # Annual gridded
+    assert "tas_grid_annual" in loaded.data_vars
+    annual = loaded["tas_grid_annual"]
+    assert annual.sizes["year"] == 2
+    np.testing.assert_array_equal(annual.coords["year"].values, years)
+
+    # Monthly gridded
+    assert "tas_grid_monthly" in loaded.data_vars
+    monthly = loaded["tas_grid_monthly"]
+    assert monthly.sizes["month"] == 24  # 2 years * 12
+    assert monthly.coords["month"].values[0] == 202501
+    assert monthly.coords["month"].values[12] == 202601
+    assert monthly.coords["month"].values[-1] == 202612
+
+    # Both share the same spatial coords
+    np.testing.assert_array_equal(annual.coords["lat"].values, lats)
+    np.testing.assert_array_equal(monthly.coords["lat"].values, lats)
+    np.testing.assert_array_equal(annual.coords["lon"].values, lons)
+    np.testing.assert_array_equal(monthly.coords["lon"].values, lons)
+
+    loaded.close()
+
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)

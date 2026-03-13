@@ -5,6 +5,8 @@ This module provides containers for METEOR ensemble outputs, including
 climate variables, spatial aggregations, and impact metrics.
 """
 
+from pathlib import Path
+
 import xarray as xr
 
 
@@ -177,6 +179,8 @@ class EnsembleOutput:
                 combined.attrs[key] = value
 
         # Save to netCDF
+        path = Path(path)
+        path.parent.mkdir(exist_ok=True, parents=True)
         combined.to_netcdf(path)
         print(f"✅ Saved ensemble to {path}")
 

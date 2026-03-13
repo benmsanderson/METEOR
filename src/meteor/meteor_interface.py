@@ -786,6 +786,9 @@ class MeteorInterface:
             base_year = 1750  # Default assumption
 
         if temp_scaling_ts is not None:
+            print(
+                f" Ts scaleing before calculating annual pred {temp_scaling_ts['year']}"
+            )
             annual_prediction = self._compute_timeseries_scaling(
                 variable,
                 annual_prediction,
@@ -914,7 +917,9 @@ class MeteorInterface:
             annual_temp_prediction_gm_anomaly = global_mean(
                 annual_temp_prediction - annual_temp_prediction_base
             )
-        temperature_input_anomaly = temp_scaling_ts - temperature_input_base
+        print(temp_scaling_ts.shape)
+        print(temperature_input_base.shape, annual_temp_prediction_gm_anomaly.shape)
+        temperature_input_anomaly = temp_scaling_ts - temperature_input_base.values
         if len(temperature_input_anomaly) != len(annual_temp_prediction_gm_anomaly):
             temperature_input_anomaly = (
                 extend_temeperature_anomaly_timeseries_for_scaling(

@@ -529,3 +529,32 @@ def extend_temeperature_anomaly_timeseries_for_scaling(
         dims=annual_temp_prediction_anomaly_gm.dims,
     )
     return temperature_input_anomaly_extended
+
+
+def find_time_dim_and_cut(base_array, n_time, n_lat, n_lon):
+    """
+    Base_array should have dimensions (time, lat, lon), but the ordering can be off
+    """
+    base_shape = base_array.shape
+    lat_dim = None
+    lon_dim = None
+    time_dim = 0
+    for i, dim_size in enumerate(base_shape):
+        if dim_size == n_lat and lat_dim is None:
+            lat_dim = i
+        elif dim_size == n_lon:
+            lon_dim = i
+        else:
+            time_dim = i
+    if lat_dim is None or lon_dim is None:
+        raise ValueError(
+            f"Couldn't find lat/lon dimensions in base array with shape {base_shape}"
+        )
+    if base_shape[time_dim] != n_time:
+        if time_dim == 0:
+            base_array = base_array[:n_time, :, :]
+        elif time_dim == 1:
+            base_array = base_array[:, :n_time, :]
+        elif time_dim == 2:
+            base_array = base_array[:, :, :n_time]
+    return base_array.transpose(time_dim, lat_dim, lon_dim)

@@ -266,3 +266,23 @@ def test_extend_temperature_anomaly_timeseries_for_scaling():
         extended[4] == 0.5
     )  # Year after last should be same as annual_temp_prediction_gm_anomaly
     assert extended.coords["year"].values.tolist() == target_years.tolist()
+
+
+def test_find_time_dim_and_cut():
+    # Create a DataArray with time dimension and extra dimensions
+    data = np.random.rand(10, 5, 5)
+    n_time = 8
+    n_lat = 5
+    n_lon = 5
+
+    cut_data = geo_data_utils.find_time_dim_and_cut(data, n_time, n_lat, n_lon)
+    assert cut_data.shape == (n_time, n_lat, n_lon)
+    # Test with time as second dimension
+    data2 = np.random.rand(5, 10, 5)
+    cut_data2 = geo_data_utils.find_time_dim_and_cut(data2, n_time, n_lat, n_lon)
+    assert cut_data2.shape == (n_time, n_lat, n_lon)
+
+    # Test with time as third dimension
+    data3 = np.random.rand(5, 5, 10)
+    cut_data3 = geo_data_utils.find_time_dim_and_cut(data3, n_time, n_lat, n_lon)
+    assert cut_data3.shape == (n_time, n_lat, n_lon)

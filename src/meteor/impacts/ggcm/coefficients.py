@@ -77,23 +77,47 @@ def get_yields(K, Ca, Ta, Wa, Na, T_agmerra, W_agmerra):
 
     # Transform inputs for polynomial evaluation
     C = C_san
-    T = T_san - T_agmerra   # temperature anomaly from AgMERRA baseline
-    W = W_san / W_agmerra   # precipitation ratio relative to AgMERRA baseline
+    T = T_san - T_agmerra  # temperature anomaly from AgMERRA baseline
+    W = W_san / W_agmerra  # precipitation ratio relative to AgMERRA baseline
     N = N_san
 
     # 35-term third-order polynomial (Eq. 1, Franke et al. 2020)
     # Python indices are shifted by -1 from the paper's 1-based notation.
     Yield = (
-        K[0] + K[1]*C + K[2]*T + K[3]*W + K[4]*N
-        + K[5]*C**2 + K[6]*C*T + K[7]*C*W + K[8]*C*N
-        + K[9]*T**2 + K[10]*T*W + K[11]*T*N
-        + K[12]*W**2 + K[13]*W*N + K[14]*N**2
-        + K[15]*C**3 + K[16]*C**2*T + K[17]*C**2*W + K[18]*C**2*N
-        + K[19]*C*T**2 + K[20]*C*T*W + K[21]*C*T*N
-        + K[22]*C*W**2 + K[23]*C*W*N + K[24]*C*N**2
-        + K[25]*T**3 + K[26]*T**2*W + K[27]*T**2*N
-        + K[28]*T*W**2 + K[29]*T*W*N + K[30]*T*N**2
-        + K[31]*W**3 + K[32]*W**2*N + K[33]*W*N**2
+        K[0]
+        + K[1] * C
+        + K[2] * T
+        + K[3] * W
+        + K[4] * N
+        + K[5] * C**2
+        + K[6] * C * T
+        + K[7] * C * W
+        + K[8] * C * N
+        + K[9] * T**2
+        + K[10] * T * W
+        + K[11] * T * N
+        + K[12] * W**2
+        + K[13] * W * N
+        + K[14] * N**2
+        + K[15] * C**3
+        + K[16] * C**2 * T
+        + K[17] * C**2 * W
+        + K[18] * C**2 * N
+        + K[19] * C * T**2
+        + K[20] * C * T * W
+        + K[21] * C * T * N
+        + K[22] * C * W**2
+        + K[23] * C * W * N
+        + K[24] * C * N**2
+        + K[25] * T**3
+        + K[26] * T**2 * W
+        + K[27] * T**2 * N
+        + K[28] * T * W**2
+        + K[29] * T * W * N
+        + K[30] * T * N**2
+        + K[31] * W**3
+        + K[32] * W**2 * N
+        + K[33] * W * N**2
     )
 
     # Yield is non-negative by definition

@@ -86,42 +86,38 @@ class MeteorInterface:
     --------
     >>> # Simple single-variable case
     >>> emulator = MeteorInterface(
-    ...     model='NorESM2-MM',
-    ...     variables='pr',
-    ...     cache_dir='./cache'
+    ...     model="NorESM2-MM", variables="pr", cache_dir="./cache"
     ... )
     >>> emulator.train()
     >>> ensemble = emulator.generate_ensemble_outputs(
-    ...     scenario='ssp245',
+    ...     scenario="ssp245",
     ...     start_year=2020,
     ...     end_year=2100,
     ...     n_realizations=100,
-    ...     timeseries=['global', 'regional:EAS']
+    ...     timeseries=["global", "regional:EAS"],
     ... )
     >>>
     >>> # Multi-variable with gridded output
     >>> emulator = MeteorInterface(
-    ...     model='CESM2',
-    ...     variables=['tas', 'pr'],
-    ...     cache_dir='./cache'
+    ...     model="CESM2", variables=["tas", "pr"], cache_dir="./cache"
     ... )
     >>> emulator.train()
     >>> ensemble = emulator.generate_ensemble_outputs(
-    ...     scenario='ssp245',
+    ...     scenario="ssp245",
     ...     start_year=2020,
     ...     end_year=2100,
     ...     n_realizations=100,
-    ...     timeseries=['global'],
-    ...     gridded={'annual': [2030, 2050, 2100]}
+    ...     timeseries=["global"],
+    ...     gridded={"annual": [2030, 2050, 2100]},
     ... )
     >>>
     >>> # Custom emissions scenario
     >>> ensemble = emulator.generate_ensemble_outputs(
-    ...     scenario={'emissions': 'path/to/custom_emissions.txt'},
+    ...     scenario={"emissions": "path/to/custom_emissions.txt"},
     ...     start_year=2020,
     ...     end_year=2100,
     ...     n_realizations=100,
-    ...     timeseries=['global']
+    ...     timeseries=["global"],
     ... )
     """
 
@@ -224,15 +220,18 @@ class MeteorInterface:
         >>> emulator.train()
         >>>
         >>> # Custom training scenario for all variables
-        >>> emulator.train(training_scenario='ssp370')
+        >>> emulator.train(training_scenario="ssp370")
         >>>
         >>> # Custom configuration with per-variable scenarios
         >>> emulator.train(
-        ...     training_scenario='ssp245',  # default for most variables
+        ...     training_scenario="ssp245",  # default for most variables
         ...     variable_configs={
-        ...         'tas': {'n_modes_noise': 40, 'use_exog': 'all'},
-        ...         'pr': {'n_modes_noise': 40, 'training_scenario': 'ssp370'}  # override for pr
-        ...     }
+        ...         "tas": {"n_modes_noise": 40, "use_exog": "all"},
+        ...         "pr": {
+        ...             "n_modes_noise": 40,
+        ...             "training_scenario": "ssp370",
+        ...         },  # override for pr
+        ...     },
         ... )
         """
         if verbose:  # pragma: no cover
@@ -538,23 +537,23 @@ class MeteorInterface:
         --------
         >>> # Generate ensemble with noise
         >>> ensemble = emulator.generate_ensemble_outputs(
-        ...     scenario='ssp245',
+        ...     scenario="ssp245",
         ...     start_year=2020,
         ...     end_year=2100,
         ...     n_realizations=100,
-        ...     timeseries=['global', 'regional:EAS', 'point:59.9,10.8'],
-        ...     gridded={'annual': [2030, 2050, 2100]},
-        ...     impacts={'tas': {'degree_days': {'hdd_base': 18.0, 'cdd_base': 18.0}}}
+        ...     timeseries=["global", "regional:EAS", "point:59.9,10.8"],
+        ...     gridded={"annual": [2030, 2050, 2100]},
+        ...     impacts={"tas": {"degree_days": {"hdd_base": 18.0, "cdd_base": 18.0}}},
         ... )
         >>>
         >>> # Generate climatology only (no noise)
         >>> climatology = emulator.generate_ensemble_outputs(
-        ...     scenario='ssp245',
+        ...     scenario="ssp245",
         ...     start_year=2020,
         ...     end_year=2100,
         ...     n_realizations=1,  # Ignored, forced to 1
-        ...     timeseries=['global'],
-        ...     include_noise=False
+        ...     timeseries=["global"],
+        ...     include_noise=False,
         ... )
         """
         # Handle climatology-only mode
@@ -1373,15 +1372,13 @@ class MeteorInterface:
             xarray DataArrays with gridded fields
         """
         # Get pattern scaling results (from cache or compute)
-        pattern_result = (
-            self._get_or_compute_pattern_scaling(  # pylint: disable=unused-variable
-                variable,
-                scenario,
-                start_year,
-                end_year,
-                temp_scaling_ts=temp_scaling_ts,
-                verbose=verbose,
-            )
+        pattern_result = self._get_or_compute_pattern_scaling(  # pylint: disable=unused-variable
+            variable,
+            scenario,
+            start_year,
+            end_year,
+            temp_scaling_ts=temp_scaling_ts,
+            verbose=verbose,
         )
         monthly_prediction = pattern_result[0]
         monthly_warming = pattern_result[1]
@@ -1592,7 +1589,6 @@ class MeteorInterface:
 
         # Check if degree days are requested
         if "degree_days" in impact_configs:
-
             dd_config = impact_configs["degree_days"]
 
             # Determine base temperature - use hdd_base if provided, otherwise cdd_base
@@ -1758,7 +1754,7 @@ class MeteorInterface:
         T_agmerra, W_agmerra = load_agmerra_baseline()  # (360, 720)
 
         # GGCM 0.5-degree target grid
-        lat_ggcm = np.arange(89.75, -90.0, -0.5)   # 360 values
+        lat_ggcm = np.arange(89.75, -90.0, -0.5)  # 360 values
         lon_ggcm = np.arange(-179.75, 180.0, 0.5)  # 720 values
 
         # --- Forcing data (emissions + concentrations) ---
@@ -1786,9 +1782,8 @@ class MeteorInterface:
         )["pr"]
 
         # 'time' dimension contains datetime64 values; filter to requested year range
-        time_mask = (
-            (annual_tas.time.dt.year >= start_year)
-            & (annual_tas.time.dt.year <= end_year)
+        time_mask = (annual_tas.time.dt.year >= start_year) & (
+            annual_tas.time.dt.year <= end_year
         )
         annual_tas = annual_tas.sel(time=time_mask)
         annual_pr = annual_pr.sel(time=time_mask)
@@ -1797,17 +1792,23 @@ class MeteorInterface:
         # --- piControl climatological gridded mean ---
         # Used to reconstruct absolute T and P from pattern scaling anomalies.
         if verbose:  # pragma: no cover
-            print("      → Loading piControl baseline for absolute T/P reconstruction...")
+            print(
+                "      → Loading piControl baseline for absolute T/P reconstruction..."
+            )
         picontrol = self.data_getter.make_meteor_training_data(
             "piControl", self.model, monthly=True
         )
         # The data getter adds an 'ens' dim AND a 'month' dim; we need to
         # average over ALL non-spatial dimensions to get a pure (lat, lon) field.
         spatial_dims = {"lat", "lon", "latitude", "longitude"}
-        non_spatial_dims_tas = [d for d in picontrol["tas"].dims if d not in spatial_dims]
-        non_spatial_dims_pr  = [d for d in picontrol["pr"].dims  if d not in spatial_dims]
+        non_spatial_dims_tas = [
+            d for d in picontrol["tas"].dims if d not in spatial_dims
+        ]
+        non_spatial_dims_pr = [d for d in picontrol["pr"].dims if d not in spatial_dims]
         picontrol_tas_mean = picontrol["tas"].mean(non_spatial_dims_tas)  # (lat, lon) K
-        picontrol_pr_mean  = picontrol["pr"].mean(non_spatial_dims_pr)    # (lat, lon) kg m-2 s-1
+        picontrol_pr_mean = picontrol["pr"].mean(
+            non_spatial_dims_pr
+        )  # (lat, lon) kg m-2 s-1
 
         # --- Detect lat/lon coordinate names in pattern scaling output ---
         def _find_coord(da, candidates):
@@ -1834,20 +1835,20 @@ class MeteorInterface:
 
         # --- Load K coefficient tensors ---
         k_by_crop = {
-            crop: load_coefficients(str(downloader.get_filepath(crop_model, crop, variant)))
+            crop: load_coefficients(
+                str(downloader.get_filepath(crop_model, crop, variant))
+            )
             for crop in crops
         }
 
         # --- Initialise output containers ---
-        crop_results = {
-            crop: {key: [] for key in agg_keys} for crop in crops
-        }
+        crop_results = {crop: {key: [] for key in agg_keys} for crop in crops}
 
         # --- Year loop ---
         for i, year in enumerate(years):
             # Pattern scaling annual anomalies on native CMIP6 grid
             tas_anom = annual_tas.isel(time=i)  # (lat, lon) K anomaly
-            pr_anom = annual_pr.isel(time=i)    # (lat, lon) kg m-2 s-1 anomaly
+            pr_anom = annual_pr.isel(time=i)  # (lat, lon) kg m-2 s-1 anomaly
 
             # Regrid anomalies to 0.5-degree grid
             tas_anom_ggcm = tas_anom.interp(
@@ -1858,7 +1859,7 @@ class MeteorInterface:
             ).values
 
             # Absolute values
-            tas_celsius = (tas_anom_ggcm + picontrol_tas_ggcm) - 273.15   # °C
+            tas_celsius = (tas_anom_ggcm + picontrol_tas_ggcm) - 273.15  # °C
             pr_mmyr = (pr_anom_ggcm + picontrol_pr_ggcm) * 86400.0 * 365.25  # mm/yr
 
             # Fill NaN (coastal/polar interpolation gaps) with climatological reference
@@ -1867,14 +1868,20 @@ class MeteorInterface:
 
             # CO2 for this year
             ca = float(
-                co2_series.loc[year] if year in co2_series.index
+                co2_series.loc[year]
+                if year in co2_series.index
                 else co2_series.iloc[-1]
             )
 
             for crop in crops:
                 yield_arr, _, _ = get_yields(
-                    k_by_crop[crop], ca, tas_celsius, pr_mmyr, n_fert,
-                    T_agmerra, W_agmerra,
+                    k_by_crop[crop],
+                    ca,
+                    tas_celsius,
+                    pr_mmyr,
+                    n_fert,
+                    T_agmerra,
+                    W_agmerra,
                 )
                 # Wrap as xr.DataArray for METEOR's spatial aggregation utilities
                 yield_da = xr.DataArray(
@@ -1891,7 +1898,9 @@ class MeteorInterface:
                         if custom_regions and region_name in custom_regions:
                             bbox = custom_regions[region_name]
                             mask = create_region_mask(yield_da, bbox=bbox)
-                            val = float(yield_da.where(mask).mean(["lat", "lon"]).values)
+                            val = float(
+                                yield_da.where(mask).mean(["lat", "lon"]).values
+                            )
                         else:
                             raise ValueError(
                                 f"Custom region '{region_name}' not found in custom_regions"

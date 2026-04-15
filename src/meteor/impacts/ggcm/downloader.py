@@ -114,13 +114,16 @@ class GgcmDownloader:
         total = int(resp.headers.get("content-length", 0)) + resume_bytes
         mode = "ab" if resume_bytes else "wb"
 
-        with open(filepath, mode) as fh, tqdm(
-            total=total,
-            initial=resume_bytes,
-            unit="B",
-            unit_scale=True,
-            desc=filepath.name,
-        ) as pbar:
+        with (
+            open(filepath, mode) as fh,
+            tqdm(
+                total=total,
+                initial=resume_bytes,
+                unit="B",
+                unit_scale=True,
+                desc=filepath.name,
+            ) as pbar,
+        ):
             for chunk in resp.iter_content(CHUNK_SIZE):
                 fh.write(chunk)
                 pbar.update(len(chunk))

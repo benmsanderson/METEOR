@@ -1372,13 +1372,15 @@ class MeteorInterface:
             xarray DataArrays with gridded fields
         """
         # Get pattern scaling results (from cache or compute)
-        pattern_result = self._get_or_compute_pattern_scaling(  # pylint: disable=unused-variable
-            variable,
-            scenario,
-            start_year,
-            end_year,
-            temp_scaling_ts=temp_scaling_ts,
-            verbose=verbose,
+        pattern_result = (
+            self._get_or_compute_pattern_scaling(  # pylint: disable=unused-variable
+                variable,
+                scenario,
+                start_year,
+                end_year,
+                temp_scaling_ts=temp_scaling_ts,
+                verbose=verbose,
+            )
         )
         monthly_prediction = pattern_result[0]
         monthly_warming = pattern_result[1]
@@ -1725,7 +1727,7 @@ class MeteorInterface:
             ``{crop_name: {agg_key: np.ndarray of shape (n_years,)}}``
             Yield in t dry matter / ha / yr.
         """
-        # pylint: disable=too-many-locals,too-many-branches
+        # pylint: disable=too-many-locals,too-many-branches,import-outside-toplevel
         from .impacts.ggcm.baseline import load_agmerra_baseline
         from .impacts.ggcm.coefficients import get_yields, load_coefficients
         from .impacts.ggcm.downloader import GgcmDownloader
@@ -1751,7 +1753,9 @@ class MeteorInterface:
         downloader.ensure_files(crops, crop_model, variant)
 
         # --- AgMERRA baseline bundled with the package ---
-        T_agmerra, W_agmerra = load_agmerra_baseline()  # (360, 720)
+        T_agmerra, W_agmerra = (  # pylint: disable=invalid-name
+            load_agmerra_baseline()
+        )  # (360, 720)
 
         # GGCM 0.5-degree target grid
         lat_ggcm = np.arange(89.75, -90.0, -0.5)  # 360 values

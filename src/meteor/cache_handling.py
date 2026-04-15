@@ -99,7 +99,9 @@ def _generate_cmip6_cache_key(method_name, *args, **kwargs):
         "kwargs": kwargs,
     }
     key_str = str(sorted(key_data.items()))
-    return hashlib.md5(key_str.encode()).hexdigest()  # nosec - Used for cache key generation, not security)
+    return hashlib.md5(
+        key_str.encode()
+    ).hexdigest()  # nosec - Used for cache key generation, not security)
 
 
 def _find_expected_variable_from_args(method_name, *args):

@@ -13,8 +13,8 @@ The AgMERRA 1980-2010 climatological baseline is bundled with this package.
 from .baseline import load_agmerra_baseline
 from .coefficients import get_yields, load_coefficients
 from .data_catalog import (
-    CROPS,
     CROP_MODELS,
+    CROPS,
     get_available_crops,
     get_available_models,
     get_download_url,

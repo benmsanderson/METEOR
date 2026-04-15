@@ -10,7 +10,7 @@ set the reference point for the anomaly inputs to the polynomial.
 
 import importlib.resources
 
-import netCDF4 as netcdf
+import netCDF4 as netcdf  # pylint: disable=no-member
 import numpy as np
 
 
@@ -27,12 +27,13 @@ def load_agmerra_baseline():
         Annual mean precipitation in mm/yr, floor-clipped at 1 mm/yr
         to avoid division-by-zero in the precipitation ratio computation.
     """
+    # pylint: disable=invalid-name
     data_pkg = importlib.resources.files("meteor.impacts.ggcm.data")
 
     with importlib.resources.as_file(
         data_pkg / "agmerra-tavg-avg-1980-2010-05deg-adjlon.nc4"
     ) as p:
-        nc = netcdf.Dataset(str(p), "r")
+        nc = netcdf.Dataset(str(p), "r")  # pylint: disable=no-member
         raw = nc.variables["tavg"][0, :, :]  # MaskedArray, °C
         # Convert to plain float64; fill masked ocean cells with 0 °C
         T_agmerra = np.ma.filled(raw, 0.0).astype(np.float64)
@@ -41,7 +42,7 @@ def load_agmerra_baseline():
     with importlib.resources.as_file(
         data_pkg / "agmerra-prate-avg-1980-2010-05deg-adjlon.nc4"
     ) as p:
-        nc = netcdf.Dataset(str(p), "r")
+        nc = netcdf.Dataset(str(p), "r")  # pylint: disable=no-member
         raw = nc.variables["prate"][0, :, :]  # MaskedArray, mm/day
         # Convert to mm/yr; fill masked ocean cells with a small positive value
         W_agmerra = np.ma.filled(raw, 1.0 / 365.25).astype(np.float64) * 365.25

@@ -10,7 +10,7 @@ import netCDF4 as netcdf
 import numpy as np
 
 
-def load_coefficients(filepath):
+def load_coefficients(filepath):  # pylint: disable=invalid-name
     """Load the K coefficient tensor from a GGCMI Phase 2 nc4 file.
 
     Parameters
@@ -24,13 +24,15 @@ def load_coefficients(filepath):
     K : np.ndarray, shape (35, 360, 720)
         Polynomial coefficients; spatially varying per 0.5-degree grid cell.
     """
-    nc = netcdf.Dataset(filepath, "r")
-    K = np.array(nc.variables["K_rf"][:, :, :], dtype=np.float64)
+    nc = netcdf.Dataset(filepath, "r")  # pylint: disable=no-member
+    K = np.array(  # pylint: disable=invalid-name
+        nc.variables["K_rf"][:, :, :], dtype=np.float64
+    )
     nc.close()
     return K
 
 
-def get_yields(K, Ca, Ta, Wa, Na, T_agmerra, W_agmerra):
+def get_yields(K, Ca, Ta, Wa, Na, T_agmerra, W_agmerra):  # pylint: disable=invalid-name
     """Evaluate the 35-term GGCMI Phase 2 crop yield polynomial.
 
     Implements Equation (1) from Franke et al. (2020).  Input bounds are
@@ -66,6 +68,7 @@ def get_yields(K, Ca, Ta, Wa, Na, T_agmerra, W_agmerra):
     T_oob : np.ndarray, shape (360, 720)
         Temperature out-of-bounds offset (degrees Celsius), same convention.
     """
+    # pylint: disable=invalid-name
     # Clamp inputs to valid ranges
     C_san = min(max(360.0, Ca), 810.0)
     T_san = np.minimum(np.maximum(T_agmerra - 1.0, Ta), T_agmerra + 6.0)

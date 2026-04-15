@@ -116,5 +116,8 @@ skip = [
     "src/meteor/_version.py",
 ]
 
+[tool.black]
+target-version = ["py312"]
+
 # ... other project metadata fields as listed in:
 #     https://packaging.python.org/en/latest/guides/writing-pyproject-toml/

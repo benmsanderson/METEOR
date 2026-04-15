@@ -77,8 +77,8 @@ class GgcmDownloader:
             return
 
         try:
-            import requests
-            from tqdm import tqdm
+            import requests  # pylint: disable=import-outside-toplevel
+            from tqdm import tqdm  # pylint: disable=import-outside-toplevel
         except ImportError as exc:
             raise ImportError(
                 "The 'requests' package is required to download GGCM files.\n"

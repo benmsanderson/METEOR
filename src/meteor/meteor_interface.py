@@ -1372,15 +1372,13 @@ class MeteorInterface:
             xarray DataArrays with gridded fields
         """
         # Get pattern scaling results (from cache or compute)
-        pattern_result = (
-            self._get_or_compute_pattern_scaling(  # pylint: disable=unused-variable
-                variable,
-                scenario,
-                start_year,
-                end_year,
-                temp_scaling_ts=temp_scaling_ts,
-                verbose=verbose,
-            )
+        pattern_result = self._get_or_compute_pattern_scaling(  # pylint: disable=unused-variable
+            variable,
+            scenario,
+            start_year,
+            end_year,
+            temp_scaling_ts=temp_scaling_ts,
+            verbose=verbose,
         )
         monthly_prediction = pattern_result[0]
         monthly_warming = pattern_result[1]

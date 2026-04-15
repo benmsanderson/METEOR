@@ -89,6 +89,9 @@ class EnsembleOutput:
     def __init__(self, results=None, metadata=None):
         self.variables = results or {}
         self.metadata = metadata or {}
+        # Top-level dict for crop yield impacts, which depend on both tas and pr.
+        # Structure: {crop_name: {agg_key: np.ndarray (n_years,)}}
+        self.crop_impacts = {}
 
     def __getitem__(self, key):
         """Access variable outputs."""

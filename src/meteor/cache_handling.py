@@ -660,6 +660,27 @@ class CacheHandler:
             cache_dir, f"cmip6-{model_name}-{scenario}_pattern_scaling.pkl"
         )
 
+    def get_subdir(self, name):
+        """Return the path to a named subdirectory within the cache root.
+
+        The directory is created on demand if it does not already exist.
+        Useful for non-CMIP6 data (e.g. GGCM coefficient files) that should
+        live alongside the standard cache structure.
+
+        Parameters
+        ----------
+        name : str
+            Subdirectory name (e.g. ``'ggcm'``).
+
+        Returns
+        -------
+        str
+            Absolute path to the subdirectory.
+        """
+        subdir = os.path.join(self.cache_dir, name)
+        os.makedirs(subdir, exist_ok=True)
+        return subdir
+
     def get_noise_model_cache_path(self, model_name, variable_name):
         """
         Get the standardized cache file path for a noise model.

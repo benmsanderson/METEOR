@@ -21,6 +21,7 @@ from .ensemble import (
     create_impact_ensemble,
     ensemble_statistics,
 )
+from .ggcm import GgcmDownloader, load_agmerra_baseline
 from .impacts_core import ImpactCalculator, ImpactEnsemble, ImpactResult
 
 __all__ = [
@@ -28,6 +29,8 @@ __all__ = [
     "ImpactResult",
     "ImpactEnsemble",
     "DegreeDaysCalculator",
+    "GgcmDownloader",
+    "load_agmerra_baseline",
     "apply_impact_calculator",
     "create_impact_ensemble",
     "ensemble_statistics",

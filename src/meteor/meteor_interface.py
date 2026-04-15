@@ -651,6 +651,22 @@ class MeteorInterface:
             },
         )
 
+        # Apply crop yield impacts if requested.
+        # These live on EnsembleOutput rather than on a single VariableOutput
+        # because they depend on both tas and pr together.
+        if impacts and "crop_yield" in impacts:
+            if verbose:  # pragma: no cover
+                print("\n🌾 Computing crop yield impacts...")
+            ensemble.crop_impacts = self._apply_crop_yields(
+                scenario,
+                start_year,
+                end_year,
+                impacts["crop_yield"],
+                timeseries_keys=timeseries if timeseries else [],
+                custom_regions=custom_regions,
+                verbose=verbose,
+            )
+
         # Save if requested
         if save_to:
             ensemble.to_netcdf(save_to)
@@ -1661,6 +1677,240 @@ class MeteorInterface:
                     print(f"         • CDD for {key}")
 
         return impacts
+
+    def _apply_crop_yields(
+        self,
+        scenario,
+        start_year,
+        end_year,
+        crop_config,
+        timeseries_keys=None,
+        custom_regions=None,
+        verbose=True,
+    ):
+        """Apply the GGCMI Phase 2 crop yield emulator to METEOR pattern outputs.
+
+        Uses annual gridded T and P from the pattern scaling (the deterministic
+        forced response) to drive the polynomial emulator of Franke et al. (2020).
+        Annual noise averages to approximately zero so the forced response is the
+        appropriate input for annual-mean crop yield calculations.
+
+        Parameters
+        ----------
+        scenario : str or dict
+            Scenario passed to generate_ensemble_outputs.
+        start_year : int
+            First year of output.
+        end_year : int
+            Last year of output (inclusive).
+        crop_config : dict
+            Keys:
+
+            ``crops`` : list of str
+                Crop names, e.g. ``['maize', 'spring_wheat']``.
+            ``crop_model`` : str, optional
+                GGCM model name (default ``'LPJmL'``).
+            ``variant`` : str, optional
+                ``'A0'`` (default) or ``'A1'`` (with adaptation).
+            ``N`` : float, optional
+                Uniform N fertilizer in kg N/ha/yr (default ``100``).
+
+        timeseries_keys : list of str, optional
+            Aggregation keys matching the ``timeseries`` argument of
+            generate_ensemble_outputs.  Defaults to ``['global']``.
+        custom_regions : dict, optional
+            Custom region bounding boxes for ``regional:custom:NAME`` keys.
+        verbose : bool
+            Print progress messages.
+
+        Returns
+        -------
+        dict
+            ``{crop_name: {agg_key: np.ndarray of shape (n_years,)}}``
+            Yield in t dry matter / ha / yr.
+        """
+        # pylint: disable=too-many-locals,too-many-branches
+        from .impacts.ggcm.baseline import load_agmerra_baseline
+        from .impacts.ggcm.coefficients import get_yields, load_coefficients
+        from .impacts.ggcm.downloader import GgcmDownloader
+
+        # --- Validate requirements ---
+        if "tas" not in self.variables or "pr" not in self.variables:
+            raise ValueError(
+                "Crop yield impacts require both 'tas' and 'pr' in the emulator "
+                "variables list. Include both when creating MeteorInterface."
+            )
+
+        crops = crop_config.get("crops", ["maize"])
+        if isinstance(crops, str):
+            crops = [crops]
+        crop_model = crop_config.get("crop_model", "LPJmL")
+        variant = crop_config.get("variant", "A0")
+        n_fert = float(crop_config.get("N", 100))
+        agg_keys = list(timeseries_keys) if timeseries_keys else ["global"]
+
+        # --- Ensure coefficient files are present (downloads if missing) ---
+        ggcm_dir = self.cache_handler.get_subdir("ggcm")
+        downloader = GgcmDownloader(ggcm_dir)
+        downloader.ensure_files(crops, crop_model, variant)
+
+        # --- AgMERRA baseline bundled with the package ---
+        T_agmerra, W_agmerra = load_agmerra_baseline()  # (360, 720)
+
+        # GGCM 0.5-degree target grid
+        lat_ggcm = np.arange(89.75, -90.0, -0.5)   # 360 values
+        lon_ggcm = np.arange(-179.75, 180.0, 0.5)  # 720 values
+
+        # --- Forcing data (emissions + concentrations) ---
+        scenario_info = parse_scenario_input(scenario)
+        if scenario_info["type"] == "ssp":
+            em_data, conc_data = load_emissions_concentrations_from_name(
+                scenario_info["name"]
+            )
+        else:
+            em_data, conc_data = load_emissions_concentrations(
+                scenario_info["emissions"], scenario_info["concentrations"]
+            )
+
+        # CO2 per year (ppm) from concentration data
+        co2_series = conc_data["CO2"]
+
+        # --- Annual gridded pattern scaling predictions ---
+        if verbose:  # pragma: no cover
+            print("      → Computing annual pattern scaling for crop inputs...")
+        annual_tas = self.pattern_models["tas"].predict_from_combined_experiment(
+            em_data, conc_data, ["tas"]
+        )["tas"]
+        annual_pr = self.pattern_models["pr"].predict_from_combined_experiment(
+            em_data, conc_data, ["pr"]
+        )["pr"]
+
+        # 'time' dimension contains datetime64 values; filter to requested year range
+        time_mask = (
+            (annual_tas.time.dt.year >= start_year)
+            & (annual_tas.time.dt.year <= end_year)
+        )
+        annual_tas = annual_tas.sel(time=time_mask)
+        annual_pr = annual_pr.sel(time=time_mask)
+        years = [int(y) for y in annual_tas.time.dt.year.values]
+
+        # --- piControl climatological gridded mean ---
+        # Used to reconstruct absolute T and P from pattern scaling anomalies.
+        if verbose:  # pragma: no cover
+            print("      → Loading piControl baseline for absolute T/P reconstruction...")
+        picontrol = self.data_getter.make_meteor_training_data(
+            "piControl", self.model, monthly=True
+        )
+        # The data getter adds an 'ens' dim AND a 'month' dim; we need to
+        # average over ALL non-spatial dimensions to get a pure (lat, lon) field.
+        spatial_dims = {"lat", "lon", "latitude", "longitude"}
+        non_spatial_dims_tas = [d for d in picontrol["tas"].dims if d not in spatial_dims]
+        non_spatial_dims_pr  = [d for d in picontrol["pr"].dims  if d not in spatial_dims]
+        picontrol_tas_mean = picontrol["tas"].mean(non_spatial_dims_tas)  # (lat, lon) K
+        picontrol_pr_mean  = picontrol["pr"].mean(non_spatial_dims_pr)    # (lat, lon) kg m-2 s-1
+
+        # --- Detect lat/lon coordinate names in pattern scaling output ---
+        def _find_coord(da, candidates):
+            return next((c for c in da.coords if c.lower() in candidates), None)
+
+        lat_n = _find_coord(annual_tas, ("lat", "latitude"))
+        lon_n = _find_coord(annual_tas, ("lon", "longitude"))
+        if lat_n is None or lon_n is None:
+            raise ValueError(
+                "Cannot find lat/lon coordinates in pattern scaling output. "
+                f"Available coords: {list(annual_tas.coords)}"
+            )
+
+        lat_n_pc = _find_coord(picontrol_tas_mean, ("lat", "latitude"))
+        lon_n_pc = _find_coord(picontrol_tas_mean, ("lon", "longitude"))
+
+        # --- Regrid piControl means to 0.5-degree grid (done once) ---
+        picontrol_tas_ggcm = picontrol_tas_mean.interp(
+            {lat_n_pc: lat_ggcm, lon_n_pc: lon_ggcm}, method="linear"
+        ).values  # (360, 720) K
+        picontrol_pr_ggcm = picontrol_pr_mean.interp(
+            {lat_n_pc: lat_ggcm, lon_n_pc: lon_ggcm}, method="linear"
+        ).values  # (360, 720) kg m-2 s-1
+
+        # --- Load K coefficient tensors ---
+        k_by_crop = {
+            crop: load_coefficients(str(downloader.get_filepath(crop_model, crop, variant)))
+            for crop in crops
+        }
+
+        # --- Initialise output containers ---
+        crop_results = {
+            crop: {key: [] for key in agg_keys} for crop in crops
+        }
+
+        # --- Year loop ---
+        for i, year in enumerate(years):
+            # Pattern scaling annual anomalies on native CMIP6 grid
+            tas_anom = annual_tas.isel(time=i)  # (lat, lon) K anomaly
+            pr_anom = annual_pr.isel(time=i)    # (lat, lon) kg m-2 s-1 anomaly
+
+            # Regrid anomalies to 0.5-degree grid
+            tas_anom_ggcm = tas_anom.interp(
+                {lat_n: lat_ggcm, lon_n: lon_ggcm}, method="linear"
+            ).values
+            pr_anom_ggcm = pr_anom.interp(
+                {lat_n: lat_ggcm, lon_n: lon_ggcm}, method="linear"
+            ).values
+
+            # Absolute values
+            tas_celsius = (tas_anom_ggcm + picontrol_tas_ggcm) - 273.15   # °C
+            pr_mmyr = (pr_anom_ggcm + picontrol_pr_ggcm) * 86400.0 * 365.25  # mm/yr
+
+            # Fill NaN (coastal/polar interpolation gaps) with climatological reference
+            tas_celsius = np.where(np.isfinite(tas_celsius), tas_celsius, T_agmerra)
+            pr_mmyr = np.where(np.isfinite(pr_mmyr), pr_mmyr, W_agmerra)
+
+            # CO2 for this year
+            ca = float(
+                co2_series.loc[year] if year in co2_series.index
+                else co2_series.iloc[-1]
+            )
+
+            for crop in crops:
+                yield_arr, _, _ = get_yields(
+                    k_by_crop[crop], ca, tas_celsius, pr_mmyr, n_fert,
+                    T_agmerra, W_agmerra,
+                )
+                # Wrap as xr.DataArray for METEOR's spatial aggregation utilities
+                yield_da = xr.DataArray(
+                    yield_arr,
+                    coords={"lat": lat_ggcm, "lon": lon_ggcm},
+                    dims=["lat", "lon"],
+                )
+
+                for key in agg_keys:
+                    if key == "global":
+                        val = float(global_mean(yield_da).values)
+                    elif key.startswith("regional:custom:"):
+                        region_name = key.split(":")[2]
+                        if custom_regions and region_name in custom_regions:
+                            bbox = custom_regions[region_name]
+                            mask = create_region_mask(yield_da, bbox=bbox)
+                            val = float(yield_da.where(mask).mean(["lat", "lon"]).values)
+                        else:
+                            raise ValueError(
+                                f"Custom region '{region_name}' not found in custom_regions"
+                            )
+                    elif key.startswith("regional:"):
+                        region = key.split(":")[1]
+                        val = float(regional_mean(yield_da, region).values)
+                    elif key.startswith("point:"):
+                        lat_p, lon_p = map(float, key.split(":")[1].split(","))
+                        val = float(extract_point(yield_da, lat_p, lon_p).values)
+                    else:
+                        raise ValueError(f"Unknown aggregation type: {key}")
+                    crop_results[crop][key].append(val)
+
+        # Convert lists → numpy arrays
+        return {
+            crop: {key: np.array(vals) for key, vals in agg.items()}
+            for crop, agg in crop_results.items()
+        }
 
     def __repr__(self):
         """Return string representation of MeteorInterface."""

@@ -677,3 +677,68 @@ def test_compute_timeseries_scaling():
         )
         assert scaling_factor.shape == (1, 1, 1)
         assert np.isclose(scaling_factor.values[0, 0, 0], 1.0)
+
+
+def test_interface_with_tabids_in_data_getter_kwargs():
+    """MeteorInterface passes tabids from data_getter_kwargs to Cmip6MeteorDataGetter."""
+    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter") as mock_getter_class:
+        mock_getter_class.return_value = MagicMock()
+
+        MeteorInterface(
+            model="TestModel",
+            variables=["tas"],
+            cache_dir="/tmp",
+            data_getter_kwargs={"tabids": "Amon"},
+        )
+
+    _, call_kwargs = mock_getter_class.call_args
+    assert call_kwargs["tabids"] is not None
+
+
+def test_train_with_custom_training_scenario(interface_factory):
+    """train() with a non-default training_scenario stores it in _training_config."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+
+    with (
+        patch.object(interface, "_train_pattern_scaling"),
+        patch.object(interface, "_train_noise_model"),
+    ):
+        interface.train(training_scenario="ssp370", verbose=False)
+
+    assert interface._training_config["tas"]["training_scenario"] == "ssp370"
+
+
+def test_train_with_variable_configs(interface_factory):
+    """train() with variable_configs applies per-variable overrides."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+
+    with (
+        patch.object(interface, "_train_pattern_scaling"),
+        patch.object(interface, "_train_noise_model"),
+    ):
+        interface.train(variable_configs={"tas": {"n_modes_noise": 20}}, verbose=False)
+
+    assert interface._training_config["tas"]["n_modes_noise"] == 20
+
+
+def test_generate_saves_to_file(interface_factory):
+    """generate_ensemble_outputs() calls ensemble.to_netcdf when save_to is given."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+    _set_trained(interface, ["tas"])
+
+    interface._generate_timeseries = MagicMock(
+        return_value={"global": xr.DataArray([290.0], dims=["time"])}
+    )
+
+    with patch.object(EnsembleOutput, "to_netcdf") as mock_save:
+        interface.generate_ensemble_outputs(
+            scenario="ssp245",
+            start_year=2020,
+            end_year=2020,
+            n_realizations=1,
+            timeseries=["global"],
+            save_to="/tmp/test_output.nc",
+            verbose=False,
+        )
+
+    mock_save.assert_called_once_with("/tmp/test_output.nc")

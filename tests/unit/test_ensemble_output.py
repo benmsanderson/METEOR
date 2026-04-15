@@ -529,3 +529,57 @@ def test_to_netcdf_annual_and_monthly_gridded():
 
     if os.path.exists(tmp_path):
         os.remove(tmp_path)
+
+
+def test_to_netcdf_with_2d_realization_timeseries():
+    """to_netcdf handles 2D (realization, time) timeseries arrays."""
+    var_tas = VariableOutput("tas")
+    # 2D: (n_realizations, n_time)
+    var_tas.timeseries["global"] = xr.DataArray(
+        np.ones((3, 5)),
+        dims=["realization", "month"],
+    )
+
+    ensemble = EnsembleOutput({"tas": var_tas})
+
+    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    with patch("builtins.print"):
+        ensemble.to_netcdf(tmp_path, include_impacts=False)
+
+    assert os.path.exists(tmp_path)
+    loaded = xr.open_dataset(tmp_path)
+    assert "tas_global" in loaded.data_vars
+    assert loaded["tas_global"].dims == ("realization", "month")
+    loaded.close()
+
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+
+
+def test_to_netcdf_with_non_dict_gridded():
+    """to_netcdf handles gridded DataArray (not a dict) via the else path."""
+    var_tas = VariableOutput("tas")
+    # Simple DataArray (not dict) in gridded — triggers the else branch
+    var_tas.gridded["climatology"] = xr.DataArray(
+        np.ones((2, 3, 4)),
+        dims=["realization", "lat", "lon"],
+        coords={"lat": [0.0, 1.0, 2.0], "lon": [0.0, 1.0, 2.0, 3.0]},
+    )
+
+    ensemble = EnsembleOutput({"tas": var_tas})
+
+    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    with patch("builtins.print"):
+        ensemble.to_netcdf(tmp_path, include_impacts=False)
+
+    assert os.path.exists(tmp_path)
+    loaded = xr.open_dataset(tmp_path)
+    assert "tas_grid_climatology" in loaded.data_vars
+    loaded.close()
+
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)

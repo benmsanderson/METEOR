@@ -137,9 +137,9 @@ def test_tas_converted_to_anomalies(mock_interface):
     }
 
     # Mock noise model
-    mock_interface.noise_models["tas"].generate_stochastic_pcs.return_value = (
-        np.random.randn(3, 10)
-    )
+    mock_interface.noise_models[
+        "tas"
+    ].generate_stochastic_pcs.return_value = np.random.randn(3, 10)
     mock_interface.noise_models[
         "tas"
     ].generate_regional_mean_realizations.return_value = np.random.randn(3, 100)
@@ -237,12 +237,12 @@ def test_pr_not_converted_to_anomalies(mock_interface):
     }
 
     # Mock noise model
-    mock_interface.noise_models["pr"].generate_stochastic_pcs.return_value = (
-        np.random.randn(3, 10)
-    )
     mock_interface.noise_models[
         "pr"
-    ].generate_regional_mean_realizations.return_value = (np.random.rand(3, 100) * 1e-5)
+    ].generate_stochastic_pcs.return_value = np.random.randn(3, 10)
+    mock_interface.noise_models[
+        "pr"
+    ].generate_regional_mean_realizations.return_value = np.random.rand(3, 100) * 1e-5
 
     # Call _generate_timeseries for pr
     with patch("meteor.global_mean") as mock_global_mean:

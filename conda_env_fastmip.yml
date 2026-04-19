@@ -1,0 +1,16 @@
+name: /storage/no-backup-nac/users/maurad/METEOR/fastmip_env
+channels:
+  - defaults
+dependencies:
+  - xesmf
+  - ipykernel
+  - matplotlib
+  - pandas
+  - dask
+  - cftime
+  - xarray
+  - cartopy
+  - netcdf4
+  - regionmask
+  - python-cdo
+prefix: /storage/no-backup-nac/users/maurad/METEOR/fastmip_env

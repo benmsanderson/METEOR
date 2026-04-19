@@ -6,6 +6,7 @@ __pycache__
 .cache/
 cache/
 data/
+fastmip_env/
 
 #Tempfiles
 *~

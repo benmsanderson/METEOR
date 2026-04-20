@@ -3,10 +3,10 @@ Steps to produce the FastMIP Phase 2 METEOR contributions.
 April 2026 by Maura Dewey (maura.dewey@cicero.oslo.no)
 
 	1. Run METEOR for all the scenarios. This is done with the METEOR venv:
-		(within a tmux session on nac)
+		(for example, within a tmux session on nac)
 		a. cd to METEOR folder and activate venv with: "source venv/bin/activate"
 		b. cd to scripts folder and run: "python FastMIP_phase2_trainMETEOR.py"
-		c. then you can disconnect from the tmux session and let it run. This will create all the raw METEOR output (takes ~10 hrs)
+		c. then you can disconnect from the tmux session and let it run. This will create all the raw METEOR output for FastMIP (takes ~10 hrs)
 
 	2. Create FastMIP specific output files. This is done with a conda env fastmip_env (can be in the same tmux session)
 		a. deactivate venv
@@ -25,7 +25,7 @@ Files on fastmip branch:
 ./FastMIP_env_setup.sh (to clear modules and activate conda environment on nac server)
 
 ./scripts/FastMIP_phase2_trainMETEOR.py (trains METEOR for all Tier 1 models and creates 200 member ensembles - 20 FAIR ensemble members x 10 METEOR noise model realizations. The subselection of Fair members used is saved in a pickle in ./data/FASTMIP_phase2/FAIR_data)
-./scripts/FastMIP_phase2_makeoutput.py (makes requested FastMIP output files - 10 member ensemble and bulk statistics across full 200.)
+./scripts/FastMIP_phase2_makeoutput.py (makes requested FastMIP output files - subset 10 member ensemble and bulk statistics across full 200.)
 
 ./notebooks/FastMIP_phase2_plots.py (makes all plots as in https://github.com/sarasita/fastMIP/blob/main/requested_output/tour_through_requested_output.ipynb)
 
@@ -35,4 +35,5 @@ Data files are not tracked with git, but the following structure is required/cre
 ./data/FASTMIP_phase2/FAIR_data (contains full FAIR ensemble files (climate_assessment_forced.csv), grid file for regridding (g025.txt), and the pickles of the FAIR subset.)
 ./data/FASTMIP_phase2/scenario_data (contains the emission and concentration data files needed for the SCM)
 ./data/FASTMIP_phase2/METEOR_emulations/raw (where METEOR output is saved initially)
-./data/FASTMIP_phase2/METEOR_emulations/processed (where FastMIP output is saved)s
+./data/FastMIP_phase2/METEOR_emulations/aggregated (where regridded and combined tmp files are saved)
+./data/FASTMIP_phase2/METEOR_emulations/processed (where FastMIP output is saved)

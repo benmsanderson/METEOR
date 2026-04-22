@@ -10,17 +10,17 @@ import random
 # =========================================================
 
 ESM_list = ['ACCESS-ESM1-5','CanESM5', 'IPSL-CM6A-LR', 'MPI-ESM1-2-LR', 'MIROC6']  # Tier 1 list
-scenarios = ['Low - SSP2 (Marker)','Medium - SSP2 (Marker)','High - SSP3 (Marker)','Very Low - SSP1 (Marker)']
+scenarios = ['SSP2 - Low Emissions', 'SSP2 - Medium Emissions', 'SSP3 - High Emissions', 'SSP1 - Very Low Emissions']
 scenarios_short = ['L','M','H','VL']
 
 # FAIR ensemble samples:
-FAIRens = pd.read_csv('../data/FASTMIP_phase2/FAIR_data/climate_assessment_forced.csv')
+FAIRens = pd.read_csv('../data/FASTMIP_phase2/FAIR_data/climate_assessment_forced_v20260325.csv')
 num_fair = 20
 
 # METEOR setup:
 start_year = 2015
 end_year = 2100
-n_members = 10 # Meteor realizations per FAIR ensemble memberd
+n_members = 10 # Meteor realizations per FAIR ensemble member
 emiss_dir = '../data/FASTMIP_phase2/scenario_data/'
 
 # check if output directories exist, if not, create them:
@@ -47,7 +47,9 @@ def add_coords(ds):
 
 # =========================================================
 # GENERATE FAIR SUBSAMPLE
-# TODO: add if wrapper about generating new subsample, or using existing one. If yes, then user needs to give a datetime to identify which subsample to use. If no, then generate new subsample and save with timestamp for unique name.
+# TODO: add if wrapper about generating new FAIR subsample, or using existing one. 
+# If re-using subsample (ie. for additional scenarios), then user needs to give a datetime to identify which subsample to use. 
+# If generating new subsample, then generate and save with timestamp for unique name.
 # =========================================================
 
 all_ensemble_members = FAIRens['ensemble_member'].unique().tolist()

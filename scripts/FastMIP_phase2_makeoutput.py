@@ -12,7 +12,7 @@ from cdo import Cdo
 # =========================================================
 
 ESM_list = ['ACCESS-ESM1-5','CanESM5', 'IPSL-CM6A-LR', 'MPI-ESM1-2-LR', 'MIROC6']  #(Tier 1 list)
-scenario_list = ['Low - SSP2 (Marker)','Medium - SSP2 (Marker)','High - SSP3 (Marker)','Very Low - SSP1 (Marker)']
+scenario_list = ['SSP2 - Low Emissions', 'SSP2 - Medium Emissions', 'SSP3 - High Emissions', 'SSP1 - Very Low Emissions']
 scenarios_short = ['L','M','H','VL']
 quantile_list = [0.01, 0.025, 0.05, 0.33, 0.5, 0.67, 0.95, 0.975, 0.99] # 1%, 2.5%, 5%, 33%, median, 67%, 95%, 97.5%, 99%
 
@@ -212,6 +212,7 @@ for scenario_short_name in scenarios_short:
 # Part 1: regrid and combine all ESMs for this scenario, and save as intermediate file (skip if already exists to save time and memory):
     scenario_long_name = scenario_list[scenarios_short.index(scenario_short_name)]
     scenario_filename = f"{aggregate_dir}METEOR_{scenario_short_name}_scaledtoFAIR_combinedESMs_regridded.nc"
+    print('starting regridding for scenario ', scenario_short_name)
 
     # if aggregate file already exists, skip
     if os.path.exists(scenario_filename):
@@ -242,6 +243,8 @@ for scenario_short_name in scenarios_short:
 
         # open temporary file and unstack coordinates
         esm_regridded = xr.open_dataset(esm_tmp).assign_coords(sample=stacked_index).unstack('sample')
+        #sample_coords = xr.Coordinates.from_pandas_multiindex(stacked_index, 'sample')
+        #esm_regridded = esm_regridded.assign_coords(sample=sample_coords).unstack('sample')
 
         # combine all re-gridded esm datasets for the scenario
         all_esms.append(esm_regridded)
@@ -269,7 +272,7 @@ for scenario_short_name in scenarios_short:
         all_fair_realisation_numbers = ds_regridded['fair_realisation'].values.astype(int)
 
         # 1. Random subset of 10 members across both FAIR and noise realisations:
-        print('starting scenario ', scenario_short_name)
+        print('starting output for scenario ', scenario_short_name)
         subset_ds = random_subset(ds_regridded, n=10)
         save_outputs(subset_ds['tas'].to_dataset(promote_attrs=True), subset_ds['pr'].to_dataset(promote_attrs=True), processed_dir, 'gridcell', 'selected-realisations', scenario_short_name, np.unique(subset_ds['fair_realisation'].values.astype(int)))
 

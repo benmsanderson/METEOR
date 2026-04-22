@@ -5,8 +5,8 @@ April 2026 by Maura Dewey (maura.dewey@cicero.oslo.no)
 	1. Run METEOR for all the scenarios. This is done with the METEOR venv:
 		(for example, within a tmux session on nac)
 		a. cd to METEOR folder and activate venv with: "source venv/bin/activate"
-		b. cd to scripts folder and run: "python FastMIP_phase2_trainMETEOR.py"
-		c. then you can disconnect from the tmux session and let it run. This will create all the raw METEOR output for FastMIP (takes ~10 hrs)
+		b. cd to scripts folder and run: "python FastMIP_phase2_trainMETEOR.py > output.txt 2>&1"
+		c. then you can disconnect from the tmux session and let it run. This will create all the raw METEOR output for FastMIP (takes ~10 hrs if also training new METEOR instances)
 
 	2. Create FastMIP specific output files. This is done with a conda env fastmip_env (can be in the same tmux session)
 		a. deactivate venv
@@ -37,3 +37,8 @@ Data files are not tracked with git, but the following structure is required/cre
 ./data/FASTMIP_phase2/METEOR_emulations/raw (where METEOR output is saved initially)
 ./data/FastMIP_phase2/METEOR_emulations/aggregated (where regridded and combined tmp files are saved)
 ./data/FASTMIP_phase2/METEOR_emulations/processed (where FastMIP output is saved)
+
+Initial emulations where done for 4 scenarios (L, M, H, VL)
+The full scenario list and short_name markers are:
+scenarios_list = ['SSP1 - Very Low Emissions', 'SSP2 - Low Emissions', 'SSP2 - Medium-Low Emissions', 'SSP2 - Medium Emissions', 'SSP3 - High Emissions', 'SSP5 - Medium-Low Emissions_a', 'SSP2 - Low Overshoot_a']
+scenarios_short = ['VL','L','ML','M','H','HL','LN']

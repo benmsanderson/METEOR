@@ -25,6 +25,49 @@ from statsmodels.tsa.api import VAR
 
 from .geo_data_utils import global_mean
 
+implemented_noise_pc_distribution = ["normal", "t"]
+
+
+def _apply_student_t_posthoc_scaling(synthetic_pcs, fitted_df):
+    """
+    Apply post-hoc Student-t scaling to Gaussian VAR output PCs.
+
+    Notes
+    -----
+    The VAR loop is always simulated with Gaussian innovations. For Student-t
+    output, each PC and timestep is then scaled as:
+
+        y_t = sqrt(df / V_t) * y_t_normal,  V_t ~ chi2(df)
+
+    This preserves VAR temporal structure while introducing heavier tails in
+    the output marginals.
+    """
+    df_arr = np.asarray(fitted_df)
+    chi2_samples = np.column_stack(
+        [np.random.chisquare(df_j, size=synthetic_pcs.shape[0]) for df_j in df_arr]
+    )
+    scale_factors = np.sqrt(df_arr[np.newaxis, :] / chi2_samples)
+    return synthetic_pcs * scale_factors
+
+def _noise_model_cache_name(
+    model_name, variable_name, noise_pc_distribution="normal"
+):
+    """Generate cache filename encoding the error distribution.
+
+    Examples: 'CanESM5_tas_noise_model.pkl' (normal),
+              'CanESM5_tas_noise_model_t.pkl' (Student-t)
+    """
+    base = f"{model_name}_{variable_name}_noise_model"
+    if noise_pc_distribution == "t":
+        return f"{base}_t.pkl"
+    elif noise_pc_distribution == "normal":
+        return f"{base}.pkl"
+    else:
+        raise ValueError(
+            f"Invalid noise_pc_distribution: {noise_pc_distribution}. "
+            f"Must be 'normal' or 't'."
+        )
+
 
 class MeteorNoiseGenerator:
     """
@@ -55,7 +98,14 @@ class MeteorNoiseGenerator:
         Whether the model has been fitted
     """
 
-    def __init__(self, n_modes=10, lag_order=2, use_exog="temp_only"):
+    def __init__(
+        self,
+        n_modes=10,
+        lag_order=2,
+        use_exog="temp_only",
+        noise_pc_distribution="normal",
+        t_df=None,
+    ):
         """
         Initialize the noise generator.
 
@@ -70,10 +120,46 @@ class MeteorNoiseGenerator:
             - 'all': Use temperature, annual_cos, annual_sin (original behavior)
             - 'temp_only': Use only temperature (recommended to avoid spurious seasonality)
             - 'none': Pure VAR with no exogenous variables
+        noise_pc_distribution : str, default 'normal'
+            Output distribution control for generated PCs:
+            - 'normal': Keep Gaussian VAR output
+            - 't': Apply post-hoc per-PC Student-t scaling to Gaussian VAR
+            output using chi-squared scale mixtures.
+
+            Important: the VAR innovations remain Gaussian in both cases.
+        t_df : float, str, or None, default None
+            Degrees of freedom for the Student-t distribution
+            (only used when noise_pc_distribution='t'):
+            - None: Use default value of 10.0
+            - float: Use this value directly (must be > 2 for finite variance)
+            - 'mle': Select optimal df per PC via univariate MLE on VARX residuals
         """
+        if noise_pc_distribution not in implemented_noise_pc_distribution:
+            raise ValueError(
+                f"noise_pc_distribution must be one of {implemented_noise_pc_distribution}, got '{noise_pc_distribution}'"
+            )
+        if isinstance(t_df, str) and t_df != "mle":
+            raise ValueError(
+                f"t_df string must be 'mle', got '{t_df}'"
+            )
+        if isinstance(t_df, (int, float)) and not isinstance(t_df, bool):
+            if t_df <= 2:
+                raise ValueError(
+                    f"t_df must be > 2 for finite variance, got {t_df}"
+                )
+            if t_df <= 4:
+                warnings.warn(
+                    f"t_df={t_df} <= 4 implies infinite kurtosis. "
+                    "Consider using t_df > 4 for well-behaved moments.",
+                    stacklevel=2,
+                )
+
         self.n_modes = n_modes
         self.lag_order = lag_order
         self.use_exog = use_exog
+        self.noise_pc_distribution = noise_pc_distribution
+        self.t_df = t_df
+        self._fitted_df = None  # Resolved df after fitting (array of shape (n_modes,) or None)
         self.seasonal_model = None
         self.pca = None
         self.varx_results = None
@@ -373,6 +459,86 @@ class MeteorNoiseGenerator:
             else:
                 print("   - Exogenous vars: none (pure VAR)")
 
+        # Resolve Student-t degrees of freedom (after VARX is fitted)
+        if self.noise_pc_distribution == "t":
+            self._resolve_df(verbose=verbose)
+
+    def _resolve_df(self, verbose=False):
+        """
+        Resolve the Student-t degrees of freedom after VARX fitting.
+
+        The result ``_fitted_df`` is always a 1-D array of shape
+        ``(n_modes,)`` so that each principal component can have its own
+        tail weight.
+
+        If t_df is None, uses default 10.0 for every PC. If a float,
+        broadcasts to every PC. If 'mle', performs per-PC univariate
+        MLE on VARX residuals.
+        """
+        if self.t_df is None:
+            self._fitted_df = np.full(self.n_modes, 10.0)
+            if verbose:
+                print(f"   - Student-t df: 10.0 for all {self.n_modes} PCs (default)")
+        elif isinstance(self.t_df, (int, float)) and not isinstance(self.t_df, bool):
+            self._fitted_df = np.full(self.n_modes, float(self.t_df))
+            if verbose:
+                print(f"   - Student-t df: {float(self.t_df)} for all {self.n_modes} PCs (user-specified)")
+        elif self.t_df == "mle":
+            self._fitted_df = self._select_df_mle(verbose=verbose)
+        else:
+            raise ValueError(
+                f"t_df must be None, a number, or 'mle', got {self.t_df!r}"
+            )
+
+    def _select_df_mle(self, verbose=False):
+        """
+        Select optimal Student-t df **per PC** via univariate MLE on VARX residuals.
+
+        For each principal component, fits a univariate Student-t distribution
+        to the VARX residual time series using ``scipy.stats.t.fit()`` and
+        returns the MLE df for every PC.
+
+        Parameters
+        ----------
+        verbose : bool
+            Print search results
+
+        Returns
+        -------
+        np.ndarray, shape (n_modes,)
+            Optimal degrees of freedom per principal component
+        """
+        from scipy.stats import t as scipy_t_dist  # noqa: F811
+
+        residuals = self.varx_results.resid  # (n_obs, n_modes)
+        n_modes = residuals.shape[1]
+        fitted_dfs = np.zeros(n_modes)
+
+        for j in range(n_modes):
+            r = residuals[:, j]
+            # scipy.stats.t.fit returns (df, loc, scale)
+            df_fit, _, _ = scipy_t_dist.fit(r)
+            # Clamp to reasonable range
+            df_fit = max(df_fit, 2.1)
+            fitted_dfs[j] = df_fit
+
+        if verbose:
+            print(f"   - Student-t df per PC (MLE):")
+            print(f"     median={np.median(fitted_dfs):.1f}, "
+                  f"min={fitted_dfs.min():.1f} (PC {fitted_dfs.argmin()}), "
+                  f"max={fitted_dfs.max():.1f} (PC {fitted_dfs.argmax()})")
+            n_heavy = (fitted_dfs < 15).sum()
+            print(f"     {n_heavy}/{n_modes} PCs with df < 15")
+            # Variance inflation: Var(t_df) = df/(df-2) vs Var(normal)=1
+            var_inflation = fitted_dfs / (fitted_dfs - 2)
+            weights = self.pca.explained_variance_ratio_
+            weighted_inflation = np.average(var_inflation, weights=weights)
+            print(f"   - Variance inflation df/(df-2): "
+                  f"weighted mean={weighted_inflation:.2f}, "
+                  f"max={var_inflation.max():.2f} (PC {var_inflation.argmax()})")
+
+        return fitted_dfs
+
     # pylint: disable=too-many-locals
     def generate_stochastic_pcs(
         self,
@@ -569,6 +735,12 @@ class MeteorNoiseGenerator:
         instead of repeatedly calling statsmodels forecast() which has
         significant overhead from redundant SVD decompositions.
 
+        When ``noise_pc_distribution='t'``, the VAR is still driven by
+        Gaussian innovations (preserving the autoregressive dynamics),
+        but the *output* PCs are scaled per time step by
+        ``sqrt(df / V_t)`` where ``V_t ~ chi2(df)``.  This gives the
+        output field multivariate Student-t marginals while preserving
+        the temporal correlation structure.
 
         Parameters
         ----------
@@ -604,6 +776,7 @@ class MeteorNoiseGenerator:
 
         # 🚀 KEY OPTIMIZATION: Pre-generate ALL random shocks at once
         # This eliminates 97% of the bottleneck (4,212 separate MVN calls → 1 batched call)
+        # Always use normal innovations for the VAR loop (even for Student-t output)
         mean_shock = np.zeros(self.n_modes)
         all_shocks = np.random.multivariate_normal(
             mean_shock, residual_cov, size=n_time
@@ -630,6 +803,16 @@ class MeteorNoiseGenerator:
 
             # Add pre-generated random shock (no MVN call here!)
             synthetic_pcs[t] = forecast + all_shocks[t]
+
+        # Apply per-PC, per-timestep Student-t scaling to the output PCs.
+        # Each PC gets its own df (fitted via MLE), so PCs with heavier tails
+        # in the training data get more tail inflation.
+        # Construction: y_{t,j}^(t) = sqrt(df_j / V_{t,j}) * y_{t,j}^(normal)
+        #   where V_{t,j} ~ chi2(df_j) independently for each (t, j).
+        if self.noise_pc_distribution == "t" and self._fitted_df is not None:
+            synthetic_pcs = _apply_student_t_posthoc_scaling(
+                synthetic_pcs, self._fitted_df
+            )
 
         return synthetic_pcs
 
@@ -1070,6 +1253,9 @@ class MeteorNoiseGenerator:
             "n_modes": self.n_modes,
             "lag_order": self.lag_order,
             "use_exog": self.use_exog,
+            "noise_pc_distribution": self.noise_pc_distribution,
+            "t_df": self.t_df,
+            "_fitted_df": self._fitted_df,
             "seasonal_model": self.seasonal_model,
             "pca": self.pca,
             "varx_results": self.varx_results,
@@ -1100,6 +1286,9 @@ class MeteorNoiseGenerator:
         self.use_exog = model_data.get(
             "use_exog", "all"
         )  # Default to 'all' for backward compatibility
+        self.noise_pc_distribution = model_data.get("noise_pc_distribution", "normal")
+        self.t_df = model_data.get("t_df", None)
+        self._fitted_df = model_data.get("_fitted_df", None)
         self.seasonal_model = model_data["seasonal_model"]
         self.pca = model_data["pca"]
         self.varx_results = model_data["varx_results"]
@@ -1108,6 +1297,11 @@ class MeteorNoiseGenerator:
         self._fix_coords_to_np()
         # Load variable_name if available (for backward compatibility)
         self.variable_name = model_data.get("variable_name", None)
+
+        # Backward compatibility: older cached Student-t models may not
+        # include resolved per-PC df values.
+        if self.noise_pc_distribution == "t" and self._fitted_df is None:
+            self._resolve_df(verbose=False)
 
         print(f"Model loaded from {filepath}")
 
@@ -1124,6 +1318,8 @@ def train_noise_model_from_cmip6(
     use_picontrol_baseline=True,
     save_diagnostics=False,
     use_exog="temp_only",
+    noise_pc_distribution="normal",
+    t_df=None,
     verbose=False,
 ):
     """
@@ -1168,6 +1364,15 @@ def train_noise_model_from_cmip6(
         - 'all': Use temperature, annual_cos, annual_sin (may cause spurious seasonality)
         - 'temp_only': Use only temperature (recommended)
         - 'none': Pure VAR with no exogenous variables
+    noise_pc_distribution : str, default 'normal'
+        Distribution to use for the stochastic principal components when
+        generating realizations:
+        - 'normal': Standard multivariate Gaussian (default)
+        - 't': Multivariate Student-t for heavier tails
+    t_df : float, str, or None, default None
+        Degrees of freedom for Student-t distribution (only used when
+        noise_pc_distribution='t'). None uses default 10.0, a float uses
+        that value directly, 'mle' triggers per-PC MLE fitting.
     verbose : bool, default False
         If True, prints variance decomposition statistics after fitting.
 
@@ -1212,7 +1417,11 @@ def train_noise_model_from_cmip6(
 
     # Create and fit noise generator
     noise_gen = MeteorNoiseGenerator(
-        n_modes=n_modes, lag_order=lag_order, use_exog=use_exog
+        n_modes=n_modes,
+        lag_order=lag_order,
+        use_exog=use_exog,
+        noise_pc_distribution=noise_pc_distribution,
+        t_df=t_df,
     )
     noise_gen.fit(
         monthly_data,
@@ -1226,7 +1435,8 @@ def train_noise_model_from_cmip6(
     if cache_dir is not None:
         os.makedirs(cache_dir, exist_ok=True)
         cache_path = os.path.join(
-            cache_dir, f"{model_name}_{variable_name}_noise_model.pkl"
+            cache_dir,
+            _noise_model_cache_name(model_name, variable_name, noise_pc_distribution),
         )
         noise_gen.save_model(cache_path)
 
@@ -1335,7 +1545,9 @@ def train_multiple_noise_models_from_cmip6(
     return noise_models
 
 
-def load_noise_model_from_cache(cache_dir, model_name, variable_name):
+def load_noise_model_from_cache(
+    cache_dir, model_name, variable_name, noise_pc_distribution="normal"
+):
     """
     Load a previously cached noise model.
 
@@ -1347,6 +1559,8 @@ def load_noise_model_from_cache(cache_dir, model_name, variable_name):
         Name of the climate model
     variable_name : str
         Name of the variable
+    noise_pc_distribution : str, optional
+        Error distribution type ('normal' or 't'). Default is 'normal'.
 
     Returns
     -------
@@ -1361,7 +1575,8 @@ def load_noise_model_from_cache(cache_dir, model_name, variable_name):
     ... )
     """
     cache_path = os.path.join(
-        cache_dir, f"{model_name}_{variable_name}_noise_model.pkl"
+        cache_dir,
+        _noise_model_cache_name(model_name, variable_name, noise_pc_distribution),
     )
 
     if not os.path.exists(cache_path):
@@ -1377,13 +1592,15 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
     variable_name,
     n_modes=40,
     lag_order=2,
+    noise_pc_distribution="normal",
+    t_df=None,
 ):
     """
     Validate a cached noise model file.
 
     Checks if the cached pickle file exists, can be loaded, and contains
-    the expected configuration (n_modes, lag_order, variable_name) and
-    required attributes (pca, varx_results).
+    the expected configuration (n_modes, lag_order, variable_name,
+    noise_pc_distribution) and required attributes (pca, varx_results).
 
     Parameters
     ----------
@@ -1395,6 +1612,14 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
         Expected number of PCA modes. Default is 40.
     lag_order : int, optional
         Expected temporal lag order. Default is 2.
+    noise_pc_distribution : str, optional
+        Expected noise principal component distribution ('normal' or 't').
+        Default is 'normal'.
+    t_df : float, str, or None, optional
+        Expected Student-t df specification. The cache is invalidated when
+        the stored ``t_df`` differs from the requested one (e.g. a cached
+        model trained with ``t_df=10.0`` won't satisfy a request for
+        ``t_df='mle'``).
 
     Returns
     -------
@@ -1419,6 +1644,7 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
             "variable_name": variable_name,
             "n_modes": n_modes,
             "lag_order": lag_order,
+            "noise_pc_distribution": noise_pc_distribution,
         },
         "found": {},
         "message": "",
@@ -1438,6 +1664,9 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
         info["found"]["n_modes"] = getattr(noise_model, "n_modes", None)
         info["found"]["lag_order"] = getattr(noise_model, "lag_order", None)
         info["found"]["variable_name"] = getattr(noise_model, "variable_name", None)
+        info["found"]["noise_pc_distribution"] = getattr(
+            noise_model, "noise_pc_distribution", "normal"
+        )
 
         # Validate n_modes
         if not hasattr(noise_model, "n_modes") or noise_model.n_modes != n_modes:
@@ -1474,6 +1703,32 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
         if missing_attrs:
             info["message"] = f"Missing required attributes: {missing_attrs}"
             return False, None, info
+
+        # Validate noise_pc_distribution
+        found_dist = getattr(noise_model, "noise_pc_distribution", "normal")
+        if found_dist != noise_pc_distribution:
+            info["message"] = (
+                f"noise_pc_distribution mismatch: expected '{noise_pc_distribution}', "
+                f"found '{found_dist}'"
+            )
+            return False, None, info
+
+        # Validate t_df specification (so MLE search isn't skipped by a
+        # cached model that was trained with a different t_df setting)
+        if noise_pc_distribution == "t":
+            found_tdf = getattr(noise_model, "t_df", None)
+            info["found"]["t_df"] = found_tdf
+            info["expected"]["t_df"] = t_df
+            # Normalize for comparison: convert lists to sorted tuples
+            def _norm(v):
+                if isinstance(v, (list, np.ndarray)):
+                    return tuple(sorted(v))
+                return v
+            if _norm(found_tdf) != _norm(t_df):
+                info["message"] = (
+                    f"t_df mismatch: expected {t_df}, found {found_tdf}"
+                )
+                return False, None, info
 
         # Cache is valid
         info["message"] = (

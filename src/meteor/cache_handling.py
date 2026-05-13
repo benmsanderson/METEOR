@@ -660,7 +660,9 @@ class CacheHandler:
             cache_dir, f"cmip6-{model_name}-{scenario}_pattern_scaling.pkl"
         )
 
-    def get_noise_model_cache_path(self, model_name, variable_name):
+    def get_noise_model_cache_path(
+        self, model_name, variable_name, noise_pc_distribution="normal"
+    ):
         """
         Get the standardized cache file path for a noise model.
 
@@ -670,6 +672,10 @@ class CacheHandler:
             Name of the CMIP6 model
         variable_name : str
             Variable name (e.g., 'tas', 'pr')
+        noise_pc_distribution : str, optional
+            Distribution type ('normal' or 't') used for the noise principal
+            components. Default is 'normal'. When 't', the filename includes a
+            '_t' suffix to avoid collisions.
 
         Returns
         -------
@@ -682,10 +688,16 @@ class CacheHandler:
         >>> cache_path = data_getter.get_noise_model_cache_path("CESM2", "tas")
         >>> print(cache_path)
         /path/to/noise_cache/CESM2_tas_noise_model.pkl
+        >>> cache_path = data_getter.get_noise_model_cache_path("CESM2", "tas", "t")
+        >>> print(cache_path)
+        /path/to/noise_cache/CESM2_tas_noise_model_t.pkl
         """
         if not self.cache_functioning:
             return None
         cache_dir = os.path.join(self.cache_dir, "noise_models")
 
         os.makedirs(cache_dir, exist_ok=True)
-        return os.path.join(cache_dir, f"{model_name}_{variable_name}_noise_model.pkl")
+        base = f"{model_name}_{variable_name}_noise_model"
+        if noise_pc_distribution == "t":
+            return os.path.join(cache_dir, f"{base}_t.pkl")
+        return os.path.join(cache_dir, f"{base}.pkl")

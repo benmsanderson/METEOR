@@ -41,6 +41,8 @@ def _get_default_config(variable):
         "lag_order": 2,
         "use_picontrol_baseline": True,
         "training_scenario": "ssp245",
+        "noise_pc_distribution": "normal",
+        "t_df": None,
     }
 
     # Variable-specific defaults
@@ -215,6 +217,8 @@ class MeteorInterface:
             - training_scenario : str (overrides method parameter)
             - transform : bool
             - transform_type : str
+            - noise_pc_distribution : str ('normal' or 't')
+            - t_df : float, str ('mle'), or None (Student-t degrees of freedom)
         verbose : bool, optional
             Print progress messages (default True)
 
@@ -361,11 +365,18 @@ class MeteorInterface:
             - 'n_modes_noise': Number of PCA modes for noise representation
             - 'lag_order': Temporal memory in VARX model
             - 'use_exog': Exogenous variable usage ('all', 'temp_only', 'none')
-            - 'training_scenario': Scenario for temperature trajectory (default: 'ssp245')
+            - 'training_scenario': Scenario for temperature trajectory
+            (default: 'ssp245')
+            - 'noise_pc_distribution': Distribution type ('normal' or 't')
+            used for the noise principal components
+            - 't_df': Student-t degrees of freedom (float, list, or None)
         verbose : bool
             Print training progress messages
         """
-        cache_file = self.cache_handler.get_noise_model_cache_path(self.model, variable)
+        noise_pc_distribution = config.get("noise_pc_distribution", "normal")
+        cache_file = self.cache_handler.get_noise_model_cache_path(
+            self.model, variable, noise_pc_distribution=noise_pc_distribution
+        )
 
         # Check cache
         is_valid, cached_model, info = (  # pylint: disable=unused-variable
@@ -374,12 +385,69 @@ class MeteorInterface:
                 variable,
                 n_modes=config["n_modes_noise"],
                 lag_order=config["lag_order"],
+                noise_pc_distribution=noise_pc_distribution,
+                t_df=config.get("t_df", None),
             )
         )
 
         if is_valid:
             if verbose:  # pragma: no cover
                 print("      ✓ Using cached noise model")
+                # Print training summary from cached model
+                diag = getattr(cached_model, 'diagnostics', {})
+                seasonal_r2 = diag.get('seasonal_r2')
+                total_var = diag.get('total_variance_explained')
+                if seasonal_r2 is not None:
+                    pca_var = cached_model.pca.explained_variance_ratio_.sum()
+                    print(f"      Noise generator fitted successfully.")
+                    print(f"         - PCA modes: {cached_model.n_modes}")
+                    print(f"         - Seasonal model R²: {seasonal_r2:.2%}")
+                    print(f"         - Anomaly variance explained (PCA): {pca_var:.2%}")
+                    if (
+                        cached_model.noise_pc_distribution == "t"
+                        and cached_model._fitted_df is not None
+                    ):
+                        import numpy as _np
+
+                        df_arr = _np.asarray(cached_model._fitted_df)
+                        if df_arr.ndim == 0:
+                            weighted_inf = float(df_arr) / (float(df_arr) - 2)
+                        else:
+                            var_inflation = df_arr / (df_arr - 2)
+                            weights = cached_model.pca.explained_variance_ratio_
+                            weighted_inf = _np.average(var_inflation, weights=weights)
+                        print(
+                            "         - Anomaly variance explained inflated (PCA): "
+                            f"{(pca_var * weighted_inf):.2%}"
+                        )
+                    print(f"         - Total variance explained: {total_var:.2%}")
+                    print(f"         - VARX lag order: {cached_model.lag_order}")
+                    use_exog = getattr(cached_model, 'use_exog', 'temp_only')
+                    if use_exog == 'all':
+                        print("         - Exogenous vars: t_glob, annual_cos, annual_sin")
+                    elif use_exog == 'temp_only':
+                        print("         - Exogenous vars: t_glob only")
+                    else:
+                        print("         - Exogenous vars: none (pure VAR)")
+                if cached_model.noise_pc_distribution == "t" and cached_model._fitted_df is not None:
+                    import numpy as _np
+                    df_arr = _np.asarray(cached_model._fitted_df)
+                    if df_arr.ndim == 0:
+                        var_inf = float(df_arr) / (float(df_arr) - 2)
+                        print(f"      Student-t df: {float(df_arr):.1f}  "
+                              f"(variance inflation: {var_inf:.2f})")
+                    else:
+                        n_heavy = int((df_arr < 15).sum())
+                        print(f"      Student-t df per PC: median={_np.median(df_arr):.1f}, "
+                              f"min={df_arr.min():.1f} (PC {df_arr.argmin()}), "
+                              f"max={df_arr.max():.1f} (PC {df_arr.argmax()})")
+                        print(f"      {n_heavy}/{len(df_arr)} PCs with df < 15")
+                        var_inflation = df_arr / (df_arr - 2)
+                        weights = cached_model.pca.explained_variance_ratio_
+                        weighted_inf = _np.average(var_inflation, weights=weights)
+                        print(f"      Variance inflation df/(df-2): "
+                              f"weighted mean={weighted_inf:.2f}, "
+                              f"max={var_inflation.max():.2f} (PC {var_inflation.argmax()})")
             self.noise_models[variable] = cached_model
         else:
             if verbose:  # pragma: no cover
@@ -428,6 +496,8 @@ class MeteorInterface:
                 n_modes=config["n_modes_noise"],
                 lag_order=config["lag_order"],
                 use_exog=config["use_exog"],
+                noise_pc_distribution=noise_pc_distribution,
+                t_df=config.get("t_df", None),
                 custom_global_temp=monthly_warming_trimmed,  # ✅ Pass pattern prediction
                 cache_dir=os.path.join(self.cache_handler.cache_dir, "noise_models"),
                 verbose=verbose,

@@ -6,7 +6,6 @@ import random
 
 # =========================================================
 # SETUP
-# TODO: add as optional inputs with these as defaults (for ESM_list, num_fair, n_members)
 # =========================================================
 
 ESM_list = ['ACCESS-ESM1-5','CanESM5', 'IPSL-CM6A-LR', 'MPI-ESM1-2-LR', 'MIROC6']  # Tier 1 list
@@ -49,7 +48,6 @@ def add_coords(ds):
 # GENERATE FAIR SUBSAMPLE
 # TODO: add if wrapper about generating new FAIR subsample, or using existing one. 
 # If re-using subsample (ie. for additional scenarios), then user needs to give a datetime to identify which subsample to use. 
-# If generating new subsample, then generate and save with timestamp for unique name.
 # =========================================================
 
 all_ensemble_members = FAIRens['ensemble_member'].unique().tolist()

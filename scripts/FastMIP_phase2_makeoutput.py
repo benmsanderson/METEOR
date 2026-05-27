@@ -5,6 +5,7 @@ import pandas as pd
 import regionmask
 import glob
 import random
+import flox
 from cdo import Cdo
 
 # =========================================================
@@ -16,9 +17,9 @@ scenario_list = ['SSP2 - Low Emissions', 'SSP2 - Medium Emissions', 'SSP3 - High
 scenarios_short = ['L','M','H','VL']
 quantile_list = [0.01, 0.025, 0.05, 0.33, 0.5, 0.67, 0.95, 0.975, 0.99] # 1%, 2.5%, 5%, 33%, median, 67%, 95%, 97.5%, 99%
 
-output_dir = '../data/FASTMIP_phase2/METEOR_emulations/raw/'
-aggregate_dir = '../data/FASTMIP_phase2/METEOR_emulations/aggregated/'
-processed_dir = '../data/FASTMIP_phase2/METEOR_emulations/processed/'
+output_dir = '../data/FASTMIP_phase2/METEOR_emulations/raw/resampled_FAIR/'
+aggregate_dir = '../data/FASTMIP_phase2/METEOR_emulations/aggregated/resampled_FAIR/'
+processed_dir = '../data/FASTMIP_phase2/METEOR_emulations/processed/resampled_FAIR/'
 
 os.makedirs(aggregate_dir, exist_ok=True)
 os.makedirs(processed_dir, exist_ok=True)
@@ -57,14 +58,10 @@ def regrid_file_with_weights(cdo, input_ds, esm, scenario, weights_file):
     return tmp_out
 
 
-
 def open_all_files(scenarios_short_list):
-    ds_list = []
-    for scenario in scenarios_short_list:
-        scenario_file = f"{aggregate_dir}METEOR_{scenario}_scaledtoFAIR_combinedESMs_regridded.nc"
-        ds = xr.open_dataset(scenario_file)
-        ds_list.append(ds)
-    combined_ds = xr.concat(ds_list, dim=xr.Variable('scenario', data=scenarios_short_list))
+    paths = [f"{aggregate_dir}METEOR_{scenario}_scaledtoFAIR_combinedESMs_regridded.nc" for scenario in scenarios_short_list]
+    combined_ds = xr.open_mfdataset(paths, combine='nested', concat_dim='scenario', chunks={'lat':24, 'lon':28})
+    combined_ds = combined_ds.assign_coords(scenario=scenarios_short_list)
     return combined_ds
 
 
@@ -73,11 +70,9 @@ def compute_regional_means(ds, ar6_mask):
     lat = ds["lat"]
     lon = ds["lon"]
     weights = np.cos(np.deg2rad(lat))
-    weights.name = "area_weight"
-    weights_expanded = weights.expand_dims(lon=lon).transpose("lon", "lat")
+    weights_2d = weights.broadcast_like(ds)
 
-    da_ar6 = (ds*weights).groupby(ar6_mask).mean(dim=['stacked_lon_lat']) / weights_expanded.groupby(ar6_mask).mean(dim='stacked_lon_lat')
-
+    da_ar6 = (ds*weights).groupby(ar6_mask).mean(dim=['lat', 'lon']) / weights_2d.groupby(ar6_mask).mean(dim=['lat', 'lon'])
     da_global = ds.weighted(weights).mean(dim=['lon', 'lat']).expand_dims(mask=[-1])
 
     da_regions = xr.concat([da_ar6, da_global], dim="mask")
@@ -97,30 +92,23 @@ def compute_regional_means(ds, ar6_mask):
 def save_outputs(tas, pr, processed_dir, aggregation, quantity, scenario_short_name=None, fair_realisation_numbers=None):
 
     # add METEOR metadata:
-    tas = tas.drop_attrs() # first clear old ones
-    pr = pr.drop_attrs()
     tas = tas.assign_attrs({
-        'model': 'METEOR (tag v1.6.0-10-g95e4345)',
         'scenario': f'{aggregation} {quantity} for scenario {scenario_short_name if scenario_short_name is not None else "cross-scenario"}',
-        'reference': 'https://doi.org/10.5194/gmd-18-8269-2025 UPDATE TO v1.6 WHEN AVAILABLE',
-        'ensemble_info': 'Full ensemble is 200 members per ESM per scenario (20 randomly chosen FAIR GSAT ensemble members x 10 METEOR noise/internal variability realisations). FAIR realisations are shared across ESMs and scenarios, noise realisations are independent.',
         'FAIR ensemble members': fair_realisation_numbers.tolist(),
-        'units': 'K'
     })
     pr = pr.assign_attrs(tas.attrs)
-    pr = pr.assign_attrs({'units': 'kg m-2 s-1'})
 
     tas = tas.compute()
     pr = pr.compute()
 
     # save per-scenario output.
     if scenario_short_name is not None:
-        tas.to_netcdf(f"{processed_dir}tas_{scenario_short_name}_METEOR_{aggregation}_{quantity}.nc")
-        pr.to_netcdf(f"{processed_dir}pr_{scenario_short_name}_METEOR_{aggregation}_{quantity}.nc")
+        tas.to_netcdf(f"{processed_dir}tas_{scenario_short_name}_meteor_{aggregation}_{quantity}.nc")
+        pr.to_netcdf(f"{processed_dir}pr_{scenario_short_name}_meteor_{aggregation}_{quantity}.nc")
     # save across-scenario output (use 'cross-scenario' in filename to distinguish):
     else:
-        tas.to_netcdf(f"{processed_dir}tas_cross-scenario_METEOR_{aggregation}_{quantity}.nc")
-        pr.to_netcdf(f"{processed_dir}pr_cross-scenario_METEOR_{aggregation}_{quantity}.nc")
+        tas.to_netcdf(f"{processed_dir}tas_cross-scenario_meteor_{aggregation}_{quantity}.nc")
+        pr.to_netcdf(f"{processed_dir}pr_cross-scenario_meteor_{aggregation}_{quantity}.nc")
 
 
 # =========================================================
@@ -129,16 +117,25 @@ def save_outputs(tas, pr, processed_dir, aggregation, quantity, scenario_short_n
 
 # 1 Save 10 randomly selected ensemble members across both FAIR and noise realisations:
 def random_subset(ds, n):
-    ds_stacked = ds.stack(realisation=['noise_realisation', 'fair_realisation'])
+    rng = np.random.default_rng(seed=42)
+    sampled = []
 
-    # check that we didn't accidentally choose all the same FAIR realisation (i.e. that we have some variability across both noise and FAIR realisations):
-    len_fair_sampled = 1 
-    while len_fair_sampled == 1:
-        idx = random.sample(range(ds_stacked.sizes['realisation']), n)
-        subset_ds = ds_stacked.isel(realisation=idx)
-        len_fair_sampled = len(np.unique(subset_ds['fair_realisation']))
+    # sample n timeseries for each esm:
+    for esm in ds['esm'].values:
 
-    return subset_ds.reset_index('realisation')
+        ds_esm = ds.sel(esm=esm)
+        valid_mask = (ds_esm['tas'].notnull().any(dim=("year", "lat", "lon")))
+        ds_valid = ds_esm.where(valid_mask, drop=True)
+        ds_valid = ds_valid.stack(
+            realisation=("fair_realisation", "noise_realisation")
+        )
+        subset_idx = rng.choice(ds_valid.realisation.size, size=n, replace=False)
+        subset = ds_valid.isel(realisation=subset_idx)
+        subset = subset.reset_index("realisation")       
+
+        sampled.append(subset)
+
+    return xr.concat(sampled, dim='esm')
 
 
 # 2, 3, 4, 5 Gridwise and regional means and quantiles by ESM, and across ESMs:
@@ -167,37 +164,64 @@ def compute_quantiles(ds, quantile_list, quantity, aggregation, ar6_mask=None):
 def compute_uncertainty_per_scenario(ds, aggregation, ar6_mask=None):
 
     if aggregation == 'gridcell':
-        var_esm = ds.mean(dim='noise_realisation').var(dim='esm').mean(dim='fair_realisation')
-        var_glb = ds.mean(dim='noise_realisation').var(dim='fair_realisation').mean(dim='esm')
+        ds_mean_noise = ds.mean(dim='noise_realisation')
+        var_esm = ds_mean_noise.var(dim='esm').mean(dim='fair_realisation')
+        var_global = ds_mean_noise.var(dim='fair_realisation').mean(dim='esm')
         var_int = ds.var(dim='noise_realisation').mean(dim=['esm', 'fair_realisation'])
+
     elif aggregation == 'regional':
         regional_means = compute_regional_means(ds, ar6_mask)
-        var_esm = regional_means.mean(dim='noise_realisation').var(dim='esm').mean(dim='fair_realisation')
-        var_glb = regional_means.mean(dim='noise_realisation').var(dim='fair_realisation').mean(dim='esm')
+        regional_means_noise = regional_means.mean(dim='noise_realisation')
+        var_esm = regional_means_noise.var(dim='esm').mean(dim='fair_realisation')
+        var_global = regional_means_noise.var(dim='fair_realisation').mean(dim='esm')
         var_int = regional_means.var(dim='noise_realisation').mean(dim=['esm', 'fair_realisation'])
 
-    tas = xr.merge([var_esm['tas'].rename('var_esm'), var_glb['tas'].rename('var_glb'), var_int['tas'].rename('var_int')])
-    pr = xr.merge([var_esm['pr'].rename('var_esm'), var_glb['pr'].rename('var_glb'), var_int['pr'].rename('var_int')])
+    tas = xr.Dataset({
+    'var_int': var_int['tas'],
+    'var_global': var_global['tas'],
+    'var_esm': var_esm['tas']
+    })
+    pr = xr.Dataset({
+    'var_int': var_int['pr'],
+    'var_global': var_global['pr'],
+    'var_esm': var_esm['pr']
+    })
 
     return tas, pr
+
 
 # 8, 9 Gridwise and regional uncertainty decomposition across scenarios:
 def compute_uncertainty_across_scenarios(ds, aggregation, ar6_mask=None):
 
     if aggregation == 'gridcell':
-        var_int = ds.var(dim='noise_realisation').mean(dim=['esm', 'fair_realisation', 'scenario'])
-        var_glb = ds.mean(dim='noise_realisation').var(dim=['fair_realisation']).mean(dim=['esm', 'scenario'])
-        var_esm = ds.mean(dim='noise_realisation').var(dim=['esm']).mean(dim=['fair_realisation', 'scenario'])
-        var_scenario = ds.mean(dim='noise_realisation').var(dim='scenario').mean(dim=['esm', 'fair_realisation'])
+        ds_mean_noise = ds.mean(dim='noise_realisation').persist()    
+
+        var_int = ds.var(dim='noise_realisation').mean(dim=['esm', 'fair_realisation', 'scenario']).compute()
+        var_global = ds_mean_noise.var(dim=['fair_realisation']).mean(dim=['esm', 'scenario']).compute()
+        var_esm = ds_mean_noise.var(dim=['esm']).mean(dim=['fair_realisation', 'scenario']).compute()
+        var_scenario = ds_mean_noise.var(dim=['scenario']).mean(dim=['esm', 'fair_realisation']).compute()
+
     elif aggregation == 'regional':
         regional_means = compute_regional_means(ds, ar6_mask)
-        var_int = regional_means.var(dim='noise_realisation').mean(dim=['esm', 'fair_realisation', 'scenario'])
-        var_glb = regional_means.mean(dim='noise_realisation').var(dim=['fair_realisation']).mean(dim=['esm', 'scenario'])
-        var_esm = regional_means.mean(dim='noise_realisation').var(dim=['esm']).mean(dim=['fair_realisation', 'scenario'])
-        var_scenario = regional_means.mean(dim='noise_realisation').var(dim='scenario').mean(dim=['esm', 'fair_realisation'])
+        regional_means_noise = regional_means.mean(dim='noise_realisation').persist()
 
-    tas = xr.merge([var_int['tas'].rename('var_int'), var_glb['tas'].rename('var_glb'), var_esm['tas'].rename('var_esm'), var_scenario['tas'].rename('var_scenario')])
-    pr = xr.merge([var_int['pr'].rename('var_int'), var_glb['pr'].rename('var_glb'), var_esm['pr'].rename('var_esm'), var_scenario['pr'].rename('var_scenario')])
+        var_int = regional_means.var(dim='noise_realisation').mean(dim=['esm', 'fair_realisation', 'scenario']).compute()
+        var_global = regional_means_noise.var(dim=['fair_realisation']).mean(dim=['esm', 'scenario']).compute()
+        var_esm = regional_means_noise.var(dim=['esm']).mean(dim=['fair_realisation', 'scenario']).compute()
+        var_scenario = regional_means_noise.var(dim=['scenario']).mean(dim=['esm', 'fair_realisation']).compute()
+
+    tas = xr.Dataset({
+    'var_int': var_int['tas'],
+    'var_global': var_global['tas'],
+    'var_esm': var_esm['tas'],
+    'var_scenario': var_scenario['tas']
+    })
+    pr = xr.Dataset({
+    'var_int': var_int['pr'],
+    'var_global': var_global['pr'],
+    'var_esm': var_esm['pr'],
+    'var_scenario': var_scenario['pr']
+    })
 
     return tas, pr
 
@@ -209,7 +233,7 @@ def compute_uncertainty_across_scenarios(ds, aggregation, ar6_mask=None):
 # Regridding and combining ESM outputs is done in a separate loop per scenario to save memory, and intermediate regridded files are saved to disk to avoid having to keep all ESMs in memory at once. The final outputs are then calculated from the combined regridded files for each scenario, and saved to disk. Finally, the across-scenario outputs are calculated from the combined per-scenario files, and saved to disk.
 
 for scenario_short_name in scenarios_short:
-# Part 1: regrid and combine all ESMs for this scenario, and save as intermediate file (skip if already exists to save time and memory):
+# Part 1: regrid and combine all ESMs for this scenario, and save as intermediate file (skip if aggregate file already exists):
     scenario_long_name = scenario_list[scenarios_short.index(scenario_short_name)]
     scenario_filename = f"{aggregate_dir}METEOR_{scenario_short_name}_scaledtoFAIR_combinedESMs_regridded.nc"
     print('starting regridding for scenario ', scenario_short_name)
@@ -258,7 +282,6 @@ for scenario_short_name in scenarios_short:
         os.remove(tmp_file)
 
 
-
 for scenario_short_name in scenarios_short:
 # Part 2: for each scenario, calculate the scenario-specific FastMIP outputs:
     scenario_filename = f"{aggregate_dir}METEOR_{scenario_short_name}_scaledtoFAIR_combinedESMs_regridded.nc"
@@ -302,14 +325,38 @@ for scenario_short_name in scenarios_short:
         save_outputs(tas, pr, processed_dir, 'gridcell', 'uncertainty', scenario_short_name, all_fair_realisation_numbers)
 
 
+print('starting across-scenario outputs')
 # Part 3: calculate FastMIP outputs across scenarios:
 combined_ds = open_all_files(scenarios_short)
 
+# get FAIR ensemble member numbers (the ensemble itself is also saved in 
+# /METEOR/data/FASTMIP_phase2/FAIR_data/ in a .pkl).
+all_fair_realisation_numbers = combined_ds['fair_realisation'].values.astype(int)
+
+ar6=regionmask.defined_regions.ar6.land
+ar6_mask=ar6.mask(combined_ds.lat, combined_ds.lon).persist()
+
+# Check if the dimension size of combined_ds is as expected (for example, if resampling FAIR, the pre-processing will expand the 'fair_realisation' dimension but the resulting array is mostly nans.) Densify if necessary (actual FAIR members used is saved by code above.)
+# TO-DO: the expected size of 'fair_realisation' dimension is hard coded to 20, this should probably be updated, its a bit hacky.  
+
+def densify_fair(group):
+    # remove all-empty FAIR entries
+    valid = group.dropna("fair_realisation", how="all")
+    n = valid.sizes["fair_realisation"]
+    # replace coordinate values entirely
+    valid = valid.assign_coords(fair_realisation=np.arange(n))
+
+if combined_ds.sizes['fair_realisation'] > 20:
+    print('Densifying FAIR realisation dimension')
+    combined_ds = (combined_ds.groupby("scenario").map(lambda x: x.groupby("esm").map(densify_fair)))
+
 # 8. Uncertainty decomposition by region, across scenarios:
 tas, pr = compute_uncertainty_across_scenarios(combined_ds, 'regional', ar6_mask=ar6_mask)
+print('saving across-scenario uncertainty decomposition by region')
 save_outputs(tas, pr, processed_dir, 'regional', 'across-scenario-uncertainty', scenario_short_name=None, fair_realisation_numbers=all_fair_realisation_numbers)
 
 # 9. Uncertainty decomposition gridwise, across scenarios:
 tas, pr = compute_uncertainty_across_scenarios(combined_ds, 'gridcell')
+print('saving across-scenario uncertainty decomposition gridwise')
 save_outputs(tas, pr, processed_dir, 'gridcell', 'across-scenario-uncertainty', scenario_short_name=None, fair_realisation_numbers=all_fair_realisation_numbers)
 

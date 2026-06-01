@@ -17,9 +17,9 @@ scenario_list = ['SSP2 - Low Emissions', 'SSP2 - Medium Emissions', 'SSP3 - High
 scenarios_short = ['L','M','H','VL']
 quantile_list = [0.01, 0.025, 0.05, 0.33, 0.5, 0.67, 0.95, 0.975, 0.99] # 1%, 2.5%, 5%, 33%, median, 67%, 95%, 97.5%, 99%
 
-output_dir = '../data/FASTMIP_phase2/METEOR_emulations/raw/resampled_FAIR/'
-aggregate_dir = '../data/FASTMIP_phase2/METEOR_emulations/aggregated/resampled_FAIR/'
-processed_dir = '../data/FASTMIP_phase2/METEOR_emulations/processed/resampled_FAIR/'
+output_dir = '../data/FASTMIP_phase2/METEOR_emulations/raw/'
+aggregate_dir = '../data/FASTMIP_phase2/METEOR_emulations/aggregated/'
+processed_dir = '../data/FASTMIP_phase2/METEOR_emulations/processed/'
 
 os.makedirs(aggregate_dir, exist_ok=True)
 os.makedirs(processed_dir, exist_ok=True)
@@ -109,6 +109,11 @@ def save_outputs(tas, pr, processed_dir, aggregation, quantity, scenario_short_n
     else:
         tas.to_netcdf(f"{processed_dir}tas_cross-scenario_meteor_{aggregation}_{quantity}.nc")
         pr.to_netcdf(f"{processed_dir}pr_cross-scenario_meteor_{aggregation}_{quantity}.nc")
+
+def densify_fair(group):
+    valid = group.dropna("fair_realisation", how="all")
+    n = valid.sizes["fair_realisation"]
+    return valid.assign_coords(fair_realisation=np.arange(n))
 
 
 # =========================================================
@@ -294,6 +299,12 @@ for scenario_short_name in scenarios_short:
         # /METEOR/data/FASTMIP_phase2/FAIR_data/ in a .pkl).
         all_fair_realisation_numbers = ds_regridded['fair_realisation'].values.astype(int)
 
+        # 0. Check that dimension sizes are as expected.
+        # TO-DO: the expected size of 'fair_realisation' dimension is hard coded to 20, this should probably be updated.     
+        if ds_regridded.sizes['fair_realisation'] > 20:
+            print('Densifying FAIR realisation dimension')
+            ds_regridded = ds_regridded.groupby("esm").map(densify_fair)
+
         # 1. Random subset of 10 members across both FAIR and noise realisations:
         print('starting output for scenario ', scenario_short_name)
         subset_ds = random_subset(ds_regridded, n=10)
@@ -336,16 +347,8 @@ all_fair_realisation_numbers = combined_ds['fair_realisation'].values.astype(int
 ar6=regionmask.defined_regions.ar6.land
 ar6_mask=ar6.mask(combined_ds.lat, combined_ds.lon).persist()
 
-# Check if the dimension size of combined_ds is as expected (for example, if resampling FAIR, the pre-processing will expand the 'fair_realisation' dimension but the resulting array is mostly nans.) Densify if necessary (actual FAIR members used is saved by code above.)
-# TO-DO: the expected size of 'fair_realisation' dimension is hard coded to 20, this should probably be updated, its a bit hacky.  
-
-def densify_fair(group):
-    # remove all-empty FAIR entries
-    valid = group.dropna("fair_realisation", how="all")
-    n = valid.sizes["fair_realisation"]
-    # replace coordinate values entirely
-    valid = valid.assign_coords(fair_realisation=np.arange(n))
-
+# Check if the dimension size of combined_ds is as expected
+# TO-DO: the expected size of 'fair_realisation' dimension is hard coded to 20, this should probably be updated. 
 if combined_ds.sizes['fair_realisation'] > 20:
     print('Densifying FAIR realisation dimension')
     combined_ds = (combined_ds.groupby("scenario").map(lambda x: x.groupby("esm").map(densify_fair)))

@@ -23,8 +23,9 @@ def test_meteor_noise_generator_initialization():
     assert hasattr(generator, "varx_results")
     assert hasattr(generator, "fitted")
     assert generator.fitted is False
-    assert generator.n_modes == 10  # default value
+    assert generator.n_modes == 40  # default value
     assert generator.lag_order == 2  # default value
+    assert generator.weight_eofs is True  # area-weighting on by default
 
     # Test error handling with uninitiated state
     with pytest.raises(ValueError, match="Invalid use_exog value:"):
@@ -518,3 +519,87 @@ def test_generate_realization_unfitted_error():
 
     with pytest.raises(ValueError, match="Model must be fitted before generating"):
         generator.generate_realization(test_trajectory)
+
+
+def _make_training_dataset(nt=120, nla=8, nlo=12):
+    """Small monthly dataset spanning the full pole-to-pole latitude range."""
+    time = np.arange(nt)
+    lats = np.linspace(-90, 90, nla)  # includes exact poles (cos lat == 0)
+    lons = np.linspace(0, 360, nlo, endpoint=False)
+    rng = np.random.default_rng(0)
+    data = (
+        rng.standard_normal((nt, nla, nlo, 1)) * 0.5
+        + np.cos(np.deg2rad(lats))[None, :, None, None]
+        * np.sin(time / 12.0)[:, None, None, None]
+    )
+    da = xr.DataArray(
+        data,
+        coords={"month": time, "lat": lats, "lon": lons, "ens": [0]},
+        dims=["month", "lat", "lon", "ens"],
+        name="tas",
+    )
+    return xr.Dataset({"tas": da})
+
+
+def test_eof_area_weighting_default_and_physical_components():
+    """Area weighting is on by default, sets weights, and reconstructs finite
+    fields even at the poles (where cos(lat) == 0)."""
+    ds = _make_training_dataset()
+    gen = MeteorNoiseGenerator(n_modes=4, lag_order=1)  # weight_eofs defaults True
+    assert gen.weight_eofs is True
+    gen.fit(ds, "tas")
+
+    n_space = ds.sizes["lat"] * ds.sizes["lon"]
+    assert gen.eof_weights is not None
+    assert gen.eof_weights.shape == (n_space,)
+    assert np.all(gen.eof_weights > 0)  # floored, so poles are nonzero
+
+    # physical components are the stored components un-weighted, and differ
+    # from the raw (weighted-space) components
+    phys = gen._physical_components()
+    assert phys.shape == gen.pca.components_.shape
+    assert not np.allclose(phys, gen.pca.components_)
+
+    traj = np.linspace(0, 2, ds.sizes["month"])
+    grid = gen.generate_realization(traj, n_realizations=1)
+    assert np.isfinite(grid.values).all()  # no inf/nan from pole division
+    glob = gen.generate_regional_mean_realizations(
+        traj, region="global", n_realizations=2, return_numpy=True
+    )
+    assert np.isfinite(glob).all()
+    pole = gen.generate_regional_mean_realizations(
+        traj, lat=90.0, lon=0.0, n_realizations=1, return_numpy=True
+    )
+    assert np.isfinite(np.asarray(pole)).all()
+
+
+def test_eof_weighting_disabled_matches_legacy():
+    """weight_eofs=False keeps the basis in raw gridcell space (legacy behavior)."""
+    ds = _make_training_dataset()
+    gen = MeteorNoiseGenerator(n_modes=4, lag_order=1, weight_eofs=False)
+    gen.fit(ds, "tas")
+    assert gen.eof_weights is None
+    assert np.allclose(gen._physical_components(), gen.pca.components_)
+
+
+def test_eof_weights_survive_save_load(tmp_path):
+    """Saving and loading preserves weighting state and reproduces output."""
+    ds = _make_training_dataset()
+    gen = MeteorNoiseGenerator(n_modes=4, lag_order=1)
+    gen.fit(ds, "tas")
+
+    fp = str(tmp_path / "model.pkl")
+    gen.save_model(fp)
+    loaded = MeteorNoiseGenerator()
+    loaded.load_model(fp)
+    assert loaded.weight_eofs is True
+    assert np.allclose(loaded.eof_weights, gen.eof_weights)
+
+    traj = np.linspace(0, 2, ds.sizes["month"])
+    a = gen.generate_regional_mean_realizations(
+        traj, region="global", n_realizations=1, random_seed=7, return_numpy=True
+    )
+    b = loaded.generate_regional_mean_realizations(
+        traj, region="global", n_realizations=1, random_seed=7, return_numpy=True
+    )
+    assert np.allclose(a, b)

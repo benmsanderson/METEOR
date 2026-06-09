@@ -162,8 +162,8 @@ def test_complex_scenarios():
         name="precipitation",
     )
 
-    # Test with complex datasets
-    generator = noise_generator.MeteorNoiseGenerator()
+    # Test with complex datasets (small 5x6 grid -> keep n_modes <= n_gridcells)
+    generator = noise_generator.MeteorNoiseGenerator(n_modes=3)
 
     # Test fitting with multiple variables
     training_data = xr.Dataset({"tas": temp_da, "pr": precip_da})
@@ -325,7 +325,8 @@ def test_advanced_noise_generation():
     )
     training_data = xr.Dataset({"tas": temp_da})
 
-    generator = noise_generator.MeteorNoiseGenerator()
+    # Small 3x4 grid -> keep n_modes <= n_gridcells
+    generator = noise_generator.MeteorNoiseGenerator(n_modes=3)
 
     # Test the fitting process
     generator.fit(training_data, "tas")

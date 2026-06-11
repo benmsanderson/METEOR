@@ -924,8 +924,6 @@ class MeteorInterface:
             annual_temp_prediction_gm_anomaly = global_mean(
                 annual_temp_prediction - annual_temp_prediction_base
             )
-        print(temp_scaling_ts.shape)
-        print(temperature_input_base.shape, annual_temp_prediction_gm_anomaly.shape)
         temperature_input_anomaly = temp_scaling_ts - temperature_input_base.values
         if len(temperature_input_anomaly) != len(annual_temp_prediction_gm_anomaly):
             temperature_input_anomaly = (
@@ -934,8 +932,6 @@ class MeteorInterface:
                     temperature_input_anomaly,
                 )
             )
-        print(temp_scaling_ts.shape)
-        print(temperature_input_anomaly.shape, annual_temp_prediction_gm_anomaly.shape)
         temp_scaling = np.where(
             annual_temp_prediction_gm_anomaly.values != 0,
             temperature_input_anomaly.values / annual_temp_prediction_gm_anomaly.values,

@@ -45,7 +45,14 @@ def _get_default_config(variable):
 
     # Variable-specific defaults
     if variable == "tas":
-        config["use_exog"] = "all"
+        # 'none' (pure VAR): using t_glob as a VAR-X exogenous regressor absorbs
+        # the persistent low-frequency global variability into the deterministic
+        # forced term, so it is lost at generation (the prescribed trajectory has
+        # no internal variability) -- the noise becomes white and annual/decadal
+        # global variance collapses ~2.5x. The temperature-dependent mean/seasonal
+        # response is already captured by the seasonal model, so the exog is
+        # redundant here. See MeteorNoiseGenerator.use_exog.
+        config["use_exog"] = "none"
         config["transform"] = False
     elif variable == "pr":
         config["use_exog"] = "none"

@@ -55,7 +55,7 @@ class MeteorNoiseGenerator:
         Whether the model has been fitted
     """
 
-    def __init__(self, n_modes=40, lag_order=2, use_exog="temp_only", weight_eofs=True):
+    def __init__(self, n_modes=40, lag_order=2, use_exog="none", weight_eofs=True):
         """
         Initialize the noise generator.
 
@@ -69,11 +69,23 @@ class MeteorNoiseGenerator:
             less sensitive to truncation).
         lag_order : int, default 2
             Lag order for VARX model
-        use_exog : str, default 'temp_only'
+        use_exog : str, default 'none'
             Exogenous variables to use in VARX model:
-            - 'all': Use temperature, annual_cos, annual_sin (original behavior)
-            - 'temp_only': Use only temperature (recommended to avoid spurious seasonality)
-            - 'none': Pure VAR with no exogenous variables
+            - 'none': Pure VAR with no exogenous variables (recommended).
+            - 'temp_only': Use only temperature.
+            - 'all': Use temperature, annual_cos, annual_sin (original behavior).
+
+            'none' is the default because using the smoothed global temperature
+            (t_glob) as an exogenous regressor absorbs the persistent
+            low-frequency global variability into the deterministic forced term.
+            At generation t_glob is the prescribed (smooth, internally
+            invariant) trajectory, so that power is not regenerated: the noise
+            becomes temporally white and annual/decadal global-mean variance
+            collapses (~2.5x too small for tas). The temperature-dependent
+            mean and seasonal response is already captured by the seasonal
+            model, so the exog regressor is redundant as well as harmful to
+            internal variability. 'temp_only'/'all' are retained for backward
+            compatibility but suppress low-frequency global variability.
         weight_eofs : bool, default True
             If True, area-weight the anomaly field by sqrt(cos(latitude)) before
             fitting the EOF/PCA basis, so PCA optimizes area-weighted variance
@@ -1180,7 +1192,7 @@ def train_noise_model_from_cmip6(
     custom_global_temp=None,
     use_picontrol_baseline=True,
     save_diagnostics=False,
-    use_exog="temp_only",
+    use_exog="none",
     weight_eofs=True,
     verbose=False,
 ):
@@ -1221,11 +1233,14 @@ def train_noise_model_from_cmip6(
         model.diagnostic_X_features, model.diagnostic_t_glob, model.diagnostic_time,
         model.diagnostic_seasonal_coef, model.diagnostic_seasonal_intercept,
         and model.diagnostic_Y_data.
-    use_exog : str, default 'temp_only'
+    use_exog : str, default 'none'
         Exogenous variables to use in VARX model:
+        - 'none': Pure VAR with no exogenous variables (recommended; preserves
+          low-frequency global variability)
+        - 'temp_only': Use only temperature
         - 'all': Use temperature, annual_cos, annual_sin (may cause spurious seasonality)
-        - 'temp_only': Use only temperature (recommended)
-        - 'none': Pure VAR with no exogenous variables
+        See MeteorNoiseGenerator for why t_glob as an exog regressor suppresses
+        global-mean internal variability.
     weight_eofs : bool, default True
         If True, area-weight the anomaly field by sqrt(cos(latitude)) before
         fitting the EOF basis so global-mean variability is preserved. See
@@ -1305,7 +1320,7 @@ def train_multiple_noise_models_from_cmip6(
     cache_dir=None,
     custom_global_temp=None,
     use_picontrol_baseline=True,
-    use_exog="temp_only",
+    use_exog="none",
     weight_eofs=True,
 ):
     """
@@ -1337,11 +1352,14 @@ def train_multiple_noise_models_from_cmip6(
         Whether to use piControl data as baseline for temperature anomalies.
         This ensures consistency with pattern scaling.
         If False, falls back to using first 42 years of training data.
-    use_exog : str, default 'temp_only'
+    use_exog : str, default 'none'
         Exogenous variables to use in VARX model:
+        - 'none': Pure VAR with no exogenous variables (recommended; preserves
+          low-frequency global variability)
+        - 'temp_only': Use only temperature
         - 'all': Use temperature, annual_cos, annual_sin (may cause spurious seasonality)
-        - 'temp_only': Use only temperature (recommended)
-        - 'none': Pure VAR with no exogenous variables
+        See MeteorNoiseGenerator for why t_glob as an exog regressor suppresses
+        global-mean internal variability.
     weight_eofs : bool, default True
         If True, area-weight the anomaly field by sqrt(cos(latitude)) before
         fitting the EOF basis so global-mean variability is preserved. See

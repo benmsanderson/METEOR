@@ -58,7 +58,9 @@ def test_get_default_config():
     assert tas_config["n_modes_noise"] == 40
     assert tas_config["lag_order"] == 2
     assert tas_config["training_scenario"] == "ssp245"
-    assert tas_config["use_exog"] == "all"
+    # 'none': t_glob as a VAR-X exog regressor whitens the noise and collapses
+    # low-frequency global variability (see MeteorNoiseGenerator.use_exog)
+    assert tas_config["use_exog"] == "none"
     assert not tas_config["transform"]
 
     pr_config = _get_default_config("pr")

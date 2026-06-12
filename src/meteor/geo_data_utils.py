@@ -34,17 +34,17 @@ def get_time_name(ds):
             return time_name
     raise RuntimeError("Couldn't find a time coordinate")
 
+
 def get_year_series(ds: xr.Dataset) -> np.ndarray:
     """Extract a DataFrame of just the year columns from a larger DataFrame."""
     time_name = get_time_name(ds)
     if time_name == "year":
         return ds[time_name].values
-    elif time_name == "time":
+    if time_name == "time":
         return ds[time_name].dt.year.values
-    elif time_name == "month":
+    if time_name == "month":
         return ds[time_name].dt.year.values + (ds[time_name].dt.month.values - 1) / 12.0
-    else:
-        raise ValueError(f"Unexpected time dimension name '{time_name}'")
+    raise ValueError(f"Unexpected time dimension name '{time_name}'")
 
 
 def get_lat_name(ds):
@@ -526,6 +526,12 @@ def extend_temeperature_anomaly_timeseries_for_scaling(
     temperature_input_anomaly_extended = np.copy(
         annual_temp_prediction_anomaly_gm.values
     )
+    input_time_name = get_time_name(temperature_input_anomaly)
+    if input_time_name != "year":
+        temperature_input_anomaly = temperature_input_anomaly.rename(
+            {input_time_name: "year"}
+        )
+        temperature_input_anomaly.coords["year"] = years_input
     for i, year in enumerate(years_prediction):
         if year in years_input:
             temperature_input_anomaly_extended[i] = temperature_input_anomaly.sel(

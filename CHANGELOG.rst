@@ -18,7 +18,12 @@ The changes listed in this file are categorised as follows:
 ---------------------
 
 ### Changed
-- Now possibly to send variable length temperature scaling timeseries, fixed noise generator for wrong ordering of base data dimensions 
+
+- Now possibly to send variable length temperature scaling timeseries, fixed noise generator for wrong ordering of base data dimensions
+
+### Fixed
+
+- Variable length timeseries now works also when don't have "year" as time dimension.
 
 
 [Version 1.6.0]

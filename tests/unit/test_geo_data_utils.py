@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
@@ -266,6 +267,72 @@ def test_extend_temperature_anomaly_timeseries_for_scaling():
         extended[4] == 0.5
     )  # Year after last should be same as annual_temp_prediction_gm_anomaly
     assert extended.coords["year"].values.tolist() == target_years.tolist()
+    temp_anomaly_time = temp_anomaly.rename({"year": "time"})
+    temp_anomaly_time.coords["time"] = pd.to_datetime(
+        {
+            "year": temp_anomaly_time.coords["time"].values,
+            "month": [6] * 3,
+            "day": [30] * 3,
+        }
+    ).values
+
+    print(
+        pd.to_datetime({"year": target_years, "month": [6] * 5, "day": [30] * 5}).values
+    )
+    print(
+        annual_temp_prediction_gm_anomaly.rename({"year": "time"}).assign_coords(
+            time=pd.to_datetime(
+                {"year": target_years, "month": [6] * 5, "day": [30] * 5}
+            ).values
+        )
+    )
+    extended_time = geo_data_utils.extend_temeperature_anomaly_timeseries_for_scaling(
+        annual_temp_prediction_gm_anomaly.rename({"year": "time"}).assign_coords(
+            time=pd.to_datetime(
+                {"year": target_years, "month": [6] * 5, "day": [30] * 5}
+            ).values
+        ),
+        temp_anomaly_time,
+    )
+    assert extended_time.shape == (5,)
+    assert extended_time[1] == 0.1
+    assert extended_time[0] == 0.1
+    assert extended_time[2] == 0.2
+    assert extended_time[3] == 0.3
+    assert extended_time[4] == 0.5
+
+
+def test_get_year_series():
+    # Create a simple dataset with different time coordinate names
+    data = np.zeros(5)
+    ds_year = xr.Dataset(
+        {"var": (("year"), data)},
+        coords={"year": np.arange(2000, 2005)},
+    )
+    ds_time = xr.Dataset(
+        {"var": (("time"), data)},
+        coords={
+            "time": pd.to_datetime(
+                {"year": range(2000, 2005), "month": [6] * 5, "day": [30] * 5}
+            ).values
+        },
+    )
+    print(ds_time["time"].dt)
+    ds_month = ds_year.rename({"year": "month"})
+    ds_month.coords["month"] = pd.to_datetime(
+        {"year": range(2000, 2005), "month": [6] * 5, "day": [30] * 5}
+    ).values  # Monthly data
+
+    years_from_year = geo_data_utils.get_year_series(ds_year)
+    years_from_time = geo_data_utils.get_year_series(ds_time)
+    years_from_month = geo_data_utils.get_year_series(ds_month)
+
+    assert years_from_year.shape == (5,)
+    assert years_from_time.shape == (5,)
+    assert years_from_month.shape == (5,)
+    assert np.array_equal(years_from_year, np.arange(2000, 2005))
+    assert np.array_equal(years_from_time, np.arange(2000, 2005))
+    assert not np.array_equal(years_from_month, np.arange(2000, 2005))
 
 
 def test_find_time_dim_and_cut():

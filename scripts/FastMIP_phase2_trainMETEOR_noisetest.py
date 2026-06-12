@@ -10,12 +10,13 @@ import random
 
 #ESM_list = ['ACCESS-ESM1-5','CanESM5', 'IPSL-CM6A-LR', 'MPI-ESM1-2-LR', 'MIROC6']  # Tier 1 list
 ESM_list = ['CanESM5']  # test without FAIR scaling, only for this model.
-scenarios = ['SSP2 - Low Emissions', 'SSP2 - Medium Emissions', 'SSP3 - High Emissions', 'SSP1 - Very Low Emissions']
+scenarios = ['Low - SSP2 (Marker)', 'SSP2 - Medium Emissions', 'SSP3 - High Emissions', 'SSP1 - Very Low Emissions']
 scenarios_short = ['L','M','H','VL']
 
 data_root = '/div/no-backup-nac/users/maurad/METEOR/'
 # FAIR ensemble samples:
 FAIRens = pd.read_csv(f'{data_root}data/FASTMIP_phase2/FAIR_data/climate_assessment_full.csv')
+#FAIRens = pd.read_csv('../../../maurad/METEOR_dataonly/data/FASTMIP_phase2/FAIR_data/climate_assessment_full.csv', index_col=0, parse_dates=True)
 num_fair = 20
 
 # METEOR setup:
@@ -56,9 +57,9 @@ all_ensemble_members = FAIRens['ensemble_member'].unique().tolist()
 random_subsample = random.sample(all_ensemble_members, num_fair)
 
 print(FAIRens['ensemble_member'].unique())
-sys.exit(3)
+#sys.exit(3)
 FAIR_subsample = FAIRens.loc[FAIRens['ensemble_member'].isin(random_subsample) & (FAIRens['variable'] == 'Climate Assessment|Surface Temperature (GSAT)')].sort_values('ensemble_member')
-
+print(FAIR_subsample)
 # save with timestamp for a unique name
 #timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 #FAIR_subsample.to_pickle(f'{data_root}data/FASTMIP_phase2/FAIR_data/subsample_{num_fair}members_{timestamp}.pkl')
@@ -92,6 +93,8 @@ for esm in ESM_list:
 
         # Get FAIR subsample for this scenario:
         FAIR_sample_for_scenario = FAIR_subsample.loc[FAIR_subsample['scenario'] == scenario]
+        print(FAIR_sample_for_scenario)
+        #sys.exit(4)
 
         # Loop through FAIR ensemble members and create METEOR realizations:
         for fair_idx in FAIR_sample_for_scenario.index:

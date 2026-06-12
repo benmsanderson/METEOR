@@ -443,6 +443,7 @@ class MeteorNoiseGenerator:
         random_seed=None,
         noise_only=False,
         add_base=None,
+        stochastic_pcs=None,
     ):
         """
         Generate stochastic climate realizations.
@@ -464,6 +465,12 @@ class MeteorNoiseGenerator:
             Base climatology to add to each realization. If provided, the addition is done
             efficiently in NumPy before XArray conversion, avoiding expensive XArray operations.
             Must have compatible shape with the output.
+        stochastic_pcs : np.ndarray, optional
+            Pre-generated stochastic PCs from :meth:`generate_stochastic_pcs`. If
+            provided, these PCs are used instead of generating fresh ones, enabling
+            self-consistent ensemble generation shared with regional/global means.
+            Shape ``(n_time, n_modes)`` or ``(n_realizations, n_time, n_modes)``.
+            When provided, ``n_realizations`` is inferred from the array.
 
         Returns
         -------
@@ -474,7 +481,7 @@ class MeteorNoiseGenerator:
         if not self.fitted:
             raise ValueError("Model must be fitted before generating realizations")
 
-        if random_seed is not None:
+        if random_seed is not None and stochastic_pcs is None:
             np.random.seed(random_seed)
 
         # Create time coordinate (shared across all realizations)
@@ -526,11 +533,25 @@ class MeteorNoiseGenerator:
 
             base_clim_np = base_values.reshape(n_time, n_lat, n_lon)
 
+        # Use pre-generated PCs if provided (self-consistent ensembles), else
+        # generate a fresh stochastic component per realization.
+        if stochastic_pcs is not None:
+            if stochastic_pcs.ndim == 2:
+                pcs_to_use = [stochastic_pcs]
+            else:
+                pcs_to_use = list(stochastic_pcs)
+            n_realizations = len(pcs_to_use)
+        else:
+            pcs_to_use = None
+
         # Generate realizations (only stochastic component varies)
         realizations = []
-        for _ in range(n_realizations):
+        for i in range(n_realizations):
             # Generate stochastic component (this is the only unique part per realization)
-            synthetic_pcs = self._generate_stochastic_pcs(X_exog, n_time)
+            if pcs_to_use is not None:
+                synthetic_pcs = pcs_to_use[i]
+            else:
+                synthetic_pcs = self._generate_stochastic_pcs(X_exog, n_time)
 
             # Reconstruct anomalies (NumPy)
             reconstructed_anomalies = synthetic_pcs @ self.pca.components_

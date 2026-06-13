@@ -24,6 +24,7 @@ The changes listed in this file are categorised as follows:
 ### Fixed
 
 - Variable length timeseries now works also when don't have "year" as time dimension.
+- Fixes to generate annual and monthly gridded ensembles with unified noise and preserving more of the variance.
 
 
 [Version 1.6.0]

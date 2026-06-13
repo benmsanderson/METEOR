@@ -692,6 +692,7 @@ def test_compute_timeseries_scaling():
         assert scaling_factor.shape == (1, 1, 1)
         assert np.isclose(scaling_factor.values[0, 0, 0], 1.0)
 
+
 def test_interface_with_tabids_in_data_getter_kwargs():
     """MeteorInterface passes tabids from data_getter_kwargs to Cmip6MeteorDataGetter."""
     with patch("meteor.meteor_interface.Cmip6MeteorDataGetter") as mock_getter_class:

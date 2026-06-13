@@ -17,6 +17,10 @@ The changes listed in this file are categorised as follows:
 [Unreleased]
 ---------------------
 
+### Fixed
+- Fixes to generate annual and monthly gridded ensembles with unified noise and preserving more of the variance.
+
+
 
 [Version 1.6.0]
 -----------------------------

@@ -17,6 +17,9 @@ The changes listed in this file are categorised as follows:
 [Unreleased]
 ---------------------
 
+### Fixed
+- Fixes to generate annual and monthly gridded ensembles with unified noise and preserving more of the variance.
+
 ### Changed
 
 - Now possibly to send variable length temperature scaling timeseries, fixed noise generator for wrong ordering of base data dimensions

@@ -47,7 +47,14 @@ def _get_default_config(variable):
 
     # Variable-specific defaults
     if variable == "tas":
-        config["use_exog"] = "all"
+        # 'none' (pure VAR): using t_glob as a VAR-X exogenous regressor absorbs
+        # the persistent low-frequency global variability into the deterministic
+        # forced term, so it is lost at generation (the prescribed trajectory has
+        # no internal variability) -- the noise becomes white and annual/decadal
+        # global variance collapses ~2.5x. The temperature-dependent mean/seasonal
+        # response is already captured by the seasonal model, so the exog is
+        # redundant here. See MeteorNoiseGenerator.use_exog.
+        config["use_exog"] = "none"
         config["transform"] = False
     elif variable == "pr":
         config["use_exog"] = "none"
@@ -894,6 +901,9 @@ class MeteorInterface:
             base_year = 1750  # Default assumption
 
         if temp_scaling_ts is not None:
+            print(
+                f" Ts scaleing before calculating annual pred {temp_scaling_ts['year']}"
+            )
             annual_prediction = self._compute_timeseries_scaling(
                 variable,
                 annual_prediction,
@@ -1031,7 +1041,7 @@ class MeteorInterface:
             annual_temp_prediction_gm_anomaly = global_mean(
                 annual_temp_prediction - annual_temp_prediction_base
             )
-        temperature_input_anomaly = temp_scaling_ts - temperature_input_base
+        temperature_input_anomaly = temp_scaling_ts - temperature_input_base.values
         if len(temperature_input_anomaly) != len(annual_temp_prediction_gm_anomaly):
             temperature_input_anomaly = (
                 extend_temeperature_anomaly_timeseries_for_scaling(
@@ -1039,8 +1049,6 @@ class MeteorInterface:
                     temperature_input_anomaly,
                 )
             )
-        print(temp_scaling_ts.shape)
-        print(temperature_input_anomaly.shape, annual_temp_prediction_gm_anomaly.shape)
         temp_scaling = np.where(
             annual_temp_prediction_gm_anomaly.values != 0,
             temperature_input_anomaly.values / annual_temp_prediction_gm_anomaly.values,

@@ -26,6 +26,9 @@ def test_meteor_noise_generator_initialization():
     assert generator.n_modes == 40  # default value
     assert generator.lag_order == 2  # default value
     assert generator.weight_eofs is True  # area-weighting on by default
+    # pure VAR by default: t_glob exog whitens the noise and collapses
+    # low-frequency global variability
+    assert MeteorNoiseGenerator().use_exog == "none"
 
     # Test error handling with uninitiated state
     with pytest.raises(ValueError, match="Invalid use_exog value:"):

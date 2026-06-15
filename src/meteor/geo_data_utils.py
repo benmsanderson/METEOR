@@ -35,6 +35,18 @@ def get_time_name(ds):
     raise RuntimeError("Couldn't find a time coordinate")
 
 
+def get_year_series(ds: xr.Dataset) -> np.ndarray:
+    """Extract a DataFrame of just the year columns from a larger DataFrame."""
+    time_name = get_time_name(ds)
+    if time_name == "year":
+        return ds[time_name].values
+    if time_name == "time":
+        return ds[time_name].dt.year.values
+    if time_name == "month":
+        return ds[time_name].dt.year.values + (ds[time_name].dt.month.values - 1) / 12.0
+    raise ValueError(f"Unexpected time dimension name '{time_name}'")
+
+
 def get_lat_name(ds):
     """
     Get name of latitude dimension
@@ -509,23 +521,56 @@ def extend_temeperature_anomaly_timeseries_for_scaling(
     temperature_input_anomaly : xarray.DataArray
         Temperature anomaly time series used for scaling (relative to base year)
     """
-    years_prediction = annual_temp_prediction_anomaly_gm[
-        get_time_name(annual_temp_prediction_anomaly_gm)
-    ].values
-    years_input = temperature_input_anomaly[
-        get_time_name(temperature_input_anomaly)
-    ].values
+    years_prediction = get_year_series(annual_temp_prediction_anomaly_gm)
+    years_input = get_year_series(temperature_input_anomaly)
     temperature_input_anomaly_extended = np.copy(
         annual_temp_prediction_anomaly_gm.values
     )
+    input_time_name = get_time_name(temperature_input_anomaly)
+    if input_time_name != "year":
+        temperature_input_anomaly = temperature_input_anomaly.rename(
+            {input_time_name: "year"}
+        )
+        temperature_input_anomaly.coords["year"] = years_input
     for i, year in enumerate(years_prediction):
         if year in years_input:
             temperature_input_anomaly_extended[i] = temperature_input_anomaly.sel(
                 {get_time_name(temperature_input_anomaly): year}
             ).values
+
     temperature_input_anomaly_extended = xr.DataArray(
         data=temperature_input_anomaly_extended,
         coords={get_time_name(annual_temp_prediction_anomaly_gm): years_prediction},
         dims=annual_temp_prediction_anomaly_gm.dims,
     )
+
     return temperature_input_anomaly_extended
+
+
+def find_time_dim_and_cut(base_array, n_time, n_lat, n_lon):
+    """
+    Base_array should have dimensions (time, lat, lon), but the ordering can be off
+    """
+    base_shape = base_array.shape
+    lat_dim = None
+    lon_dim = None
+    time_dim = 0
+    for i, dim_size in enumerate(base_shape):
+        if dim_size == n_lat and lat_dim is None:
+            lat_dim = i
+        elif dim_size == n_lon:
+            lon_dim = i
+        else:
+            time_dim = i
+    if lat_dim is None or lon_dim is None:
+        raise ValueError(
+            f"Couldn't find lat/lon dimensions in base array with shape {base_shape}"
+        )
+    if base_shape[time_dim] != n_time:
+        if time_dim == 0:
+            base_array = base_array[:n_time, :, :]
+        elif time_dim == 1:
+            base_array = base_array[:, :n_time, :]
+        elif time_dim == 2:
+            base_array = base_array[:, :, :n_time]
+    return base_array.transpose(time_dim, lat_dim, lon_dim)

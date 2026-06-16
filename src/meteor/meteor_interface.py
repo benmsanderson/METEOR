@@ -1567,12 +1567,30 @@ class MeteorInterface:
 
         Parameters
         ----------
+        variable : str
+            Climate variable to generate
+        scenario : str or dict
+            Scenario specification (see :meth:`generate_ensemble_outputs`).
+        start_year : int    
+            Start year
+        end_year : int
+            End year (inclusive)
+        n_realizations : int
+            Number of ensemble members
         gridded_spec : dict
             Dictionary specifying gridded outputs:
             - 'annual': list of years for annual mean fields
             - 'monthly': list of years for monthly fields (all 12 months)
             - 'climatology': list of [start, end] year pairs for climatological means
-
+        gen_inputs : GenerationInputs, optional
+            Shared pattern scaling result and (window-sliced) stochastic PCs, if
+            already computed by the caller. If None, will be computed internally.
+        include_noise : bool
+            If True, add stochastic noise; if False, return forced response only
+        temp_scaling_ts : xr.DataArray, optional
+            Optional global-mean temperature trajectory to scale the pattern to.
+        verbose : bool 
+            Print progress messages or not
         Returns
         -------
         dict
@@ -1814,9 +1832,11 @@ class MeteorInterface:
 
         # Apply the distribution transform on the monthly field, before averaging.
         if transform_config and transform_config.transform_type:
+            ensemble = ensemble - base_slice  # Convert to anomalies for the transform, if not already
             ensemble = self._apply_gridded_transform(
                 ensemble, transform_config, target_params, pr_baseline_field
             )
+            ensemble = ensemble + base_slice  # Convert back to absolute values after the transform
 
         if reduce_time:
             ensemble = ensemble.mean(dim="month")

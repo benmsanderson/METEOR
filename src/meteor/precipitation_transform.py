@@ -369,6 +369,199 @@ def apply_distribution_transform(
 
 
 # =============================================================================
+# Seasonal (per-month-of-year) variants
+# =============================================================================
+#
+# Fitting/applying one quantile map across all months conflates the seasonal
+# cycle with internal variability: the Gaussian std becomes dominated by the
+# seasonal swing (very large for variables like precipitation), so the CDF
+# squashes inter-realization noise into a narrow quantile band and the gamma
+# PPF then maps it to a narrow output band. Fitting per month-of-year removes
+# the seasonal contribution from the variance the quantile map sees, so the
+# transform actually preserves the within-month internal variability.
+
+
+def _month_of_year_indices(n_time):
+    """Return a list of 12 index arrays selecting each month-of-year from a
+    contiguous monthly time axis of length ``n_time``. Assumes the series
+    starts in January; partial trailing years are fine (the last month-of-year
+    bins will just have one fewer sample)."""
+    return [np.arange(m, n_time, 12) for m in range(12)]
+
+
+def fit_distribution_parameters_1d_seasonal(timeseries_data, distribution="gamma"):
+    """
+    Fit a separate distribution per month-of-year (12 fits) to a 1D-time series.
+
+    Parameters
+    ----------
+    timeseries_data : np.ndarray or xr.DataArray
+        Monthly data. Last axis is time and must be a multiple of 12. Earlier
+        axes (realization / ensemble) are pooled into each per-month fit.
+    distribution : str
+        Distribution to fit at each month-of-year.
+
+    Returns
+    -------
+    dict
+        Each parameter key maps to a 1D array of length 12 (Jan..Dec).
+    """
+    if isinstance(timeseries_data, xr.DataArray):
+        data = timeseries_data.values
+    else:
+        data = timeseries_data
+
+    n_time = data.shape[-1]
+    month_idx = _month_of_year_indices(n_time)
+
+    per_month = [
+        fit_distribution_parameters_1d(data[..., idx], distribution=distribution)
+        for idx in month_idx
+    ]
+
+    keys = per_month[0].keys()
+    return {k: np.array([p[k] for p in per_month]) for k in keys}
+
+
+def fit_distribution_parameters_3d_seasonal(spatial_data, distribution="gamma"):
+    """
+    Fit per-gridpoint distributions separately for each month-of-year.
+
+    Parameters
+    ----------
+    spatial_data : np.ndarray or xr.DataArray
+        Shape (n_time, n_lat, n_lon) or (n_ensemble, n_time, n_lat, n_lon).
+        ``n_time`` must be a multiple of 12.
+    distribution : str
+        'gaussian' or 'gamma'.
+
+    Returns
+    -------
+    dict
+        Each parameter key maps to an array of shape (12, n_lat, n_lon).
+    """
+    if isinstance(spatial_data, xr.DataArray):
+        data = spatial_data.values
+    else:
+        data = spatial_data
+
+    if data.ndim == 3:
+        time_axis = 0
+        n_time = data.shape[0]
+    elif data.ndim == 4:
+        time_axis = 1
+        n_time = data.shape[1]
+    else:
+        raise ValueError(
+            "Data must be 3D (n_time, n_lat, n_lon) or "
+            f"4D (n_ensemble, n_time, n_lat, n_lon), got shape {data.shape}"
+        )
+
+    month_idx = _month_of_year_indices(n_time)
+
+    per_month = [
+        fit_distribution_parameters_3d(
+            np.take(data, idx, axis=time_axis), distribution=distribution
+        )
+        for idx in month_idx
+    ]
+
+    keys = per_month[0].keys()
+    return {k: np.stack([p[k] for p in per_month], axis=0) for k in keys}
+
+
+def apply_distribution_transform_seasonal(
+    gaussian_data, gaussian_params, target_params, target_dist="gamma"
+):
+    """
+    Apply a per-month-of-year quantile transform.
+
+    Automatically detects 1D vs 3D based on the rank of the parameter arrays
+    (``ndim == 1`` -> 1D scalar-per-month; ``ndim == 3`` -> 3D per-gridpoint).
+
+    Parameters
+    ----------
+    gaussian_data : np.ndarray or xr.DataArray
+        Shape (n_realizations, n_time) for 1D or
+        (n_realizations, n_time, n_lat, n_lon) / (n_time, n_lat, n_lon) for 3D.
+        ``n_time`` must be a multiple of 12.
+    gaussian_params, target_params : dict
+        Per-month-of-year parameter arrays. For 1D: shape (12,) each.
+        For 3D: shape (12, n_lat, n_lon) each.
+    target_dist : str
+        Target distribution name.
+
+    Returns
+    -------
+    Same type/shape as input.
+    """
+    is_xarray = isinstance(gaussian_data, xr.DataArray)
+    if is_xarray:
+        coords = gaussian_data.coords
+        dims = gaussian_data.dims
+        data = gaussian_data.values
+    else:
+        data = gaussian_data
+
+    sample_param = gaussian_params["mean"]
+    if sample_param.ndim == 1:
+        # 1D scalar-per-month
+        if data.ndim != 2:
+            raise ValueError(
+                "For 1D seasonal transform, expected 2D data (n_real, n_time), "
+                f"got shape {data.shape}"
+            )
+        time_axis = 1
+    elif sample_param.ndim == 3:
+        # 3D per-gridpoint-per-month: params shape (12, n_lat, n_lon)
+        if data.ndim == 3:
+            time_axis = 0
+        elif data.ndim == 4:
+            time_axis = 1
+        else:
+            raise ValueError(
+                "For 3D seasonal transform, expected 3D or 4D data, "
+                f"got shape {data.shape}"
+            )
+    else:
+        raise ValueError(
+            "Seasonal params must have ndim 1 (scalar per month) or 3 "
+            f"(per gridpoint per month), got ndim={sample_param.ndim}"
+        )
+
+    n_time = data.shape[time_axis]
+    month_idx = _month_of_year_indices(n_time)
+
+    transformed = np.empty_like(data, dtype=np.float64)
+    for m, idx in enumerate(month_idx):
+        data_m = np.take(data, idx, axis=time_axis)
+
+        if sample_param.ndim == 1:
+            # Extract Python scalars so the underlying apply_distribution_transform
+            # takes the 1D-scalar path (which uses np.isscalar).
+            gp_m = {k: float(v[m]) for k, v in gaussian_params.items()}
+            tp_m = {k: float(v[m]) for k, v in target_params.items()}
+        else:
+            gp_m = {k: v[m] for k, v in gaussian_params.items()}
+            tp_m = {k: v[m] for k, v in target_params.items()}
+
+        transformed_m = apply_distribution_transform(
+            data_m, gp_m, tp_m, target_dist=target_dist
+        )
+
+        # Write back into the appropriate slice of ``transformed``.
+        if time_axis == 0:
+            transformed[idx] = transformed_m
+        else:
+            # time_axis == 1 covers both 2D and 4D layouts.
+            transformed[:, idx] = transformed_m
+
+    if is_xarray:
+        return xr.DataArray(transformed, coords=coords, dims=dims)
+    return transformed
+
+
+# =============================================================================
 # Empirical Quantile Mapping (non-parametric alternative)
 # =============================================================================
 

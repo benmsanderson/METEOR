@@ -7,8 +7,11 @@ climate variables to ensure physical realism (e.g., precipitation positivity).
 
 from meteor.precipitation_transform import (
     apply_distribution_transform,
+    apply_distribution_transform_seasonal,
     fit_distribution_parameters_1d,
+    fit_distribution_parameters_1d_seasonal,
     fit_distribution_parameters_3d,
+    fit_distribution_parameters_3d_seasonal,
 )
 
 
@@ -30,6 +33,10 @@ class VariableTransformConfig:  # pylint: disable=too-few-public-methods
         Function to fit 3D transform parameters
     apply_func : callable, optional
         Function to apply the transform
+    fit_1d_seasonal_func, fit_3d_seasonal_func, apply_seasonal_func : callable, optional
+        Per-month-of-year variants. When present, the generator path uses these
+        in place of the pooled variants so the quantile map sees variability,
+        not the seasonal cycle.
     """
 
     def __init__(
@@ -40,6 +47,9 @@ class VariableTransformConfig:  # pylint: disable=too-few-public-methods
         fit_1d_func=None,
         fit_3d_func=None,
         apply_func=None,
+        fit_1d_seasonal_func=None,
+        fit_3d_seasonal_func=None,
+        apply_seasonal_func=None,
     ):
         self.name = name
         self.transform_type = transform_type
@@ -47,6 +57,9 @@ class VariableTransformConfig:  # pylint: disable=too-few-public-methods
         self.fit_1d_func = fit_1d_func
         self.fit_3d_func = fit_3d_func
         self.apply_func = apply_func
+        self.fit_1d_seasonal_func = fit_1d_seasonal_func
+        self.fit_3d_seasonal_func = fit_3d_seasonal_func
+        self.apply_seasonal_func = apply_seasonal_func
 
     def __repr__(self):
         """Return string representation of VariableTransformConfig."""
@@ -64,6 +77,9 @@ VARIABLE_TRANSFORMS = {
         fit_1d_func=fit_distribution_parameters_1d,
         fit_3d_func=fit_distribution_parameters_3d,
         apply_func=apply_distribution_transform,
+        fit_1d_seasonal_func=fit_distribution_parameters_1d_seasonal,
+        fit_3d_seasonal_func=fit_distribution_parameters_3d_seasonal,
+        apply_seasonal_func=apply_distribution_transform_seasonal,
     ),
     "tas": VariableTransformConfig(
         name=None,

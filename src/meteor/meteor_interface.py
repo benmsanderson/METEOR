@@ -1513,23 +1513,40 @@ class MeteorInterface:
                 if variable == "pr" and pr_baseline_agg is not None:
                     ensemble_for_transform = ensemble_for_transform + pr_baseline_agg
 
-                # Fit Gaussian to generated data
-                gaussian_params = transform_config.fit_1d_func(
-                    ensemble_for_transform, "gaussian"
+                # Fit per-month-of-year (seasonal) when the transform exposes it
+                # — otherwise σ_gaussian is dominated by the seasonal cycle and
+                # the quantile map squashes the inter-realization noise band.
+                use_seasonal = (
+                    transform_config.fit_1d_seasonal_func is not None
+                    and transform_config.apply_seasonal_func is not None
                 )
 
-                # Fit target distribution to CMIP6 data
-                target_params = transform_config.fit_1d_func(
-                    cmip6_agg, transform_config.transform_type
-                )
-
-                # Apply transform
-                transformed_ensemble = transform_config.apply_func(
-                    ensemble_for_transform,
-                    gaussian_params,
-                    target_params,
-                    target_dist=transform_config.transform_type,
-                )
+                if use_seasonal:
+                    gaussian_params = transform_config.fit_1d_seasonal_func(
+                        ensemble_for_transform, "gaussian"
+                    )
+                    target_params = transform_config.fit_1d_seasonal_func(
+                        cmip6_agg, transform_config.transform_type
+                    )
+                    transformed_ensemble = transform_config.apply_seasonal_func(
+                        ensemble_for_transform,
+                        gaussian_params,
+                        target_params,
+                        target_dist=transform_config.transform_type,
+                    )
+                else:
+                    gaussian_params = transform_config.fit_1d_func(
+                        ensemble_for_transform, "gaussian"
+                    )
+                    target_params = transform_config.fit_1d_func(
+                        cmip6_agg, transform_config.transform_type
+                    )
+                    transformed_ensemble = transform_config.apply_func(
+                        ensemble_for_transform,
+                        gaussian_params,
+                        target_params,
+                        target_dist=transform_config.transform_type,
+                    )
 
                 results[agg] = transformed_ensemble
             else:
@@ -1613,22 +1630,28 @@ class MeteorInterface:
         elif verbose:  # pragma: no cover
             print("      → Using shared stochastic PC realizations (gridded)")
 
-        # Resolve transform and (only for transform variables, e.g. pr) load the
-        # CMIP6 reference field and fit the per-gridpoint target distribution once.
+        # Resolve transform. For variables with a distribution transform (e.g.
+        # pr) we generate the full prediction window in one shot and apply the
+        # seasonal (per-month-of-year, per-gridpoint) transform once on the
+        # whole window. Doing it per year-slice (the old path) re-fitted the
+        # Gaussian on just 12 months at each gridpoint, which normalised every
+        # year to its own local mean and wiped the climate-change trend.
         transform_config = self._get_transform_config(variable)
+        pre_transformed_ensemble = None
         target_params = None
         pr_baseline_field = None
         if transform_config and transform_config.transform_type:
-            ssp_data, pr_baseline_field = self._load_transform_reference(
-                variable, start_year, end_year, verbose=verbose
-            )
-            if verbose:  # pragma: no cover
-                print(
-                    f"      → Fitting per-gridpoint {transform_config.transform_type} "
-                    "target distribution..."
-                )
-            target_params = transform_config.fit_3d_func(
-                ssp_data, transform_config.transform_type
+            pre_transformed_ensemble = self._build_full_window_transformed_ensemble(
+                variable,
+                monthly_prediction,
+                monthly_warming,
+                noise_model,
+                stochastic_pcs,
+                start_year,
+                end_year,
+                transform_config,
+                include_noise,
+                verbose=verbose,
             )
 
         # Extract requested time slices
@@ -1642,6 +1665,27 @@ class MeteorInterface:
         def year_to_month_idx(year):
             return (year - start_year) * 12
 
+        def _get_ensemble_slice(s_idx, e_idx, reduce_time):
+            """Slice the pre-transformed ensemble, or generate+transform per slice."""
+            if pre_transformed_ensemble is not None:
+                sliced = pre_transformed_ensemble.isel(month=slice(s_idx, e_idx))
+                if reduce_time:
+                    sliced = sliced.mean(dim="month")
+                return sliced
+            return self._generate_gridded_slice(
+                monthly_prediction,
+                monthly_warming,
+                noise_model,
+                stochastic_pcs,
+                s_idx,
+                e_idx,
+                include_noise,
+                reduce_time=reduce_time,
+                transform_config=transform_config,
+                target_params=target_params,
+                pr_baseline_field=pr_baseline_field,
+            )
+
         # Annual means (12-month average of each year)
         if "annual" in gridded_spec:
             if verbose:  # pragma: no cover
@@ -1653,18 +1697,8 @@ class MeteorInterface:
                 start_idx = year_to_month_idx(year)
                 end_idx = start_idx + 12
                 if start_idx >= 0 and end_idx <= n_months:
-                    annual_fields[year] = self._generate_gridded_slice(
-                        monthly_prediction,
-                        monthly_warming,
-                        noise_model,
-                        stochastic_pcs,
-                        start_idx,
-                        end_idx,
-                        include_noise,
-                        reduce_time=True,
-                        transform_config=transform_config,
-                        target_params=target_params,
-                        pr_baseline_field=pr_baseline_field,
+                    annual_fields[year] = _get_ensemble_slice(
+                        start_idx, end_idx, reduce_time=True
                     )
                 else:
                     if verbose:  # pragma: no cover
@@ -1684,18 +1718,8 @@ class MeteorInterface:
                 start_idx = year_to_month_idx(year)
                 end_idx = start_idx + 12
                 if start_idx >= 0 and end_idx <= n_months:
-                    monthly_fields[year] = self._generate_gridded_slice(
-                        monthly_prediction,
-                        monthly_warming,
-                        noise_model,
-                        stochastic_pcs,
-                        start_idx,
-                        end_idx,
-                        include_noise,
-                        reduce_time=False,
-                        transform_config=transform_config,
-                        target_params=target_params,
-                        pr_baseline_field=pr_baseline_field,
+                    monthly_fields[year] = _get_ensemble_slice(
+                        start_idx, end_idx, reduce_time=False
                     )
                 else:
                     if verbose:  # pragma: no cover
@@ -1718,19 +1742,7 @@ class MeteorInterface:
                     end_idx = year_to_month_idx(clim_end + 1)  # +1 to include end year
                     if start_idx >= 0 and end_idx <= n_months:
                         climatology_fields[f"{clim_start}-{clim_end}"] = (
-                            self._generate_gridded_slice(
-                                monthly_prediction,
-                                monthly_warming,
-                                noise_model,
-                                stochastic_pcs,
-                                start_idx,
-                                end_idx,
-                                include_noise,
-                                reduce_time=True,
-                                transform_config=transform_config,
-                                target_params=target_params,
-                                pr_baseline_field=pr_baseline_field,
-                            )
+                            _get_ensemble_slice(start_idx, end_idx, reduce_time=True)
                         )
                     else:
                         if verbose:  # pragma: no cover
@@ -1876,6 +1888,97 @@ class MeteorInterface:
         # Fit Gaussian per gridpoint to the generated ensemble, then map to target.
         gaussian_params = transform_config.fit_3d_func(data.values, "gaussian")
         transformed = transform_config.apply_func(
+            data.values,
+            gaussian_params,
+            target_params,
+            target_dist=transform_config.transform_type,
+        )
+        return xr.DataArray(transformed, coords=data.coords, dims=data.dims)
+
+    def _build_full_window_transformed_ensemble(
+        self,
+        variable,
+        monthly_prediction,
+        monthly_warming,
+        noise_model,
+        stochastic_pcs,
+        start_year,
+        end_year,
+        transform_config,
+        include_noise,
+        verbose=True,
+    ):
+        """
+        Generate the gridded ensemble over the FULL prediction window and apply
+        the seasonal (per-month-of-year, per-gridpoint) distribution transform
+        once.
+
+        Fitting the Gaussian half of the quantile map over the full window — and
+        per month-of-year rather than across all months at once — keeps the
+        long-term trend in the variance the map carries through (so the gridded
+        trend is preserved) while removing the seasonal cycle from σ (so the
+        inter-realization noise band is preserved at every gridpoint).
+
+        Returns
+        -------
+        xr.DataArray
+            Transformed monthly ensemble (realization, month, lat, lon) spanning
+            ``start_year..end_year`` inclusive. Callers slice this once per
+            requested annual / monthly / climatology field.
+        """
+        if verbose:  # pragma: no cover
+            print(
+                "      → Generating full-window gridded ensemble for "
+                f"{transform_config.transform_type} transform"
+            )
+
+        ssp_data, pr_baseline_field = self._load_transform_reference(
+            variable, start_year, end_year, verbose=verbose
+        )
+
+        if verbose:  # pragma: no cover
+            print(
+                f"      → Fitting per-month-of-year per-gridpoint "
+                f"{transform_config.transform_type} target distribution..."
+            )
+        target_params = transform_config.fit_3d_seasonal_func(
+            ssp_data, transform_config.transform_type
+        )
+
+        if include_noise:
+            realizations = noise_model.generate_realization(
+                monthly_warming,
+                noise_only=True,
+                add_base=monthly_prediction,
+                stochastic_pcs=stochastic_pcs,
+            )
+            if not isinstance(realizations, list):
+                realizations = [realizations]
+        else:
+            realizations = [monthly_prediction]
+        ensemble = _stack_realizations(realizations)
+
+        data = ensemble
+        if pr_baseline_field is not None:
+            extra_dims = [
+                d for d in pr_baseline_field.dims if d not in ("lat", "lon")
+            ]
+            if extra_dims:
+                pr_baseline_field = pr_baseline_field.isel(
+                    {d: 0 for d in extra_dims}, drop=True
+                )
+            data = data + pr_baseline_field
+
+        if verbose:  # pragma: no cover
+            print(
+                "      → Fitting per-month-of-year per-gridpoint Gaussian on "
+                "full-window generated ensemble..."
+            )
+        gaussian_params = transform_config.fit_3d_seasonal_func(
+            data.values, "gaussian"
+        )
+
+        transformed = transform_config.apply_seasonal_func(
             data.values,
             gaussian_params,
             target_params,

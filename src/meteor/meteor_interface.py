@@ -1960,9 +1960,7 @@ class MeteorInterface:
 
         data = ensemble
         if pr_baseline_field is not None:
-            extra_dims = [
-                d for d in pr_baseline_field.dims if d not in ("lat", "lon")
-            ]
+            extra_dims = [d for d in pr_baseline_field.dims if d not in ("lat", "lon")]
             if extra_dims:
                 pr_baseline_field = pr_baseline_field.isel(
                     {d: 0 for d in extra_dims}, drop=True
@@ -1974,9 +1972,7 @@ class MeteorInterface:
                 "      → Fitting per-month-of-year per-gridpoint Gaussian on "
                 "full-window generated ensemble..."
             )
-        gaussian_params = transform_config.fit_3d_seasonal_func(
-            data.values, "gaussian"
-        )
+        gaussian_params = transform_config.fit_3d_seasonal_func(data.values, "gaussian")
 
         transformed = transform_config.apply_seasonal_func(
             data.values,

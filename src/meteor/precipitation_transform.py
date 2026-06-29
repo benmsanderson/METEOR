@@ -382,10 +382,24 @@ def apply_distribution_transform(
 
 
 def _month_of_year_indices(n_time):
-    """Return a list of 12 index arrays selecting each month-of-year from a
+    """
+    Return a list of 12 index arrays selecting each month-of-year
+
+    Return a list of 12 index arrays selecting each month-of-year from a
     contiguous monthly time axis of length ``n_time``. Assumes the series
     starts in January; partial trailing years are fine (the last month-of-year
-    bins will just have one fewer sample)."""
+    bins will just have one fewer sample).
+
+    Parameters
+    ----------
+    n_time : int
+        Length of the time axis (must be a multiple of 12).
+
+    Returns
+    -------
+    list of np.ndarray
+        Each element is a 1D array of indices selecting the corresponding month-of-year.
+    """
     return [np.arange(m, n_time, 12) for m in range(12)]
 
 

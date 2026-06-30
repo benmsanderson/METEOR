@@ -1,4 +1,21 @@
-"""Utility functions for handling geographic data."""
+"""
+Geographic data utilities for METEOR's gridded climate fields.
+
+This module groups the helpers METEOR uses to navigate, weight, and
+spatially aggregate xarray datasets on (lat, lon, time) grids:
+
+- Coordinate discovery: :func:`get_time_name`, :func:`get_lat_name`,
+  :func:`get_lon_name`, :func:`get_year_series`.
+- Area weighting: :func:`get_weights_for_ds`,
+  :func:`apply_weights_and_do_spatial_mean`.
+- Spatial aggregation: :func:`global_mean`, :func:`regional_mean` (AR6
+  reference regions via ``regionmask``), :func:`extract_point`,
+  :func:`create_region_mask` (custom bounding boxes or precomputed masks),
+  :func:`list_ar6_regions`.
+- Time-axis helpers used by the pattern-scaling pipeline:
+  :func:`extend_temeperature_anomaly_timeseries_for_scaling`,
+  :func:`find_time_dim_and_cut`.
+"""
 
 import logging
 

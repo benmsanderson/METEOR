@@ -572,7 +572,6 @@ class MeteorNoiseGenerator:
 
             # Now reshape to (n_time, n_lat, n_lon)
             # If the time dimension doesn't match, select the first n_time steps
-            print(n_lat, n_lon, n_time)
             base_values = find_time_dim_and_cut(base_values, n_time, n_lat, n_lon)
             base_clim_np = base_values.reshape(n_time, n_lat, n_lon)
 

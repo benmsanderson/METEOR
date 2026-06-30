@@ -29,10 +29,13 @@ def load_agmerra_baseline():
     """
     data_pkg = importlib.resources.files("meteor.impacts.ggcm.data")
 
+    # decode_times=False: the bundled files have a malformed CF time unit
+    # ("1980 01-01-01 12:00:00") that newer cftime/xarray refuse to parse.
+    # We only use the data variables, not the time coordinate.
     with importlib.resources.as_file(
         data_pkg / "agmerra-tavg-avg-1980-2010-05deg-adjlon.nc4"
     ) as path:
-        with xr.open_dataset(path) as ds:
+        with xr.open_dataset(path, decode_times=False) as ds:
             # Ocean cells arrive as NaN once xarray applies the fill mask
             temp_baseline = np.nan_to_num(
                 ds["tavg"].isel(time=0).values.astype(np.float64), nan=0.0
@@ -41,7 +44,7 @@ def load_agmerra_baseline():
     with importlib.resources.as_file(
         data_pkg / "agmerra-prate-avg-1980-2010-05deg-adjlon.nc4"
     ) as path:
-        with xr.open_dataset(path) as ds:
+        with xr.open_dataset(path, decode_times=False) as ds:
             precip_mmday = np.nan_to_num(
                 ds["prate"].isel(time=0).values.astype(np.float64), nan=1.0 / 365.25
             )

@@ -25,7 +25,9 @@ def load_coefficients(filepath):
         Polynomial coefficients (``K_rf`` in the source files); spatially
         varying per 0.5-degree grid cell.
     """
-    with xr.open_dataset(filepath) as ds:
+    # decode_times=False matches the baseline loader: we only read the
+    # data variable, and bundled GGCMI files have idiosyncratic time metadata.
+    with xr.open_dataset(filepath, decode_times=False) as ds:
         return ds["K_rf"].values.astype(np.float64)
 
 

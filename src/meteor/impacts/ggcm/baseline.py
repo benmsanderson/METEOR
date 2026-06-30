@@ -1,7 +1,7 @@
 """
 Load the AgMERRA 1980-2010 climatological baseline bundled with METEOR.
 
-The two netCDF4 files bundled in meteor/impacts/ggcm/data/ are the
+The two netCDF files bundled in meteor/impacts/ggcm/data/ are the
 pre-processed AgMERRA averages required by the GGCMI Phase 2 emulator
 (Franke et al., 2020) as the historical reference climate baseline.
 They define the valid input ranges for temperature and precipitation and
@@ -10,8 +10,8 @@ set the reference point for the anomaly inputs to the polynomial.
 
 import importlib.resources
 
-import netCDF4 as netcdf  # pylint: disable=no-member
 import numpy as np
+import xarray as xr
 
 
 def load_agmerra_baseline():
@@ -19,36 +19,35 @@ def load_agmerra_baseline():
 
     Returns
     -------
-    T_agmerra : np.ndarray, shape (360, 720)
+    temp_baseline : np.ndarray, shape (360, 720)
         Annual mean temperature in degrees Celsius.
         Row 0 = 89.75 N, row 359 = -89.75 S, step 0.5 deg.
         Column 0 = -179.75 W, column 719 = 179.75 E, step 0.5 deg.
-    W_agmerra : np.ndarray, shape (360, 720)
+    precip_baseline : np.ndarray, shape (360, 720)
         Annual mean precipitation in mm/yr, floor-clipped at 1 mm/yr
         to avoid division-by-zero in the precipitation ratio computation.
     """
-    # pylint: disable=invalid-name
     data_pkg = importlib.resources.files("meteor.impacts.ggcm.data")
 
     with importlib.resources.as_file(
         data_pkg / "agmerra-tavg-avg-1980-2010-05deg-adjlon.nc4"
-    ) as p:
-        nc = netcdf.Dataset(str(p), "r")  # pylint: disable=no-member
-        raw = nc.variables["tavg"][0, :, :]  # MaskedArray, °C
-        # Convert to plain float64; fill masked ocean cells with 0 °C
-        T_agmerra = np.ma.filled(raw, 0.0).astype(np.float64)
-        nc.close()
+    ) as path:
+        with xr.open_dataset(path) as ds:
+            # Ocean cells arrive as NaN once xarray applies the fill mask
+            temp_baseline = np.nan_to_num(
+                ds["tavg"].isel(time=0).values.astype(np.float64), nan=0.0
+            )
 
     with importlib.resources.as_file(
         data_pkg / "agmerra-prate-avg-1980-2010-05deg-adjlon.nc4"
-    ) as p:
-        nc = netcdf.Dataset(str(p), "r")  # pylint: disable=no-member
-        raw = nc.variables["prate"][0, :, :]  # MaskedArray, mm/day
-        # Convert to mm/yr; fill masked ocean cells with a small positive value
-        W_agmerra = np.ma.filled(raw, 1.0 / 365.25).astype(np.float64) * 365.25
-        nc.close()
+    ) as path:
+        with xr.open_dataset(path) as ds:
+            precip_mmday = np.nan_to_num(
+                ds["prate"].isel(time=0).values.astype(np.float64), nan=1.0 / 365.25
+            )
+    precip_baseline = precip_mmday * 365.25
 
-    # Floor precipitation to avoid divison by zero in the W ratio
-    W_agmerra[W_agmerra < 1] = 1.0
+    # Floor precipitation to avoid division by zero in the precip ratio
+    precip_baseline[precip_baseline < 1] = 1.0
 
-    return T_agmerra, W_agmerra
+    return temp_baseline, precip_baseline

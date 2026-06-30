@@ -6,12 +6,12 @@ Faithfully reproduces the core mathematics of Franke et al. (2020)
 on the original ggcm_emulator package.
 """
 
-import netCDF4 as netcdf
 import numpy as np
+import xarray as xr
 
 
-def load_coefficients(filepath):  # pylint: disable=invalid-name
-    """Load the K coefficient tensor from a GGCMI Phase 2 nc4 file.
+def load_coefficients(filepath):
+    """Load the coefficient tensor from a GGCMI Phase 2 nc4 file.
 
     Parameters
     ----------
@@ -21,18 +21,23 @@ def load_coefficients(filepath):  # pylint: disable=invalid-name
 
     Returns
     -------
-    K : np.ndarray, shape (35, 360, 720)
-        Polynomial coefficients; spatially varying per 0.5-degree grid cell.
+    coefficients : np.ndarray, shape (35, 360, 720)
+        Polynomial coefficients (``K_rf`` in the source files); spatially
+        varying per 0.5-degree grid cell.
     """
-    nc = netcdf.Dataset(filepath, "r")  # pylint: disable=no-member
-    K = np.array(  # pylint: disable=invalid-name
-        nc.variables["K_rf"][:, :, :], dtype=np.float64
-    )
-    nc.close()
-    return K
+    with xr.open_dataset(filepath) as ds:
+        return ds["K_rf"].values.astype(np.float64)
 
 
-def get_yields(K, Ca, Ta, Wa, Na, T_agmerra, W_agmerra):  # pylint: disable=invalid-name
+def get_yields(
+    coefficients,
+    co2_ppm,
+    temp_c,
+    precip_mmyr,
+    n_fertilizer,
+    temp_baseline,
+    precip_baseline,
+):
     """Evaluate the 35-term GGCMI Phase 2 crop yield polynomial.
 
     Implements Equation (1) from Franke et al. (2020).  Input bounds are
@@ -41,89 +46,93 @@ def get_yields(K, Ca, Ta, Wa, Na, T_agmerra, W_agmerra):  # pylint: disable=inva
 
     Parameters
     ----------
-    K : np.ndarray, shape (35, 360, 720)
+    coefficients : np.ndarray, shape (35, 360, 720)
         Coefficient tensor loaded by :func:`load_coefficients`.
-    Ca : float
+    co2_ppm : float
         Global annual mean CO2 concentration (ppm). Valid range: 360-810.
-    Ta : np.ndarray, shape (360, 720)
+    temp_c : np.ndarray, shape (360, 720)
         Annual mean temperature in degrees Celsius on the 0.5-degree grid.
         Must be absolute temperature (not an anomaly).
-    Wa : np.ndarray, shape (360, 720)
+    precip_mmyr : np.ndarray, shape (360, 720)
         Annual mean precipitation in mm/yr on the 0.5-degree grid.
         Must be absolute precipitation.
-    Na : float
+    n_fertilizer : float
         Uniform nitrogen application (kg N / ha / yr). Valid range: 10-200.
-    T_agmerra : np.ndarray, shape (360, 720)
+    temp_baseline : np.ndarray, shape (360, 720)
         AgMERRA 1980-2010 temperature baseline in degrees Celsius.
-    W_agmerra : np.ndarray, shape (360, 720)
+    precip_baseline : np.ndarray, shape (360, 720)
         AgMERRA 1980-2010 precipitation baseline in mm/yr.
 
     Returns
     -------
-    Yield : np.ndarray, shape (360, 720)
+    yields : np.ndarray, shape (360, 720)
         Estimated crop yield in t dry matter / ha / yr.  Clipped to >= 0.
-    W_oob : np.ndarray, shape (360, 720)
+    precip_oob : np.ndarray, shape (360, 720)
         Precipitation out-of-bounds offset (mm/yr).  Negative = below lower
         bound; positive = above upper bound.
-    T_oob : np.ndarray, shape (360, 720)
+    temp_oob : np.ndarray, shape (360, 720)
         Temperature out-of-bounds offset (degrees Celsius), same convention.
     """
-    # pylint: disable=invalid-name
-    # Clamp inputs to valid ranges
-    C_san = min(max(360.0, Ca), 810.0)
-    T_san = np.minimum(np.maximum(T_agmerra - 1.0, Ta), T_agmerra + 6.0)
-    W_san = np.minimum(np.maximum(0.5 * W_agmerra, Wa), 1.3 * W_agmerra)
-    N_san = min(max(10.0, Na), 200.0)
+    # Clamp inputs to the valid ranges of Franke et al. (2020)
+    co2_clamped = min(max(360.0, co2_ppm), 810.0)
+    temp_clamped = np.minimum(
+        np.maximum(temp_baseline - 1.0, temp_c), temp_baseline + 6.0
+    )
+    precip_clamped = np.minimum(
+        np.maximum(0.5 * precip_baseline, precip_mmyr), 1.3 * precip_baseline
+    )
+    n_clamped = min(max(10.0, n_fertilizer), 200.0)
 
-    T_oob = Ta - T_san
-    W_oob = Wa - W_san
+    temp_oob = temp_c - temp_clamped
+    precip_oob = precip_mmyr - precip_clamped
 
     # Transform inputs for polynomial evaluation
-    C = C_san
-    T = T_san - T_agmerra  # temperature anomaly from AgMERRA baseline
-    W = W_san / W_agmerra  # precipitation ratio relative to AgMERRA baseline
-    N = N_san
+    # Paper symbols: C = co2, T = temp_anom, W = precip_ratio, N = nitrogen
+    co2 = co2_clamped
+    temp_anom = temp_clamped - temp_baseline
+    precip_ratio = precip_clamped / precip_baseline
+    nitrogen = n_clamped
 
     # 35-term third-order polynomial (Eq. 1, Franke et al. 2020)
     # Python indices are shifted by -1 from the paper's 1-based notation.
-    Yield = (
-        K[0]
-        + K[1] * C
-        + K[2] * T
-        + K[3] * W
-        + K[4] * N
-        + K[5] * C**2
-        + K[6] * C * T
-        + K[7] * C * W
-        + K[8] * C * N
-        + K[9] * T**2
-        + K[10] * T * W
-        + K[11] * T * N
-        + K[12] * W**2
-        + K[13] * W * N
-        + K[14] * N**2
-        + K[15] * C**3
-        + K[16] * C**2 * T
-        + K[17] * C**2 * W
-        + K[18] * C**2 * N
-        + K[19] * C * T**2
-        + K[20] * C * T * W
-        + K[21] * C * T * N
-        + K[22] * C * W**2
-        + K[23] * C * W * N
-        + K[24] * C * N**2
-        + K[25] * T**3
-        + K[26] * T**2 * W
-        + K[27] * T**2 * N
-        + K[28] * T * W**2
-        + K[29] * T * W * N
-        + K[30] * T * N**2
-        + K[31] * W**3
-        + K[32] * W**2 * N
-        + K[33] * W * N**2
+    yields = (
+        coefficients[0]
+        + coefficients[1] * co2
+        + coefficients[2] * temp_anom
+        + coefficients[3] * precip_ratio
+        + coefficients[4] * nitrogen
+        + coefficients[5] * co2**2
+        + coefficients[6] * co2 * temp_anom
+        + coefficients[7] * co2 * precip_ratio
+        + coefficients[8] * co2 * nitrogen
+        + coefficients[9] * temp_anom**2
+        + coefficients[10] * temp_anom * precip_ratio
+        + coefficients[11] * temp_anom * nitrogen
+        + coefficients[12] * precip_ratio**2
+        + coefficients[13] * precip_ratio * nitrogen
+        + coefficients[14] * nitrogen**2
+        + coefficients[15] * co2**3
+        + coefficients[16] * co2**2 * temp_anom
+        + coefficients[17] * co2**2 * precip_ratio
+        + coefficients[18] * co2**2 * nitrogen
+        + coefficients[19] * co2 * temp_anom**2
+        + coefficients[20] * co2 * temp_anom * precip_ratio
+        + coefficients[21] * co2 * temp_anom * nitrogen
+        + coefficients[22] * co2 * precip_ratio**2
+        + coefficients[23] * co2 * precip_ratio * nitrogen
+        + coefficients[24] * co2 * nitrogen**2
+        + coefficients[25] * temp_anom**3
+        + coefficients[26] * temp_anom**2 * precip_ratio
+        + coefficients[27] * temp_anom**2 * nitrogen
+        + coefficients[28] * temp_anom * precip_ratio**2
+        + coefficients[29] * temp_anom * precip_ratio * nitrogen
+        + coefficients[30] * temp_anom * nitrogen**2
+        + coefficients[31] * precip_ratio**3
+        + coefficients[32] * precip_ratio**2 * nitrogen
+        + coefficients[33] * precip_ratio * nitrogen**2
     )
 
     # Yield is non-negative by definition
-    Yield[Yield < 0] = 0.0
+    yields[yields < 0] = 0.0
 
-    return Yield, W_oob, T_oob
+    return yields, precip_oob, temp_oob

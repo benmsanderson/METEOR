@@ -1753,9 +1753,7 @@ class MeteorInterface:
         downloader.ensure_files(crops, crop_model, variant)
 
         # --- AgMERRA baseline bundled with the package ---
-        T_agmerra, W_agmerra = (  # pylint: disable=invalid-name
-            load_agmerra_baseline()
-        )  # (360, 720)
+        temp_baseline, precip_baseline = load_agmerra_baseline()  # (360, 720)
 
         # GGCM 0.5-degree target grid
         lat_ggcm = np.arange(89.75, -90.0, -0.5)  # 360 values
@@ -1837,8 +1835,8 @@ class MeteorInterface:
             {lat_n_pc: lat_ggcm, lon_n_pc: lon_ggcm}, method="linear"
         ).values  # (360, 720) kg m-2 s-1
 
-        # --- Load K coefficient tensors ---
-        k_by_crop = {
+        # --- Load coefficient tensors ---
+        coefficients_by_crop = {
             crop: load_coefficients(
                 str(downloader.get_filepath(crop_model, crop, variant))
             )
@@ -1867,11 +1865,11 @@ class MeteorInterface:
             pr_mmyr = (pr_anom_ggcm + picontrol_pr_ggcm) * 86400.0 * 365.25  # mm/yr
 
             # Fill NaN (coastal/polar interpolation gaps) with climatological reference
-            tas_celsius = np.where(np.isfinite(tas_celsius), tas_celsius, T_agmerra)
-            pr_mmyr = np.where(np.isfinite(pr_mmyr), pr_mmyr, W_agmerra)
+            tas_celsius = np.where(np.isfinite(tas_celsius), tas_celsius, temp_baseline)
+            pr_mmyr = np.where(np.isfinite(pr_mmyr), pr_mmyr, precip_baseline)
 
             # CO2 for this year
-            ca = float(
+            co2_ppm = float(
                 co2_series.loc[year]
                 if year in co2_series.index
                 else co2_series.iloc[-1]
@@ -1879,13 +1877,13 @@ class MeteorInterface:
 
             for crop in crops:
                 yield_arr, _, _ = get_yields(
-                    k_by_crop[crop],
-                    ca,
+                    coefficients_by_crop[crop],
+                    co2_ppm,
                     tas_celsius,
                     pr_mmyr,
                     n_fert,
-                    T_agmerra,
-                    W_agmerra,
+                    temp_baseline,
+                    precip_baseline,
                 )
                 # Wrap as xr.DataArray for METEOR's spatial aggregation utilities
                 yield_da = xr.DataArray(

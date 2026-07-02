@@ -154,3 +154,101 @@ def test_apply_empirical_quantile_mapping():
         },
     )
     transformed = apply_empirical_quantile_mapping(data_xarray, reference)
+
+
+def test_fit_distribution_parameters_1d_lognorm_with_zeros():
+    """lognorm fit adds 1e-6 offset when data contains zeros."""
+    data = np.array([0.0, 0.5, 1.0, 2.0, 3.0])  # zero triggers offset path
+    params = fit_distribution_parameters_1d(data, distribution="lognorm")
+    assert "shape" in params and "scale" in params
+    assert params["shape"] > 0
+    assert params["scale"] > 0
+
+
+def test_apply_distribution_transform_xarray_input_1d():
+    """apply_distribution_transform accepts xarray input and returns xarray."""
+    data = xr.DataArray(
+        np.array([[0.1, 0.5, 1.0, 2.0, 3.0]]),
+        dims=["n_realisations", "n_time"],
+    )
+    params_gauss = {"mean": 1.2, "std": 0.8}
+    params_gamma = {"shape": 1.5, "scale": 0.8}
+    transformed = apply_distribution_transform(
+        data, params_gauss, params_gamma, target_dist="gamma"
+    )
+    assert isinstance(transformed, xr.DataArray)
+    assert transformed.shape == data.shape
+    assert np.all(transformed.values >= 0)
+
+
+def test_apply_distribution_transform_1d_weibull():
+    """apply_distribution_transform maps Gaussian → Weibull for 1D scalar params."""
+    data = np.array([[0.1, 0.5, 1.0, 2.0, 3.0]])
+    params_gauss = {"mean": 1.2, "std": 0.8}
+    params_weibull = fit_distribution_parameters_1d(
+        np.array([0.1, 0.5, 1.0, 2.0, 3.0]), distribution="weibull"
+    )
+    transformed = apply_distribution_transform(
+        data, params_gauss, params_weibull, target_dist="weibull"
+    )
+    assert transformed.shape == data.shape
+    assert np.all(np.isfinite(transformed))
+
+
+def test_apply_distribution_transform_1d_lognorm():
+    """apply_distribution_transform maps Gaussian → LogNorm for 1D scalar params."""
+    data = np.array([[0.1, 0.5, 1.0, 2.0, 3.0]])
+    params_gauss = {"mean": 1.2, "std": 0.8}
+    params_lognorm = fit_distribution_parameters_1d(
+        np.array([0.1, 0.5, 1.0, 2.0, 3.0]), distribution="lognorm"
+    )
+    transformed = apply_distribution_transform(
+        data, params_gauss, params_lognorm, target_dist="lognorm"
+    )
+    assert transformed.shape == data.shape
+    assert np.all(np.isfinite(transformed))
+
+
+def test_apply_distribution_transform_1d_gengamma():
+    """apply_distribution_transform maps Gaussian → GenGamma for 1D scalar params."""
+    data = np.array([[0.1, 0.5, 1.0, 2.0, 3.0]])
+    params_gauss = {"mean": 1.2, "std": 0.8}
+    params_gengamma = fit_distribution_parameters_1d(
+        np.array([0.1, 0.5, 1.0, 2.0, 3.0]), distribution="gengamma"
+    )
+    transformed = apply_distribution_transform(
+        data, params_gauss, params_gengamma, target_dist="gengamma"
+    )
+    assert transformed.shape == data.shape
+    assert np.all(np.isfinite(transformed))
+
+
+def test_apply_distribution_transform_1d_unknown_raises():
+    """apply_distribution_transform raises ValueError for unknown 1D target_dist."""
+    data = np.array([[0.1, 0.5, 1.0, 2.0, 3.0]])
+    params_gauss = {"mean": 1.2, "std": 0.8}
+    params_gamma = {"shape": 1.5, "scale": 0.8}
+    with pytest.raises(ValueError, match="Unknown target distribution: bad_dist"):
+        apply_distribution_transform(
+            data, params_gauss, params_gamma, target_dist="bad_dist"
+        )
+
+
+def test_apply_distribution_transform_1d_wrong_ndim_raises():
+    """apply_distribution_transform raises ValueError when 1D data is not 2D array."""
+    data = np.array([0.1, 0.5, 1.0, 2.0, 3.0])  # 1D, not (n_real, n_time)
+    params_gauss = {"mean": 1.2, "std": 0.8}
+    params_gamma = {"shape": 1.5, "scale": 0.8}
+    with pytest.raises(ValueError, match="For scalar parameters"):
+        apply_distribution_transform(
+            data, params_gauss, params_gamma, target_dist="gamma"
+        )
+
+
+def test_apply_empirical_quantile_mapping_xarray_target():
+    """apply_empirical_quantile_mapping accepts xarray target_data."""
+    data = np.array([[0.1, 0.5, 1.0, 2.0, 3.0]])
+    reference = xr.DataArray(np.array([0.2, 0.6, 1.5, 2.5, 4.0]), dims=["time"])
+    transformed = apply_empirical_quantile_mapping(data, reference)
+    assert transformed.shape == data.shape
+    assert np.all(transformed >= 0)

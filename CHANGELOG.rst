@@ -17,6 +17,18 @@ The changes listed in this file are categorised as follows:
 [Unreleased]
 ---------------------
 
+### Added
+
+- **GGCMI Phase 2 crop yield impacts** in ``src/meteor/impacts/ggcm/`` for emulating global gridded crop model yield responses (Franke et al., 2020)
+    - 34-term third-order polynomial emulator over CO₂, temperature, precipitation, and nitrogen inputs (``coefficients.py``)
+    - ``GgcmDownloader`` that fetches coefficient tensors on demand from Zenodo record 3592453 and caches them (``downloader.py``)
+    - Data catalog helpers for available crops and crop models (``data_catalog.py``)
+    - Bundled AgMERRA 1980-2010 climatological baseline (``baseline.py`` and ``data/*.nc4``)
+    - Crop yield emulation integrated into ``MeteorInterface`` via an ``impacts={"crop_yield": ...}`` argument, with results exposed on ``EnsembleOutput.crop_impacts``
+    - Documentation in ``docs/ggcm_crop_yield_impacts.md`` and a demo notebook ``notebooks/METEOR_CropYield_Demo.ipynb``
+- ``CacheHandler.get_subdir()`` for locating named cache subdirectories (e.g. GGCM coefficient files) alongside the standard cache structure
+- ``requests`` runtime dependency and packaging of bundled GGCM ``.nc4`` data files
+
 ### Changed
 
 - Now possibly to send variable length temperature scaling timeseries, fixed noise generator for wrong ordering of base data dimensions

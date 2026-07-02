@@ -29,12 +29,16 @@ checks: $(VENV_DIR)  ## run all the checks
 		echo "\n\n=== isort ==="; $(VENV_DIR)/bin/isort --check-only --quiet src tests|| echo "--- isort failed ---" >&2; \
 		echo "\n\n=== pydocstyle ==="; $(VENV_DIR)/bin/pydocstyle src || echo "--- pydocstyle failed ---" >&2; \
 		echo "\n\n=== pylint ==="; $(VENV_DIR)/bin/pylint src || echo "--- pylint failed ---" >&2; \
-		echo "\n\n=== notebook tests 1 ==="; $(VENV_DIR)/bin/pytest notebooks/METEOR_Interface_Paper_plots.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
+		echo "\n\n=== tests ==="; $(VENV_DIR)/bin/pytest tests -r a --cov=meteor --cov-report='' \
+			&& $(VENV_DIR)/bin/coverage report --fail-under=90 || echo "--- tests failed ---" >&2; \
+		echo
+
+.PHONY: test-notebooks
+test-notebooks: $(VENV_DIR)  ## run the notebook test suite
+	@echo "=== notebook tests 1 ==="; $(VENV_DIR)/bin/pytest notebooks/notebooks_v16_description_paper/METEOR_Interface_Paper_plots.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
 		echo "\n\n=== notebook tests 2 ==="; $(VENV_DIR)/bin/pytest notebooks/GCAM_predict.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
 		echo "\n\n=== notebook tests 3 ==="; $(VENV_DIR)/bin/pytest notebooks/METEOR_Interface_Examples.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
 		echo "\n\n=== notebook tests 4 ==="; $(VENV_DIR)/bin/pytest notebooks/METEOR_Impacts_Clean_Demo.ipynb -r a --nbval --nbval-sanitize-with $(NOTEBOOKS_SANITIZE_FILE) || echo "--- notebook tests failed ---" >&2; \
-		echo "\n\n=== tests ==="; $(VENV_DIR)/bin/pytest tests -r a --cov=meteor --cov-report='' \
-			&& $(VENV_DIR)/bin/coverage report --fail-under=90 || echo "--- tests failed ---" >&2; \
 		echo
 
 format-checks: $(VENV_DIR)  ## run all the checks

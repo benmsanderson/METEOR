@@ -78,19 +78,22 @@ class EnsembleOutput:
     >>> ensemble = emulator.generate(...)
     >>>
     >>> # Access time series
-    >>> tas_global = ensemble['tas'].timeseries['global']
-    >>> pr_regional = ensemble['pr'].timeseries['regional:EAS']
+    >>> tas_global = ensemble["tas"].timeseries["global"]
+    >>> pr_regional = ensemble["pr"].timeseries["regional:EAS"]
     >>>
     >>> # Access gridded outputs
-    >>> tas_2050 = ensemble['tas'].gridded['annual'][2050]
+    >>> tas_2050 = ensemble["tas"].gridded["annual"][2050]
     >>>
     >>> # Access impact metrics
-    >>> hdd = ensemble['tas'].impacts['hdd']['point:59.9,10.8']
+    >>> hdd = ensemble["tas"].impacts["hdd"]["point:59.9,10.8"]
     """
 
     def __init__(self, results=None, metadata=None):
         self.variables = results or {}
         self.metadata = metadata or {}
+        # Top-level dict for crop yield impacts, which depend on both tas and pr.
+        # Structure: {crop_name: {agg_key: np.ndarray (n_years,)}}
+        self.crop_impacts = {}
 
     def __getitem__(self, key):
         """Access variable outputs."""

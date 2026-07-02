@@ -6,6 +6,8 @@ pattern scaling and noise generation capabilities.
 """
 
 import os
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -45,7 +47,14 @@ def _get_default_config(variable):
 
     # Variable-specific defaults
     if variable == "tas":
-        config["use_exog"] = "all"
+        # 'none' (pure VAR): using t_glob as a VAR-X exogenous regressor absorbs
+        # the persistent low-frequency global variability into the deterministic
+        # forced term, so it is lost at generation (the prescribed trajectory has
+        # no internal variability) -- the noise becomes white and annual/decadal
+        # global variance collapses ~2.5x. The temperature-dependent mean/seasonal
+        # response is already captured by the seasonal model, so the exog is
+        # redundant here. See MeteorNoiseGenerator.use_exog.
+        config["use_exog"] = "none"
         config["transform"] = False
     elif variable == "pr":
         config["use_exog"] = "none"
@@ -57,6 +66,90 @@ def _get_default_config(variable):
         config["transform"] = False
 
     return config
+
+
+@dataclass
+class PatternScalingResult:
+    """
+    Result of a pattern scaling computation.
+
+    Holds both the time-sliced pattern scaling output used directly by the
+    generators and the full-trajectory warming plus slice bookkeeping needed to
+    generate spun-up stochastic PCs over the full trajectory and slice them to
+    the requested output window.
+
+    Attributes
+    ----------
+    monthly_prediction : xr.DataArray
+        Monthly pattern prediction sliced to the requested output window.
+    monthly_warming : np.ndarray
+        Global-mean monthly warming sliced to the requested output window.
+    em_data : Any
+        Emissions data used to drive the pattern model.
+    conc_data : Any
+        Concentration data used to drive the pattern model.
+    full_monthly_warming : np.ndarray
+        Global-mean monthly warming over the full (un-sliced) trajectory. Used to
+        generate stochastic PCs so the autoregressive spin-up transient is parked
+        at the trajectory start rather than inside the output window.
+    base_year : int
+        First year of the full monthly trajectory (origin for all month indexing).
+    start_month_idx : int
+        Month index (relative to ``base_year``) of the first output month.
+    end_month_idx : int
+        Month index (relative to ``base_year``) one past the last output month.
+    """
+
+    monthly_prediction: xr.DataArray
+    monthly_warming: np.ndarray
+    em_data: Any
+    conc_data: Any
+    full_monthly_warming: np.ndarray
+    base_year: int
+    start_month_idx: int
+    end_month_idx: int
+
+
+@dataclass
+class GenerationInputs:
+    """
+    Shared inputs prepared once per variable and consumed by both generators.
+
+    Produced by :meth:`MeteorInterface._prepare_generation` and passed to both
+    ``_generate_timeseries`` and ``_generate_gridded`` so the two paths share the
+    same pattern scaling and the same spun-up stochastic PC realisations.
+
+    Attributes
+    ----------
+    pattern : PatternScalingResult
+        Pattern scaling result (sliced prediction/warming + slice bookkeeping).
+    stochastic_pcs : np.ndarray or None
+        Stochastic PCs generated once over the full trajectory and sliced to the
+        output window. Shape ``(n_realizations, n_months, n_modes)``. ``None`` when
+        ``include_noise`` is False.
+    """
+
+    pattern: PatternScalingResult
+    stochastic_pcs: Any
+
+
+def _stack_realizations(realizations):
+    """
+    Stack a list of per-realization DataArrays along a ``realization`` dimension.
+
+    Parameters
+    ----------
+    realizations : list of xr.DataArray
+        One DataArray per ensemble member.
+
+    Returns
+    -------
+    xr.DataArray
+        Concatenated array with a leading ``realization`` dimension.
+    """
+    if len(realizations) > 1:
+        return xr.concat(realizations, dim="realization")
+    return realizations[0].expand_dims(realization=[0])
 
 
 class MeteorInterface:
@@ -588,6 +681,24 @@ class MeteorInterface:
 
             var_output = VariableOutput(variable)
 
+            # Prepare shared generation inputs ONCE when both output types are
+            # requested, so the time series and gridded paths are driven by the
+            # same pattern scaling and the same spun-up stochastic PCs (mutually
+            # consistent noise). When only one type is requested there is nothing
+            # to be consistent with, so that generator builds its own inputs.
+            gen_inputs = None
+            if timeseries and gridded:
+                gen_inputs = self._prepare_generation(
+                    variable,
+                    scenario,
+                    start_year,
+                    end_year,
+                    n_realizations,
+                    include_noise=include_noise,
+                    temp_scaling_ts=temp_scaling_ts,
+                    verbose=verbose,
+                )
+
             # Generate timeseries if requested
             if timeseries:
                 if verbose:  # pragma: no cover
@@ -599,6 +710,7 @@ class MeteorInterface:
                     end_year,
                     n_realizations,
                     timeseries,
+                    gen_inputs=gen_inputs,
                     custom_regions=custom_regions,
                     include_noise=include_noise,
                     temp_scaling_ts=temp_scaling_ts,
@@ -616,6 +728,7 @@ class MeteorInterface:
                     end_year,
                     n_realizations,
                     gridded,
+                    gen_inputs=gen_inputs,
                     include_noise=include_noise,
                     temp_scaling_ts=temp_scaling_ts,
                     verbose=verbose,
@@ -708,8 +821,10 @@ class MeteorInterface:
 
         Returns
         -------
-        tuple
-            (monthly_prediction_sliced, monthly_warming_sliced, em_data, conc_data)
+        PatternScalingResult
+            Sliced monthly prediction/warming plus the full-trajectory warming and
+            slice bookkeeping (``base_year``, ``start_month_idx``, ``end_month_idx``)
+            needed to generate spun-up stochastic PCs aligned to the output window.
         """
         # Parse scenario input
         scenario_info = parse_scenario_input(scenario)
@@ -801,6 +916,9 @@ class MeteorInterface:
             base_year = 1750  # Default assumption
 
         if temp_scaling_ts is not None:
+            print(
+                f" Ts scaleing before calculating annual pred {temp_scaling_ts['year']}"
+            )
             annual_prediction = self._compute_timeseries_scaling(
                 variable,
                 annual_prediction,
@@ -839,7 +957,16 @@ class MeteorInterface:
         )
         monthly_warming_sliced = full_monthly_warming[start_month_idx:end_month_idx]
 
-        return monthly_prediction_sliced, monthly_warming_sliced, em_data, conc_data
+        return PatternScalingResult(
+            monthly_prediction=monthly_prediction_sliced,
+            monthly_warming=monthly_warming_sliced,
+            em_data=em_data,
+            conc_data=conc_data,
+            full_monthly_warming=full_monthly_warming,
+            base_year=base_year,
+            start_month_idx=start_month_idx,
+            end_month_idx=end_month_idx,
+        )
 
     # TODO - possibly add verbosity?
     def _compute_timeseries_scaling(
@@ -929,7 +1056,7 @@ class MeteorInterface:
             annual_temp_prediction_gm_anomaly = global_mean(
                 annual_temp_prediction - annual_temp_prediction_base
             )
-        temperature_input_anomaly = temp_scaling_ts - temperature_input_base
+        temperature_input_anomaly = temp_scaling_ts - temperature_input_base.values
         if len(temperature_input_anomaly) != len(annual_temp_prediction_gm_anomaly):
             temperature_input_anomaly = (
                 extend_temeperature_anomaly_timeseries_for_scaling(
@@ -937,8 +1064,6 @@ class MeteorInterface:
                     temperature_input_anomaly,
                 )
             )
-        print(temp_scaling_ts.shape)
-        print(temperature_input_anomaly.shape, annual_temp_prediction_gm_anomaly.shape)
         temp_scaling = np.where(
             annual_temp_prediction_gm_anomaly.values != 0,
             temperature_input_anomaly.values / annual_temp_prediction_gm_anomaly.values,
@@ -952,6 +1077,209 @@ class MeteorInterface:
         )
         return annual_prediction_base + annual_prediction_anomaly * temp_scaling
 
+    def _prepare_generation(
+        self,
+        variable,
+        scenario,
+        start_year,
+        end_year,
+        n_realizations,
+        include_noise=True,
+        temp_scaling_ts=None,
+        verbose=True,
+    ):
+        """
+        Prepare the shared inputs consumed by both output generators.
+
+        Computes pattern scaling once and generates the stochastic PCs once over
+        the FULL trajectory (so the autoregressive spin-up transient is parked at
+        the trajectory start, not inside the output window), then slices the PCs to
+        the requested output window. The resulting :class:`GenerationInputs` is
+        passed to both ``_generate_timeseries`` and ``_generate_gridded`` so the two
+        paths are driven by identical pattern scaling and identical noise draws.
+
+        Parameters
+        ----------
+        variable : str
+            Climate variable ('tas', 'pr').
+        scenario : str or dict
+            Scenario specification (see :meth:`generate_ensemble_outputs`).
+        start_year, end_year : int
+            Output window (inclusive).
+        n_realizations : int
+            Number of ensemble members.
+        include_noise : bool
+            If False, no PCs are generated (climatology only).
+        temp_scaling_ts : xr.DataArray, optional
+            Optional global-mean temperature trajectory to scale the pattern to.
+        verbose : bool
+            Print progress messages.
+
+        Returns
+        -------
+        GenerationInputs
+            Shared pattern scaling result and (window-sliced) stochastic PCs.
+        """
+        pattern = self._get_or_compute_pattern_scaling(
+            variable,
+            scenario,
+            start_year,
+            end_year,
+            temp_scaling_ts=temp_scaling_ts,
+            verbose=verbose,
+        )
+
+        stochastic_pcs = None
+        if include_noise:
+            noise_model = self.noise_models[variable]
+            if verbose:  # pragma: no cover
+                print(
+                    f"      → Generating {n_realizations} stochastic PC realizations "
+                    "(full trajectory, spun-up)..."
+                )
+            # Generate over the FULL trajectory so spin-up is resolved before the
+            # output window, then slice to the window on a January boundary
+            # (start_month_idx is always a multiple of 12).
+            full_pcs = noise_model.generate_stochastic_pcs(
+                pattern.full_monthly_warming,
+                n_realizations=n_realizations,
+                random_seed=None,
+            )
+            if full_pcs.ndim == 2:
+                # Single realization -> add leading realization axis
+                full_pcs = full_pcs[np.newaxis, ...]
+            stochastic_pcs = full_pcs[
+                :, pattern.start_month_idx : pattern.end_month_idx, :
+            ]
+
+        return GenerationInputs(pattern=pattern, stochastic_pcs=stochastic_pcs)
+
+    def _get_transform_config(self, variable):
+        """
+        Return the resolved transform config for a variable, or None.
+
+        Handles both the fitted case (stored as a dict with a ``'config'`` entry)
+        and the not-yet-fitted case (stored as a ``VariableTransformConfig``).
+        """
+        transform_info = self.transforms.get(variable, None)
+        if isinstance(transform_info, dict):
+            return transform_info.get("config")
+        return transform_info
+
+    def _load_transform_reference(self, variable, start_year, end_year, verbose=True):
+        """
+        Load and prepare CMIP6 reference data for distribution-transform fitting.
+
+        Only needed for variables that have a distribution transform (e.g. ``pr``).
+        Returns the gridded CMIP6 reference field sliced to the output window plus,
+        for precipitation, the gridded first-year baseline field. The timeseries
+        path aggregates these per requested region; the gridded path uses them
+        directly with the per-gridpoint (3D) transform.
+
+        Parameters
+        ----------
+        variable : str
+            Climate variable.
+        start_year, end_year : int
+            Output window (inclusive).
+        verbose : bool
+            Print progress messages.
+
+        Returns
+        -------
+        tuple
+            ``(ssp_data, pr_first_year_mean)`` where ``ssp_data`` is the gridded
+            reference field (anomalies for ``tas``, absolute for ``pr``) and
+            ``pr_first_year_mean`` is the gridded first-year baseline field for
+            ``pr`` (``None`` otherwise).
+        """
+        transform_training_scenario = self._training_config.get(variable, {}).get(
+            "training_scenario", "ssp245"
+        )
+
+        if verbose:  # pragma: no cover
+            print(
+                f"      → Loading CMIP6 training data for {transform_training_scenario}..."
+            )
+        ssp_data = self.data_getter.make_meteor_training_data_composite(
+            ["historical", transform_training_scenario], self.model, monthly=True
+        )[variable]
+
+        if verbose:  # pragma: no cover
+            print(f"      → Loading piControl baseline for {variable}...")
+        picontrol_data = self.data_getter.make_meteor_training_data_composite(
+            ["piControl"], self.model, monthly=True
+        )[variable]
+        picontrol_mean = picontrol_data.mean(dim="month")
+
+        pr_first_year_mean = None
+
+        # For precipitation: use first-year baseline instead of piControl. CMIP6
+        # scenarios already include ~1°C of historical warming effects on
+        # precipitation, so piControl would create a ~2-4% bias. Use the first 12
+        # months of the prediction period (start_year) as the baseline. ssp_data is
+        # a composite starting from historical (~1850), so find the index for
+        # start_year.
+        if variable == "pr":
+            n_months = len(ssp_data.month)
+
+            if hasattr(ssp_data, "start_year"):
+                composite_start_year = int(ssp_data.start_year)
+            else:
+                # Default assumption: historical+scenario composite starts at 1850
+                expected_months_from_1850 = (end_year - 1850 + 1) * 12
+                if n_months < expected_months_from_1850:
+                    composite_start_year = end_year - (n_months // 12) + 1
+                else:
+                    composite_start_year = 1850
+
+            start_year_idx = (start_year - composite_start_year) * 12
+            end_year_idx = (end_year - composite_start_year + 1) * 12  # inclusive
+
+            composite_end_year = composite_start_year + n_months // 12 - 1
+
+            if start_year_idx < 0:
+                raise ValueError(
+                    f"start_year {start_year} is before the composite data start year {composite_start_year}. "
+                    f"Valid range: {composite_start_year}-{composite_end_year}"
+                )
+            if end_year_idx > n_months:
+                raise ValueError(
+                    f"end_year {end_year} is beyond the composite data end year {composite_end_year}. "
+                    f"Valid range: {composite_start_year}-{composite_end_year}"
+                )
+            if start_year_idx + 12 > n_months:
+                raise ValueError(
+                    f"start_year {start_year} does not have 12 months of data in the composite. "
+                    f"Valid range: {composite_start_year}-{composite_end_year}"
+                )
+
+            # Use first year of prediction period as the baseline
+            pr_first_year_mean = ssp_data.isel(
+                month=slice(start_year_idx, start_year_idx + 12)
+            ).mean(dim="month")
+
+            # CRITICAL: Slice ssp_data to only the prediction period for Gamma
+            # transform fitting. Using the full historical+scenario composite would
+            # result in a lower mean distribution, causing negative bias.
+            ssp_data = ssp_data.isel(month=slice(start_year_idx, end_year_idx))
+
+            if verbose:  # pragma: no cover
+                print(
+                    f"      → Using {start_year} baseline for PR instead of piControl"
+                )
+
+        # For temperature: convert CMIP6 to anomalies (pattern scaling outputs
+        # anomalies). For precipitation keep absolute values for Gamma fitting.
+        if variable == "tas":
+            if verbose:  # pragma: no cover
+                print(
+                    f"      → Converting {variable} to anomalies from piControl baseline..."
+                )
+            ssp_data = ssp_data - picontrol_mean
+
+        return ssp_data, pr_first_year_mean
+
     def _generate_timeseries(
         self,
         variable,
@@ -960,6 +1288,7 @@ class MeteorInterface:
         end_year,
         n_realizations,
         aggregations,
+        gen_inputs=None,
         custom_regions=None,
         include_noise=True,
         temp_scaling_ts=None,
@@ -999,147 +1328,42 @@ class MeteorInterface:
             Dictionary mapping aggregation names to xarray DataArrays
             with shape (n_realizations, n_months)
         """
-        # Always use the TRAINING scenario for transform fitting, not the
-        # prediction scenario. default is ssp245
-        transform_training_scenario = self._training_config.get(variable, {}).get(
-            "training_scenario", "ssp245"
-        )
-
-        # Get pattern scaling results
-        pattern_result = self._get_or_compute_pattern_scaling(
-            variable,
-            scenario,
-            start_year,
-            end_year,
-            temp_scaling_ts=temp_scaling_ts,
-            verbose=verbose,
-        )
-        monthly_prediction = pattern_result[0]
-        monthly_warming = pattern_result[1]
-
-        # Get CMIP6 data for transform fitting
-        if verbose:  # pragma: no cover
-            print(
-                f"      → Loading CMIP6 training data for {transform_training_scenario}..."
+        # Build shared generation inputs if not provided by the caller.
+        if gen_inputs is None:
+            gen_inputs = self._prepare_generation(
+                variable,
+                scenario,
+                start_year,
+                end_year,
+                n_realizations,
+                include_noise=include_noise,
+                temp_scaling_ts=temp_scaling_ts,
+                verbose=verbose,
             )
-        ssp_data = self.data_getter.make_meteor_training_data_composite(
-            ["historical", transform_training_scenario], self.model, monthly=True
-        )[variable]
 
-        # Load piControl data for baseline (used for temperature anomalies)
-        if verbose:  # pragma: no cover
-            print(f"      → Loading piControl baseline for {variable}...")
-        picontrol_data = self.data_getter.make_meteor_training_data_composite(
-            ["piControl"], self.model, monthly=True
-        )[variable]
-        # Compute piControl climatology (mean across all time)
-        picontrol_mean = picontrol_data.mean(dim="month")
-
-        # For precipitation: use first-year (2015) baseline instead of piControl
-        # This is because CMIP6 scenarios in 2015 already include ~1°C of historical
-        # warming effects on precipitation, so using piControl would create a ~2-4% bias.
-        # We use the first 12 months of the prediction period (start_year) as the baseline.
-        # Note: ssp_data is a composite starting from historical (~1850), so we need to
-        # find the correct index for start_year.
-        if variable == "pr":
-            # Infer composite start year from the data length and structure
-            # Historical experiments in CMIP6 typically start at 1850
-            # We can infer this from the data by checking if it includes historical
-            n_months = len(ssp_data.month)
-
-            # Check if ssp_data has a 'start_year' attribute (set by data getter)
-            # Otherwise infer from experiment structure
-            if hasattr(ssp_data, "start_year"):
-                composite_start_year = int(ssp_data.start_year)
-            else:
-                # Default assumption: historical+scenario composite starts at 1850
-                # If the data is shorter than expected, calculate backwards from end_year
-                expected_months_from_1850 = (end_year - 1850 + 1) * 12
-                if n_months < expected_months_from_1850:
-                    # Data is shorter - calculate start year from data length
-                    composite_start_year = end_year - (n_months // 12) + 1
-                else:
-                    composite_start_year = 1850
-
-            start_year_idx = (start_year - composite_start_year) * 12
-            end_year_idx = (
-                end_year - composite_start_year + 1
-            ) * 12  # +1 for inclusive
-
-            # Validate indices are within bounds - fail loudly if not
-            composite_end_year = composite_start_year + n_months // 12 - 1
-
-            if start_year_idx < 0:
-                raise ValueError(
-                    f"start_year {start_year} is before the composite data start year {composite_start_year}. "
-                    f"Valid range: {composite_start_year}-{composite_end_year}"
-                )
-            if end_year_idx > n_months:
-                raise ValueError(
-                    f"end_year {end_year} is beyond the composite data end year {composite_end_year}. "
-                    f"Valid range: {composite_start_year}-{composite_end_year}"
-                )
-            if start_year_idx + 12 > n_months:
-                raise ValueError(
-                    f"start_year {start_year} does not have 12 months of data in the composite. "
-                    f"Valid range: {composite_start_year}-{composite_end_year}"
-                )
-
-            # Use first year of prediction period as the baseline
-            pr_first_year_mean = ssp_data.isel(
-                month=slice(start_year_idx, start_year_idx + 12)
-            ).mean(dim="month")
-
-            # CRITICAL: Slice ssp_data to only the prediction period (start_year to end_year)
-            # for Gamma transform fitting. Using the full historical+scenario composite
-            # would result in a lower mean distribution, causing negative bias.
-            ssp_data = ssp_data.isel(month=slice(start_year_idx, end_year_idx))
-
-            if verbose:  # pragma: no cover
-                print(
-                    f"      → Using {start_year} baseline for PR instead of piControl"
-                )
-
-        # For temperature: convert CMIP6 to anomalies (pattern scaling outputs anomalies)
-        # For precipitation: keep CMIP6 as absolute values (for Gamma transform fitting)
-        #   but we'll add first-year baseline to pattern output below
-        if variable == "tas":
-            if verbose:  # pragma: no cover
-                print(
-                    f"      → Converting {variable} to anomalies from piControl baseline..."
-                )
-            ssp_data = ssp_data - picontrol_mean
-
-        # ✅ Generate stochastic PCs (or skip if climatology only)
+        monthly_prediction = gen_inputs.pattern.monthly_prediction
+        monthly_warming = gen_inputs.pattern.monthly_warming
+        stochastic_pcs = gen_inputs.stochastic_pcs
         noise_model = self.noise_models[variable]
-        stochastic_pcs = None
 
-        if include_noise:
-            # CRITICAL: Generate stochastic PCs ONCE for all aggregations
-            # This ensures all spatial scales share the same underlying variability
-            if verbose:  # pragma: no cover
-                print(
-                    f"      → Generating {n_realizations} stochastic PC realizations..."
-                )
-
-            stochastic_pcs = noise_model.generate_stochastic_pcs(
-                monthly_warming,
-                n_realizations=n_realizations,
-                random_seed=None,  # Can expose this as parameter if needed
+        # Resolve transform and (only if needed) load CMIP6 reference data.
+        # tas has no transform, so its reference data is never loaded.
+        transform_config = self._get_transform_config(variable)
+        ssp_data = None
+        pr_first_year_mean = None
+        if transform_config and transform_config.transform_type:
+            ssp_data, pr_first_year_mean = self._load_transform_reference(
+                variable, start_year, end_year, verbose=verbose
             )
-        else:
-            if verbose:  # pragma: no cover
+
+        if verbose:  # pragma: no cover
+            if include_noise:
+                print("      → Using shared stochastic PC realizations")
+            else:
                 print("      → Climatology only (no stochastic variability)")
 
         # Generate outputs for each aggregation
         results = {}
-        transform_info = self.transforms.get(variable, None)
-
-        # Handle both dict (fitted) and VariableTransformConfig (not fitted) cases
-        if isinstance(transform_info, dict):
-            transform_config = transform_info.get("config")
-        else:
-            transform_config = transform_info  # It's a VariableTransformConfig object
 
         for agg in aggregations:
             if verbose:  # pragma: no cover
@@ -1150,6 +1374,8 @@ class MeteorInterface:
             # Pattern scaling outputs anomalies, but Gamma transform needs absolute values
             # We use first-year (2015) baseline instead of piControl to match CMIP6 starting point
             pr_baseline_agg = None
+            # CMIP6 reference aggregation, only needed/available when a transform exists
+            cmip6_agg = None
 
             if agg == "global":
                 # Global mean
@@ -1171,7 +1397,8 @@ class MeteorInterface:
                 else:
                     # Climatology only: return pattern scaling with shape (1, time)
                     raw_ensemble = pattern_agg[np.newaxis, :]
-                cmip6_agg = global_mean(ssp_data)
+                if ssp_data is not None:
+                    cmip6_agg = global_mean(ssp_data)
 
             elif agg.startswith("regional:"):
                 # Check if it's a custom region
@@ -1195,7 +1422,8 @@ class MeteorInterface:
                     pattern_agg = regional_mean(
                         monthly_prediction, region_mask=region_mask
                     ).values
-                    cmip6_agg = regional_mean(ssp_data, region_mask=region_mask)
+                    if ssp_data is not None:
+                        cmip6_agg = regional_mean(ssp_data, region_mask=region_mask)
                     if variable == "pr":
                         pr_baseline_agg = float(
                             regional_mean(
@@ -1241,7 +1469,8 @@ class MeteorInterface:
                     else:
                         # Climatology only: return pattern scaling with shape (1, time)
                         raw_ensemble = pattern_agg[np.newaxis, :]
-                    cmip6_agg = regional_mean(ssp_data, region_code=region_code)
+                    if ssp_data is not None:
+                        cmip6_agg = regional_mean(ssp_data, region_code=region_code)
 
             elif agg.startswith("point:"):
                 # Point extraction
@@ -1269,7 +1498,8 @@ class MeteorInterface:
                 else:
                     # Climatology only: return pattern scaling with shape (1, time)
                     raw_ensemble = pattern_agg[np.newaxis, :]
-                cmip6_agg = extract_point(ssp_data, lat, lon)
+                if ssp_data is not None:
+                    cmip6_agg = extract_point(ssp_data, lat, lon)
             else:
                 raise ValueError(f"Unknown aggregation type: {agg}")
 
@@ -1298,23 +1528,40 @@ class MeteorInterface:
                 if variable == "pr" and pr_baseline_agg is not None:
                     ensemble_for_transform = ensemble_for_transform + pr_baseline_agg
 
-                # Fit Gaussian to generated data
-                gaussian_params = transform_config.fit_1d_func(
-                    ensemble_for_transform, "gaussian"
+                # Fit per-month-of-year (seasonal) when the transform exposes it
+                # — otherwise σ_gaussian is dominated by the seasonal cycle and
+                # the quantile map squashes the inter-realization noise band.
+                use_seasonal = (
+                    transform_config.fit_1d_seasonal_func is not None
+                    and transform_config.apply_seasonal_func is not None
                 )
 
-                # Fit target distribution to CMIP6 data
-                target_params = transform_config.fit_1d_func(
-                    cmip6_agg, transform_config.transform_type
-                )
-
-                # Apply transform
-                transformed_ensemble = transform_config.apply_func(
-                    ensemble_for_transform,
-                    gaussian_params,
-                    target_params,
-                    target_dist=transform_config.transform_type,
-                )
+                if use_seasonal:
+                    gaussian_params = transform_config.fit_1d_seasonal_func(
+                        ensemble_for_transform, "gaussian"
+                    )
+                    target_params = transform_config.fit_1d_seasonal_func(
+                        cmip6_agg, transform_config.transform_type
+                    )
+                    transformed_ensemble = transform_config.apply_seasonal_func(
+                        ensemble_for_transform,
+                        gaussian_params,
+                        target_params,
+                        target_dist=transform_config.transform_type,
+                    )
+                else:
+                    gaussian_params = transform_config.fit_1d_func(
+                        ensemble_for_transform, "gaussian"
+                    )
+                    target_params = transform_config.fit_1d_func(
+                        cmip6_agg, transform_config.transform_type
+                    )
+                    transformed_ensemble = transform_config.apply_func(
+                        ensemble_for_transform,
+                        gaussian_params,
+                        target_params,
+                        target_dist=transform_config.transform_type,
+                    )
 
                 results[agg] = transformed_ensemble
             else:
@@ -1350,6 +1597,7 @@ class MeteorInterface:
         end_year,
         n_realizations,
         gridded_spec,
+        gen_inputs=None,
         include_noise=True,
         temp_scaling_ts=None,
         verbose=True,
@@ -1371,41 +1619,89 @@ class MeteorInterface:
             Dictionary with keys 'annual', 'monthly', 'climatology' containing
             xarray DataArrays with gridded fields
         """
-        # Get pattern scaling results (from cache or compute)
-        pattern_result = (
-            self._get_or_compute_pattern_scaling(  # pylint: disable=unused-variable
+        # Build shared generation inputs if not provided by the caller. The PCs
+        # are generated once over the full trajectory (spun-up) and sliced to the
+        # output window, then sliced again per output field below.
+        if gen_inputs is None:
+            gen_inputs = self._prepare_generation(
                 variable,
                 scenario,
                 start_year,
                 end_year,
+                n_realizations,
+                include_noise=include_noise,
                 temp_scaling_ts=temp_scaling_ts,
                 verbose=verbose,
             )
-        )
-        monthly_prediction = pattern_result[0]
-        monthly_warming = pattern_result[1]
 
-        # Get noise model
+        monthly_prediction = gen_inputs.pattern.monthly_prediction
+        monthly_warming = gen_inputs.pattern.monthly_warming
+        stochastic_pcs = gen_inputs.stochastic_pcs
         noise_model = self.noise_models[variable]
 
-        # Generate stochastic PCs (or skip if climatology only)
-        if include_noise:
-            if verbose:  # pragma: no cover
-                print(f"      → Generating {n_realizations} gridded realizations")
-        else:
+        if not include_noise:
             if verbose:  # pragma: no cover
                 print("      → Generating gridded climatology (no noise)")
-            n_realizations = 1  # Force to 1 for climatology
+        elif verbose:  # pragma: no cover
+            print("      → Using shared stochastic PC realizations (gridded)")
+
+        # Resolve transform. For variables with a distribution transform (e.g.
+        # pr) we generate the full prediction window in one shot and apply the
+        # seasonal (per-month-of-year, per-gridpoint) transform once on the
+        # whole window. Doing it per year-slice (the old path) re-fitted the
+        # Gaussian on just 12 months at each gridpoint, which normalised every
+        # year to its own local mean and wiped the climate-change trend.
+        transform_config = self._get_transform_config(variable)
+        pre_transformed_ensemble = None
+        target_params = None
+        pr_baseline_field = None
+        if transform_config and transform_config.transform_type:
+            pre_transformed_ensemble = self._build_full_window_transformed_ensemble(
+                variable,
+                monthly_prediction,
+                monthly_warming,
+                noise_model,
+                stochastic_pcs,
+                start_year,
+                end_year,
+                transform_config,
+                include_noise,
+                verbose=verbose,
+            )
 
         # Extract requested time slices
         results = {}
         n_months = len(monthly_warming)
 
-        # Helper to convert year to month index
+        # Window-relative month index. monthly_prediction, monthly_warming and the
+        # sliced stochastic PCs all share the same origin (start_year), which is
+        # derived from base_year inside _get_or_compute_pattern_scaling, so all
+        # three stay aligned.
         def year_to_month_idx(year):
             return (year - start_year) * 12
 
-        # Annual means
+        def _get_ensemble_slice(s_idx, e_idx, reduce_time):
+            """Slice the pre-transformed ensemble, or generate+transform per slice."""
+            if pre_transformed_ensemble is not None:
+                sliced = pre_transformed_ensemble.isel(month=slice(s_idx, e_idx))
+                if reduce_time:
+                    sliced = sliced.mean(dim="month")
+                return sliced
+            return self._generate_gridded_slice(
+                monthly_prediction,
+                monthly_warming,
+                noise_model,
+                stochastic_pcs,
+                s_idx,
+                e_idx,
+                include_noise,
+                reduce_time=reduce_time,
+                transform_config=transform_config,
+                target_params=target_params,
+                pr_baseline_field=pr_baseline_field,
+            )
+
+        # Annual means (12-month average of each year)
         if "annual" in gridded_spec:
             if verbose:  # pragma: no cover
                 print(
@@ -1416,38 +1712,9 @@ class MeteorInterface:
                 start_idx = year_to_month_idx(year)
                 end_idx = start_idx + 12
                 if start_idx >= 0 and end_idx <= n_months:
-                    # Generate realizations for this year
-                    year_realizations = []
-                    for i in range(n_realizations):  # pylint: disable=unused-variable
-                        if include_noise:
-                            # Generate full field with noise
-                            realization = noise_model.generate_realization(
-                                monthly_warming[start_idx:end_idx],
-                                n_realizations=1,
-                                noise_only=True,
-                                add_base=monthly_prediction.isel(
-                                    month=slice(start_idx, end_idx)
-                                ),
-                            )
-                        else:
-                            # Just use pattern scaling
-                            realization = monthly_prediction.isel(
-                                month=slice(start_idx, end_idx)
-                            )
-
-                        # Average over 12 months
-                        annual_mean = realization.mean(dim="month")
-                        year_realizations.append(annual_mean)
-
-                    # Stack realizations
-                    if len(year_realizations) > 1:
-                        annual_fields[year] = xr.concat(
-                            year_realizations, dim="realization"
-                        )
-                    else:
-                        annual_fields[year] = year_realizations[0].expand_dims(
-                            realization=[0]
-                        )
+                    annual_fields[year] = _get_ensemble_slice(
+                        start_idx, end_idx, reduce_time=True
+                    )
                 else:
                     if verbose:  # pragma: no cover
                         print(
@@ -1455,7 +1722,7 @@ class MeteorInterface:
                         )
             results["annual"] = annual_fields
 
-        # Monthly fields
+        # Monthly fields (all 12 months retained)
         if "monthly" in gridded_spec:
             if verbose:  # pragma: no cover
                 print(
@@ -1466,34 +1733,9 @@ class MeteorInterface:
                 start_idx = year_to_month_idx(year)
                 end_idx = start_idx + 12
                 if start_idx >= 0 and end_idx <= n_months:
-                    # Generate realizations for this year
-                    year_realizations = []
-                    for i in range(n_realizations):
-                        if include_noise:
-                            # Generate full field with noise
-                            realization = noise_model.generate_realization(
-                                monthly_warming[start_idx:end_idx],
-                                n_realizations=1,
-                                noise_only=True,
-                                add_base=monthly_prediction.isel(
-                                    month=slice(start_idx, end_idx)
-                                ),
-                            )
-                        else:
-                            # Just use pattern scaling
-                            realization = monthly_prediction.isel(
-                                month=slice(start_idx, end_idx)
-                            )
-
-                        year_realizations.append(realization)
-
-                    # Stack realizations (shape: realizations, month, lat, lon)
-                    if len(year_realizations) > 1:
-                        year_months = xr.concat(year_realizations, dim="realization")
-                    else:
-                        year_months = year_realizations[0].expand_dims(realization=[0])
-
-                    monthly_fields[year] = year_months
+                    monthly_fields[year] = _get_ensemble_slice(
+                        start_idx, end_idx, reduce_time=False
+                    )
                 else:
                     if verbose:  # pragma: no cover
                         print(
@@ -1514,38 +1756,9 @@ class MeteorInterface:
                     start_idx = year_to_month_idx(clim_start)
                     end_idx = year_to_month_idx(clim_end + 1)  # +1 to include end year
                     if start_idx >= 0 and end_idx <= n_months:
-                        # Generate realizations for this period
-                        clim_realizations = []
-                        for i in range(n_realizations):
-                            if include_noise:
-                                # Generate full field with noise
-                                realization = noise_model.generate_realization(
-                                    monthly_warming[start_idx:end_idx],
-                                    n_realizations=1,
-                                    noise_only=True,
-                                    add_base=monthly_prediction.isel(
-                                        month=slice(start_idx, end_idx)
-                                    ),
-                                )
-                            else:
-                                # Just use pattern scaling
-                                realization = monthly_prediction.isel(
-                                    month=slice(start_idx, end_idx)
-                                )
-
-                            # Average over all months in period
-                            clim_mean = realization.mean(dim="month")
-                            clim_realizations.append(clim_mean)
-
-                        # Stack realizations
-                        if len(clim_realizations) > 1:
-                            climatology_fields[f"{clim_start}-{clim_end}"] = xr.concat(
-                                clim_realizations, dim="realization"
-                            )
-                        else:
-                            climatology_fields[f"{clim_start}-{clim_end}"] = (
-                                clim_realizations[0].expand_dims(realization=[0])
-                            )
+                        climatology_fields[f"{clim_start}-{clim_end}"] = (
+                            _get_ensemble_slice(start_idx, end_idx, reduce_time=True)
+                        )
                     else:
                         if verbose:  # pragma: no cover
                             print(
@@ -1557,6 +1770,232 @@ class MeteorInterface:
             results["climatology"] = climatology_fields
 
         return results
+
+    def _generate_gridded_slice(
+        self,
+        monthly_prediction,
+        monthly_warming,
+        noise_model,
+        stochastic_pcs,
+        start_idx,
+        end_idx,
+        include_noise,
+        reduce_time,
+        transform_config=None,
+        target_params=None,
+        pr_baseline_field=None,
+    ):
+        """
+        Generate one gridded output slice (annual / monthly / climatology).
+
+        Unifies the three previously-duplicated gridded loops. The only behavioural
+        differences between output types are the month range (``start_idx`` /
+        ``end_idx``, window-relative) and whether the time axis is averaged away
+        (``reduce_time``).
+
+        Noise is taken from the shared spun-up PCs (sliced to this window) so that
+        gridded fields are consistent with the time series outputs and carry full
+        stationary variability. Any distribution transform (e.g. precipitation
+        Gamma) is applied to the MONTHLY field *before* time-averaging, since the
+        transform is a per-gridpoint quantile map over the sample axis.
+
+        Parameters
+        ----------
+        monthly_prediction : xr.DataArray
+            Window-sliced monthly pattern prediction (month, lat, lon).
+        monthly_warming : np.ndarray
+            Window-sliced global-mean monthly warming.
+        noise_model : object
+            Fitted noise model for this variable.
+        stochastic_pcs : np.ndarray or None
+            Window-sliced shared PCs (n_realizations, n_months, n_modes), or None
+            when ``include_noise`` is False.
+        start_idx, end_idx : int
+            Window-relative month indices bounding this slice.
+        include_noise : bool
+            Whether to add stochastic noise.
+        reduce_time : bool
+            If True, average over the month axis (annual / climatology); if False,
+            keep all months (monthly fields).
+        transform_config : VariableTransformConfig, optional
+            Distribution transform configuration (e.g. for ``pr``).
+        target_params : dict, optional
+            Pre-fitted per-gridpoint target distribution parameters.
+        pr_baseline_field : xr.DataArray, optional
+            Gridded first-year baseline (lat, lon) added to anomalies before the
+            transform to obtain absolute precipitation.
+
+        Returns
+        -------
+        xr.DataArray
+            Stacked realizations with a leading ``realization`` dimension.
+        """
+        base_slice = monthly_prediction.isel(month=slice(start_idx, end_idx))
+
+        if include_noise:
+            pcs_slice = stochastic_pcs[:, start_idx:end_idx, :]
+            realizations = noise_model.generate_realization(
+                monthly_warming[start_idx:end_idx],
+                noise_only=True,
+                add_base=base_slice,
+                stochastic_pcs=pcs_slice,
+            )
+            if not isinstance(realizations, list):
+                realizations = [realizations]
+        else:
+            realizations = [base_slice]
+
+        ensemble = _stack_realizations(realizations)
+
+        # Apply the distribution transform on the monthly field, before averaging.
+        if transform_config and transform_config.transform_type:
+            ensemble = self._apply_gridded_transform(
+                ensemble, transform_config, target_params, pr_baseline_field
+            )
+
+        if reduce_time:
+            ensemble = ensemble.mean(dim="month")
+
+        return ensemble
+
+    def _apply_gridded_transform(
+        self, ensemble, transform_config, target_params, pr_baseline_field
+    ):
+        """
+        Apply a per-gridpoint distribution transform to a gridded ensemble.
+
+        Mirrors the time series transform but uses the 3D (per-gridpoint) fitting
+        and application path. The input must still retain its month axis so that
+        each gridpoint has a sample distribution to map.
+
+        Parameters
+        ----------
+        ensemble : xr.DataArray
+            Generated ensemble (realization, month, lat, lon).
+        transform_config : VariableTransformConfig
+            Transform configuration providing ``fit_3d_func`` / ``apply_func``.
+        target_params : dict
+            Pre-fitted per-gridpoint target distribution parameters.
+        pr_baseline_field : xr.DataArray or None
+            Gridded first-year baseline added to convert anomalies to absolute
+            values before the transform (precipitation).
+
+        Returns
+        -------
+        xr.DataArray
+            Transformed ensemble with the same coords/dims as the input.
+        """
+        data = ensemble
+        if pr_baseline_field is not None:
+            # The CMIP6 reference field carries a singleton "ens" dimension (added
+            # by the data getter via expand_dims). Reduce the baseline to its
+            # spatial (lat, lon) grid so it broadcasts cleanly over the ensemble's
+            # (realization, month, lat, lon) dims instead of appending a spurious
+            # trailing axis.
+            extra_dims = [d for d in pr_baseline_field.dims if d not in ("lat", "lon")]
+            if extra_dims:
+                pr_baseline_field = pr_baseline_field.isel(
+                    {d: 0 for d in extra_dims}, drop=True
+                )
+            # Broadcast (lat, lon) baseline over realization and month
+            data = data + pr_baseline_field
+
+        # Fit Gaussian per gridpoint to the generated ensemble, then map to target.
+        gaussian_params = transform_config.fit_3d_func(data.values, "gaussian")
+        transformed = transform_config.apply_func(
+            data.values,
+            gaussian_params,
+            target_params,
+            target_dist=transform_config.transform_type,
+        )
+        return xr.DataArray(transformed, coords=data.coords, dims=data.dims)
+
+    def _build_full_window_transformed_ensemble(
+        self,
+        variable,
+        monthly_prediction,
+        monthly_warming,
+        noise_model,
+        stochastic_pcs,
+        start_year,
+        end_year,
+        transform_config,
+        include_noise,
+        verbose=True,
+    ):
+        """
+        Generate the gridded ensemble over the FULL prediction window and apply
+        the seasonal (per-month-of-year, per-gridpoint) distribution transform
+        once.
+
+        Fitting the Gaussian half of the quantile map over the full window — and
+        per month-of-year rather than across all months at once — keeps the
+        long-term trend in the variance the map carries through (so the gridded
+        trend is preserved) while removing the seasonal cycle from σ (so the
+        inter-realization noise band is preserved at every gridpoint).
+
+        Returns
+        -------
+        xr.DataArray
+            Transformed monthly ensemble (realization, month, lat, lon) spanning
+            ``start_year..end_year`` inclusive. Callers slice this once per
+            requested annual / monthly / climatology field.
+        """
+        if verbose:  # pragma: no cover
+            print(
+                "      → Generating full-window gridded ensemble for "
+                f"{transform_config.transform_type} transform"
+            )
+
+        ssp_data, pr_baseline_field = self._load_transform_reference(
+            variable, start_year, end_year, verbose=verbose
+        )
+
+        if verbose:  # pragma: no cover
+            print(
+                f"      → Fitting per-month-of-year per-gridpoint "
+                f"{transform_config.transform_type} target distribution..."
+            )
+        target_params = transform_config.fit_3d_seasonal_func(
+            ssp_data, transform_config.transform_type
+        )
+
+        if include_noise:
+            realizations = noise_model.generate_realization(
+                monthly_warming,
+                noise_only=True,
+                add_base=monthly_prediction,
+                stochastic_pcs=stochastic_pcs,
+            )
+            if not isinstance(realizations, list):
+                realizations = [realizations]
+        else:
+            realizations = [monthly_prediction]
+        ensemble = _stack_realizations(realizations)
+
+        data = ensemble
+        if pr_baseline_field is not None:
+            extra_dims = [d for d in pr_baseline_field.dims if d not in ("lat", "lon")]
+            if extra_dims:
+                pr_baseline_field = pr_baseline_field.isel(
+                    {d: 0 for d in extra_dims}, drop=True
+                )
+            data = data + pr_baseline_field
+
+        if verbose:  # pragma: no cover
+            print(
+                "      → Fitting per-month-of-year per-gridpoint Gaussian on "
+                "full-window generated ensemble..."
+            )
+        gaussian_params = transform_config.fit_3d_seasonal_func(data.values, "gaussian")
+
+        transformed = transform_config.apply_seasonal_func(
+            data.values,
+            gaussian_params,
+            target_params,
+            target_dist=transform_config.transform_type,
+        )
+        return xr.DataArray(transformed, coords=data.coords, dims=data.dims)
 
     def _apply_impacts(
         self, var_output, variable, impact_configs, custom_regions=None, verbose=True

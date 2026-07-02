@@ -1,6 +1,6 @@
 # METEOR: Multivariate Emulation of Time-Evolving and Overlapping Responses
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17523936.svg)](https://doi.org/10.5281/zenodo.17523936)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18977718.svg)](https://doi.org/10.5281/zenodo.18977718)
 
 METEOR is a fast spatial climate emulator that generates large ensembles of monthly climate projections with realistic variability. Perfect for impact assessment, uncertainty quantification, and exploring climate scenarios.
 

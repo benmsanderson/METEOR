@@ -13,7 +13,18 @@ import pytest
 import xarray as xr
 
 from meteor.ensemble_output import EnsembleOutput
-from meteor.meteor_interface import MeteorInterface, _get_default_config
+from meteor.meteor_interface import (
+    GenerationInputs,
+    MeteorInterface,
+    PatternScalingResult,
+    _get_default_config,
+    _stack_realizations,
+)
+from meteor.precipitation_transform import (
+    apply_distribution_transform,
+    fit_distribution_parameters_3d,
+)
+from meteor.variable_transforms import VariableTransformConfig
 
 
 def _set_trained(interface, variables):
@@ -58,7 +69,9 @@ def test_get_default_config():
     assert tas_config["n_modes_noise"] == 40
     assert tas_config["lag_order"] == 2
     assert tas_config["training_scenario"] == "ssp245"
-    assert tas_config["use_exog"] == "all"
+    # 'none': t_glob as a VAR-X exog regressor whitens the noise and collapses
+    # low-frequency global variability (see MeteorNoiseGenerator.use_exog)
+    assert tas_config["use_exog"] == "none"
     assert not tas_config["transform"]
 
     pr_config = _get_default_config("pr")
@@ -77,8 +90,10 @@ def test_get_default_config():
     assert not generic_config["transform"]
 
 
-def test_tas_converted_to_anomalies(mock_interface):
-    """Test that tas data is converted to anomalies from piControl baseline."""
+def test_tas_skips_reference_data_loading(mock_interface):
+    """tas has no distribution transform, so no CMIP6/piControl reference data
+    should be loaded during time series generation (the former anomaly-conversion
+    path only fed transform fitting, which tas does not perform)."""
     # Create mock piControl data with known mean
     picontrol_mean = 288.0  # K
     picontrol_data = xr.Dataset(
@@ -151,7 +166,7 @@ def test_tas_converted_to_anomalies(mock_interface):
             np.zeros(100), dims=["month"], coords={"month": range(100)}
         )
 
-        # This should trigger the anomaly conversion for tas
+        # This should NOT trigger any reference-data loading for tas
         _ = mock_interface._generate_timeseries(
             variable="tas",
             scenario="ssp245",
@@ -163,16 +178,8 @@ def test_tas_converted_to_anomalies(mock_interface):
             verbose=False,
         )
 
-    # Verify that make_meteor_training_data_composite was called for both scenario and piControl
-    calls = [
-        call[0]
-        for call in mock_interface.data_getter.make_meteor_training_data_composite.call_args_list
-    ]
-
-    # Should have been called with scenario data
-    assert any("ssp245" in str(call) or "historical" in str(call) for call in calls)
-    # Should have been called with piControl data (for tas only)
-    assert any("piControl" in str(call) for call in calls)
+    # tas has no transform, so no CMIP6/piControl reference data is loaded.
+    mock_interface.data_getter.make_meteor_training_data_composite.assert_not_called()
 
 
 def test_pr_not_converted_to_anomalies(mock_interface):
@@ -575,7 +582,16 @@ def test_generate_gridded_climatology_no_noise_single_realization(interface_fact
         coords={"month": np.arange(24), "lat": [0, 1], "lon": [0, 1]},
     )
     interface._get_or_compute_pattern_scaling = MagicMock(
-        return_value=(monthly_prediction, monthly_warming)
+        return_value=PatternScalingResult(
+            monthly_prediction=monthly_prediction,
+            monthly_warming=monthly_warming,
+            em_data=None,
+            conc_data=None,
+            full_monthly_warming=monthly_warming,
+            base_year=2000,
+            start_month_idx=0,
+            end_month_idx=24,
+        )
     )
 
     gridded = interface._generate_gridded(
@@ -742,3 +758,274 @@ def test_generate_saves_to_file(interface_factory):
         )
 
     mock_save.assert_called_once_with("/tmp/test_output.nc")
+
+
+# =============================================================================
+# Shared generation helpers (introduced by the unified-generation refactor)
+# =============================================================================
+
+
+def test_stack_realizations_single_adds_realization_dim():
+    """A single realization is promoted to a length-1 ``realization`` dimension."""
+    field = xr.DataArray(
+        np.ones((3, 2, 2)),
+        dims=["month", "lat", "lon"],
+        coords={"month": range(3), "lat": [0, 1], "lon": [0, 1]},
+    )
+
+    stacked = _stack_realizations([field])
+
+    assert "realization" in stacked.dims
+    assert stacked.sizes["realization"] == 1
+    # The underlying field is unchanged aside from the new leading axis.
+    assert np.array_equal(stacked.isel(realization=0).values, field.values)
+
+
+def test_stack_realizations_multiple_concatenates():
+    """Multiple realizations are concatenated along the ``realization`` dim."""
+    fields = [
+        xr.DataArray(
+            np.full((3, 2, 2), float(i)),
+            dims=["month", "lat", "lon"],
+            coords={"month": range(3), "lat": [0, 1], "lon": [0, 1]},
+        )
+        for i in range(4)
+    ]
+
+    stacked = _stack_realizations(fields)
+
+    assert stacked.sizes["realization"] == 4
+    # Each member retains its distinct values.
+    for i in range(4):
+        assert np.all(stacked.isel(realization=i).values == float(i))
+
+
+def test_get_transform_config_handles_dict_and_direct(interface_factory):
+    """_get_transform_config resolves both fitted (dict) and unfitted configs."""
+    interface, _ = interface_factory(model="TestModel", variables=("pr",))
+    config = VariableTransformConfig("pr", "gamma", "positivity")
+
+    # Fitted case: stored as a dict with a 'config' entry.
+    interface.transforms["pr"] = {"config": config, "target_params": {}}
+    assert interface._get_transform_config("pr") is config
+
+    # Unfitted case: stored as the config object directly.
+    interface.transforms["pr"] = config
+    assert interface._get_transform_config("pr") is config
+
+    # Missing case: variable with no transform registered.
+    assert interface._get_transform_config("tas") is None
+
+
+def test_prepare_generation_slices_full_trajectory_pcs(interface_factory):
+    """PCs are generated once over the full trajectory then sliced to the window.
+
+    The autoregressive spin-up transient must be parked at the trajectory start,
+    so PCs are generated over ``full_monthly_warming`` and only afterwards sliced
+    to ``[start_month_idx:end_month_idx]``.
+    """
+    interface, _ = interface_factory(model="TestModel", variables=("pr",))
+    _set_trained(interface, ["pr"])
+
+    n_months_full = 36  # 3 years from base_year
+    start_idx, end_idx = 12, 24  # output window = second year
+    full_warming = np.linspace(0.0, 3.0, n_months_full)
+
+    pattern = PatternScalingResult(
+        monthly_prediction=xr.DataArray(np.zeros(12), dims=["month"]),
+        monthly_warming=full_warming[start_idx:end_idx],
+        em_data=None,
+        conc_data=None,
+        full_monthly_warming=full_warming,
+        base_year=2000,
+        start_month_idx=start_idx,
+        end_month_idx=end_idx,
+    )
+    interface._get_or_compute_pattern_scaling = MagicMock(return_value=pattern)
+
+    full_pcs = np.arange(3 * n_months_full * 4).reshape(3, n_months_full, 4)
+    interface.noise_models["pr"].generate_stochastic_pcs.return_value = full_pcs
+
+    gen_inputs = interface._prepare_generation(
+        "pr", "ssp245", 2001, 2001, n_realizations=3, verbose=False
+    )
+
+    assert isinstance(gen_inputs, GenerationInputs)
+    # PCs generated over the FULL trajectory (length 36), not the window.
+    call_args, _ = interface.noise_models["pr"].generate_stochastic_pcs.call_args
+    assert len(call_args[0]) == n_months_full
+    # Returned PCs are sliced to the output window.
+    assert gen_inputs.stochastic_pcs.shape == (3, end_idx - start_idx, 4)
+    assert np.array_equal(gen_inputs.stochastic_pcs, full_pcs[:, start_idx:end_idx, :])
+
+
+def test_prepare_generation_normalizes_2d_pcs(interface_factory):
+    """A 2D (single-realization) PC array is promoted to a leading realization axis."""
+    interface, _ = interface_factory(model="TestModel", variables=("pr",))
+    _set_trained(interface, ["pr"])
+
+    pattern = PatternScalingResult(
+        monthly_prediction=xr.DataArray(np.zeros(12), dims=["month"]),
+        monthly_warming=np.zeros(12),
+        em_data=None,
+        conc_data=None,
+        full_monthly_warming=np.zeros(24),
+        base_year=2000,
+        start_month_idx=0,
+        end_month_idx=12,
+    )
+    interface._get_or_compute_pattern_scaling = MagicMock(return_value=pattern)
+    interface.noise_models["pr"].generate_stochastic_pcs.return_value = np.zeros(
+        (24, 4)
+    )
+
+    gen_inputs = interface._prepare_generation(
+        "pr", "ssp245", 2000, 2000, n_realizations=1, verbose=False
+    )
+
+    assert gen_inputs.stochastic_pcs.shape == (1, 12, 4)
+
+
+def test_prepare_generation_no_noise_skips_pcs(interface_factory):
+    """With include_noise=False no PCs are generated and the field is None."""
+    interface, _ = interface_factory(model="TestModel", variables=("pr",))
+    _set_trained(interface, ["pr"])
+
+    pattern = PatternScalingResult(
+        monthly_prediction=xr.DataArray(np.zeros(12), dims=["month"]),
+        monthly_warming=np.zeros(12),
+        em_data=None,
+        conc_data=None,
+        full_monthly_warming=np.zeros(24),
+        base_year=2000,
+        start_month_idx=0,
+        end_month_idx=12,
+    )
+    interface._get_or_compute_pattern_scaling = MagicMock(return_value=pattern)
+
+    gen_inputs = interface._prepare_generation(
+        "pr", "ssp245", 2000, 2000, n_realizations=5, include_noise=False, verbose=False
+    )
+
+    assert gen_inputs.stochastic_pcs is None
+    interface.noise_models["pr"].generate_stochastic_pcs.assert_not_called()
+
+
+def test_generate_gridded_slice_no_noise_reduces_time(interface_factory):
+    """Without noise the slice is the time-mean of the base pattern, no noise calls."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+    noise_model = MagicMock()
+
+    monthly_prediction = xr.DataArray(
+        np.arange(24 * 2 * 2, dtype=float).reshape(24, 2, 2),
+        dims=["month", "lat", "lon"],
+        coords={"month": np.arange(24), "lat": [0, 1], "lon": [0, 1]},
+    )
+
+    result = interface._generate_gridded_slice(
+        monthly_prediction,
+        np.zeros(24),
+        noise_model,
+        stochastic_pcs=None,
+        start_idx=0,
+        end_idx=12,
+        include_noise=False,
+        reduce_time=True,
+    )
+
+    noise_model.generate_realization.assert_not_called()
+    assert result.dims == ("realization", "lat", "lon")
+    assert result.sizes["realization"] == 1
+    expected = monthly_prediction.isel(month=slice(0, 12)).mean(dim="month")
+    assert np.allclose(result.isel(realization=0).values, expected.values)
+
+
+def test_generate_gridded_slice_passes_sliced_pcs(interface_factory):
+    """With noise the window-sliced PCs and base climatology are forwarded."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+    noise_model = MagicMock()
+
+    monthly_prediction = xr.DataArray(
+        np.zeros((24, 2, 2)),
+        dims=["month", "lat", "lon"],
+        coords={"month": np.arange(24), "lat": [0, 1], "lon": [0, 1]},
+    )
+    noise_model.generate_realization.return_value = [
+        xr.DataArray(
+            np.zeros((12, 2, 2)),
+            dims=["month", "lat", "lon"],
+            coords={"month": np.arange(12), "lat": [0, 1], "lon": [0, 1]},
+        )
+        for _ in range(2)
+    ]
+
+    stochastic_pcs = np.arange(2 * 24 * 4).reshape(2, 24, 4)
+
+    result = interface._generate_gridded_slice(
+        monthly_prediction,
+        np.zeros(24),
+        noise_model,
+        stochastic_pcs=stochastic_pcs,
+        start_idx=12,
+        end_idx=24,
+        include_noise=True,
+        reduce_time=False,
+    )
+
+    _, call_kwargs = noise_model.generate_realization.call_args
+    # PCs are sliced to the requested window before being passed on.
+    assert np.array_equal(call_kwargs["stochastic_pcs"], stochastic_pcs[:, 12:24, :])
+    assert call_kwargs["noise_only"] is True
+    # Monthly output retains the month axis and both realizations.
+    assert result.sizes["realization"] == 2
+    assert "month" in result.dims
+
+
+def test_apply_gridded_transform_drops_singleton_ens_dim(interface_factory):
+    """The (lat, lon) baseline must not append a spurious axis to the ensemble.
+
+    The CMIP6 data getter adds a singleton ``ens`` dimension to its fields. When
+    that baseline is added to the generated ensemble it must be reduced to its
+    spatial grid first, otherwise xarray broadcasting produces a 5D array that the
+    per-gridpoint transform rejects. This is a regression test for that bug.
+    """
+    interface, _ = interface_factory(model="TestModel", variables=("pr",))
+
+    rng = np.random.default_rng(0)
+    ensemble = xr.DataArray(
+        rng.normal(0.0, 1e-6, size=(2, 12, 2, 2)),
+        dims=["realization", "month", "lat", "lon"],
+        coords={
+            "realization": [0, 1],
+            "month": np.arange(12),
+            "lat": [0, 1],
+            "lon": [0, 1],
+        },
+    )
+    # Baseline carries a singleton ``ens`` dim as produced by the data getter.
+    pr_baseline_field = xr.DataArray(
+        rng.uniform(1e-5, 2e-5, size=(1, 2, 2)),
+        dims=["ens", "lat", "lon"],
+        coords={"ens": [1], "lat": [0, 1], "lon": [0, 1]},
+    )
+
+    target_ref = rng.uniform(1e-5, 3e-5, size=(24, 2, 2))
+    target_params = fit_distribution_parameters_3d(target_ref, "gamma")
+
+    config = VariableTransformConfig(
+        "pr",
+        "gamma",
+        "positivity",
+        fit_3d_func=fit_distribution_parameters_3d,
+        apply_func=apply_distribution_transform,
+    )
+
+    result = interface._apply_gridded_transform(
+        ensemble, config, target_params, pr_baseline_field
+    )
+
+    # Dimensions are preserved (no spurious ``ens`` axis) ...
+    assert result.dims == ("realization", "month", "lat", "lon")
+    assert result.shape == (2, 12, 2, 2)
+    # ... and the gamma transform guarantees non-negative precipitation.
+    assert np.all(result.values >= 0)

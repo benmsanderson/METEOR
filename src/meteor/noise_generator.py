@@ -23,7 +23,7 @@ from sklearn.decomposition import PCA
 from sklearn.linear_model import LinearRegression
 from statsmodels.tsa.api import VAR
 
-from .geo_data_utils import global_mean
+from .geo_data_utils import find_time_dim_and_cut, global_mean
 
 
 class MeteorNoiseGenerator:
@@ -55,25 +55,53 @@ class MeteorNoiseGenerator:
         Whether the model has been fitted
     """
 
-    def __init__(self, n_modes=10, lag_order=2, use_exog="temp_only"):
+    def __init__(self, n_modes=40, lag_order=2, use_exog="none", weight_eofs=True):
         """
         Initialize the noise generator.
 
         Parameters
         ----------
-        n_modes : int, default 10
-            Number of PCA modes to retain
+        n_modes : int, default 40
+            Number of PCA modes to retain. The default of 40 (raised from 10)
+            captures ~90%+ of global-mean temperature variability; lower values
+            truncate the spatially coherent modes that carry the global signal
+            and suppress global-mean variance (point/regional variance is far
+            less sensitive to truncation).
         lag_order : int, default 2
             Lag order for VARX model
-        use_exog : str, default 'temp_only'
+        use_exog : str, default 'none'
             Exogenous variables to use in VARX model:
-            - 'all': Use temperature, annual_cos, annual_sin (original behavior)
-            - 'temp_only': Use only temperature (recommended to avoid spurious seasonality)
-            - 'none': Pure VAR with no exogenous variables
+            - 'none': Pure VAR with no exogenous variables (recommended).
+            - 'temp_only': Use only temperature.
+            - 'all': Use temperature, annual_cos, annual_sin (original behavior).
+
+            'none' is the default because using the smoothed global temperature
+            (t_glob) as an exogenous regressor absorbs the persistent
+            low-frequency global variability into the deterministic forced term.
+            At generation t_glob is the prescribed (smooth, internally
+            invariant) trajectory, so that power is not regenerated: the noise
+            becomes temporally white and annual/decadal global-mean variance
+            collapses (~2.5x too small for tas). The temperature-dependent
+            mean and seasonal response is already captured by the seasonal
+            model, so the exog regressor is redundant as well as harmful to
+            internal variability. 'temp_only'/'all' are retained for backward
+            compatibility but suppress low-frequency global variability.
+        weight_eofs : bool, default True
+            If True, area-weight the anomaly field by sqrt(cos(latitude)) before
+            fitting the EOF/PCA basis, so PCA optimizes area-weighted variance
+            (consistent with the global mean) rather than raw per-gridcell
+            variance. This stops dense high-latitude cells from dominating the
+            leading EOFs and pushing the global-mean-carrying structure into
+            trailing (truncated) modes. Set False to recover the legacy
+            unweighted behavior.
         """
         self.n_modes = n_modes
         self.lag_order = lag_order
         self.use_exog = use_exog
+        self.weight_eofs = weight_eofs
+        # sqrt(cos-lat) weights applied to the EOF basis (set during fit when
+        # weight_eofs is True; None means the basis is in raw gridcell space).
+        self.eof_weights = None
         self.seasonal_model = None
         self.pca = None
         self.varx_results = None
@@ -322,7 +350,23 @@ class MeteorNoiseGenerator:
         else:
             anomalies = ds[variable_name].mean(dim=["ens"]) - seasonal_cycle_fit_xr
         # Fit PCA to anomalies
-        anomalies_flat = anomalies.stack(space=("lat", "lon")).data
+        anomalies_stacked = anomalies.stack(space=("lat", "lon"))
+        anomalies_flat = anomalies_stacked.data
+
+        if self.weight_eofs:
+            # Area-weight the basis by sqrt(cos-lat) so PCA optimizes
+            # area-weighted variance (consistent with the global mean) instead
+            # of raw per-gridcell variance. cos-lat is floored to keep the
+            # weights strictly positive so components can be returned to
+            # physical units (see _physical_components); pole cells carry
+            # ~zero weight and contribute ~zero anomaly.
+            lat_per_cell = anomalies_stacked["lat"].values
+            self.eof_weights = np.sqrt(
+                np.clip(np.cos(np.deg2rad(lat_per_cell)), 1e-6, None)
+            )
+            anomalies_flat = anomalies_flat * self.eof_weights
+        else:
+            self.eof_weights = None
 
         self.pca = PCA(n_components=self.n_modes)
         pcs = self.pca.fit_transform(anomalies_flat)
@@ -443,6 +487,7 @@ class MeteorNoiseGenerator:
         random_seed=None,
         noise_only=False,
         add_base=None,
+        stochastic_pcs=None,
     ):
         """
         Generate stochastic climate realizations.
@@ -464,6 +509,12 @@ class MeteorNoiseGenerator:
             Base climatology to add to each realization. If provided, the addition is done
             efficiently in NumPy before XArray conversion, avoiding expensive XArray operations.
             Must have compatible shape with the output.
+        stochastic_pcs : np.ndarray, optional
+            Pre-generated stochastic PCs from :meth:`generate_stochastic_pcs`. If
+            provided, these PCs are used instead of generating fresh ones, enabling
+            self-consistent ensemble generation shared with regional/global means.
+            Shape ``(n_time, n_modes)`` or ``(n_realizations, n_time, n_modes)``.
+            When provided, ``n_realizations`` is inferred from the array.
 
         Returns
         -------
@@ -474,7 +525,7 @@ class MeteorNoiseGenerator:
         if not self.fitted:
             raise ValueError("Model must be fitted before generating realizations")
 
-        if random_seed is not None:
+        if random_seed is not None and stochastic_pcs is None:
             np.random.seed(random_seed)
 
         # Create time coordinate (shared across all realizations)
@@ -521,19 +572,31 @@ class MeteorNoiseGenerator:
 
             # Now reshape to (n_time, n_lat, n_lon)
             # If the time dimension doesn't match, select the first n_time steps
-            if base_values.shape[0] != n_time:
-                base_values = base_values[:n_time, :, :]
-
+            base_values = find_time_dim_and_cut(base_values, n_time, n_lat, n_lon)
             base_clim_np = base_values.reshape(n_time, n_lat, n_lon)
+
+        # Use pre-generated PCs if provided (self-consistent ensembles), else
+        # generate a fresh stochastic component per realization.
+        if stochastic_pcs is not None:
+            if stochastic_pcs.ndim == 2:
+                pcs_to_use = [stochastic_pcs]
+            else:
+                pcs_to_use = list(stochastic_pcs)
+            n_realizations = len(pcs_to_use)
+        else:
+            pcs_to_use = None
 
         # Generate realizations (only stochastic component varies)
         realizations = []
-        for _ in range(n_realizations):
+        for i in range(n_realizations):
             # Generate stochastic component (this is the only unique part per realization)
-            synthetic_pcs = self._generate_stochastic_pcs(X_exog, n_time)
+            if pcs_to_use is not None:
+                synthetic_pcs = pcs_to_use[i]
+            else:
+                synthetic_pcs = self._generate_stochastic_pcs(X_exog, n_time)
 
             # Reconstruct anomalies (NumPy)
-            reconstructed_anomalies = synthetic_pcs @ self.pca.components_
+            reconstructed_anomalies = synthetic_pcs @ self._physical_components()
             reconstructed_anomalies_reshaped = reconstructed_anomalies.reshape(
                 n_time, n_lat, n_lon
             )
@@ -671,6 +734,26 @@ class MeteorNoiseGenerator:
 
         return lat_idx, lon_idx
 
+    def _physical_components(self):
+        """
+        EOF components in physical (unweighted) gridcell space.
+
+        When the basis was fit with area weighting (``self.eof_weights`` set),
+        the stored PCA components live in sqrt(cos-lat)-weighted space; dividing
+        by the weights returns them to physical units so reconstructions and
+        regional projections are correct. Falls back to the raw components for
+        models fit with ``weight_eofs=False`` and for backward compatibility
+        with pickles saved before weighting was introduced.
+
+        Returns
+        -------
+        np.ndarray
+            EOF components, shape (n_modes, n_space), in physical units.
+        """
+        if getattr(self, "eof_weights", None) is None:
+            return self.pca.components_
+        return self.pca.components_ / self.eof_weights
+
     def _get_point_eof_values(self, lat, lon):
         """
         Get EOF values at a specific point (no averaging).
@@ -700,7 +783,7 @@ class MeteorNoiseGenerator:
         # Get EOFs reshaped to spatial grid
         n_lat = len(self.coords["lat"])
         n_lon = len(self.coords["lon"])
-        eof_components = self.pca.components_.reshape(self.n_modes, n_lat, n_lon)
+        eof_components = self._physical_components().reshape(self.n_modes, n_lat, n_lon)
 
         # Extract values at the point (no averaging needed)
         eof_point_values = eof_components[:, lat_idx, lon_idx]
@@ -739,7 +822,7 @@ class MeteorNoiseGenerator:
         n_lon = len(self.coords["lon"])
 
         # Get EOFs reshaped to spatial grid (n_modes, n_lat, n_lon)
-        eof_components = self.pca.components_.reshape(self.n_modes, n_lat, n_lon)
+        eof_components = self._physical_components().reshape(self.n_modes, n_lat, n_lon)
         if region_mask is None and region != "global":
             region_mask = self._get_ar6_region_mask(region)
 
@@ -1070,6 +1153,8 @@ class MeteorNoiseGenerator:
             "n_modes": self.n_modes,
             "lag_order": self.lag_order,
             "use_exog": self.use_exog,
+            "weight_eofs": self.weight_eofs,
+            "eof_weights": self.eof_weights,
             "seasonal_model": self.seasonal_model,
             "pca": self.pca,
             "varx_results": self.varx_results,
@@ -1100,6 +1185,10 @@ class MeteorNoiseGenerator:
         self.use_exog = model_data.get(
             "use_exog", "all"
         )  # Default to 'all' for backward compatibility
+        # Backward compatibility: pickles predating area weighting have neither
+        # key, which correctly restores the legacy unweighted behavior.
+        self.weight_eofs = model_data.get("weight_eofs", False)
+        self.eof_weights = model_data.get("eof_weights", None)
         self.seasonal_model = model_data["seasonal_model"]
         self.pca = model_data["pca"]
         self.varx_results = model_data["varx_results"]
@@ -1117,13 +1206,14 @@ def train_noise_model_from_cmip6(
     experiments,
     model_name,
     variable_name,
-    n_modes=10,
+    n_modes=40,
     lag_order=2,
     cache_dir=None,
     custom_global_temp=None,
     use_picontrol_baseline=True,
     save_diagnostics=False,
-    use_exog="temp_only",
+    use_exog="none",
+    weight_eofs=True,
     verbose=False,
 ):
     """
@@ -1142,7 +1232,7 @@ def train_noise_model_from_cmip6(
         Name of the climate model (must be available in data_getter)
     variable_name : str
         Variable to model (e.g., 'tas', 'pr')
-    n_modes : int, default 10
+    n_modes : int, default 40
         Number of PCA modes to retain
     lag_order : int, default 2
         Lag order for VARX model
@@ -1163,11 +1253,18 @@ def train_noise_model_from_cmip6(
         model.diagnostic_X_features, model.diagnostic_t_glob, model.diagnostic_time,
         model.diagnostic_seasonal_coef, model.diagnostic_seasonal_intercept,
         and model.diagnostic_Y_data.
-    use_exog : str, default 'temp_only'
+    use_exog : str, default 'none'
         Exogenous variables to use in VARX model:
+        - 'none': Pure VAR with no exogenous variables (recommended; preserves
+          low-frequency global variability)
+        - 'temp_only': Use only temperature
         - 'all': Use temperature, annual_cos, annual_sin (may cause spurious seasonality)
-        - 'temp_only': Use only temperature (recommended)
-        - 'none': Pure VAR with no exogenous variables
+        See MeteorNoiseGenerator for why t_glob as an exog regressor suppresses
+        global-mean internal variability.
+    weight_eofs : bool, default True
+        If True, area-weight the anomaly field by sqrt(cos(latitude)) before
+        fitting the EOF basis so global-mean variability is preserved. See
+        MeteorNoiseGenerator for details. Set False for legacy unweighted EOFs.
     verbose : bool, default False
         If True, prints variance decomposition statistics after fitting.
 
@@ -1212,7 +1309,7 @@ def train_noise_model_from_cmip6(
 
     # Create and fit noise generator
     noise_gen = MeteorNoiseGenerator(
-        n_modes=n_modes, lag_order=lag_order, use_exog=use_exog
+        n_modes=n_modes, lag_order=lag_order, use_exog=use_exog, weight_eofs=weight_eofs
     )
     noise_gen.fit(
         monthly_data,
@@ -1238,12 +1335,13 @@ def train_multiple_noise_models_from_cmip6(
     experiments,
     models=None,
     variables=None,
-    n_modes=10,
+    n_modes=40,
     lag_order=2,
     cache_dir=None,
     custom_global_temp=None,
     use_picontrol_baseline=True,
-    use_exog="temp_only",
+    use_exog="none",
+    weight_eofs=True,
 ):
     """
     Train noise generators for multiple model/variable combinations.
@@ -1261,7 +1359,7 @@ def train_multiple_noise_models_from_cmip6(
         List of models to train. If None, uses all available models.
     variables : list, optional
         List of variables to train. If None, uses all fields in data getter.
-    n_modes : int, default 10
+    n_modes : int, default 40
         Number of PCA modes to retain
     lag_order : int, default 2
         Lag order for VARX model
@@ -1274,11 +1372,18 @@ def train_multiple_noise_models_from_cmip6(
         Whether to use piControl data as baseline for temperature anomalies.
         This ensures consistency with pattern scaling.
         If False, falls back to using first 42 years of training data.
-    use_exog : str, default 'temp_only'
+    use_exog : str, default 'none'
         Exogenous variables to use in VARX model:
+        - 'none': Pure VAR with no exogenous variables (recommended; preserves
+          low-frequency global variability)
+        - 'temp_only': Use only temperature
         - 'all': Use temperature, annual_cos, annual_sin (may cause spurious seasonality)
-        - 'temp_only': Use only temperature (recommended)
-        - 'none': Pure VAR with no exogenous variables
+        See MeteorNoiseGenerator for why t_glob as an exog regressor suppresses
+        global-mean internal variability.
+    weight_eofs : bool, default True
+        If True, area-weight the anomaly field by sqrt(cos(latitude)) before
+        fitting the EOF basis so global-mean variability is preserved. See
+        MeteorNoiseGenerator for details. Set False for legacy unweighted EOFs.
 
     Returns
     -------
@@ -1326,6 +1431,7 @@ def train_multiple_noise_models_from_cmip6(
                     custom_global_temp=custom_global_temp,
                     use_picontrol_baseline=use_picontrol_baseline,
                     use_exog=use_exog,
+                    weight_eofs=weight_eofs,
                 )
                 noise_models[model][variable] = noise_gen
             except Exception as e:  # pylint: disable=broad-exception-caught

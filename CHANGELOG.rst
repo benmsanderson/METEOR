@@ -19,6 +19,7 @@ The changes listed in this file are categorised as follows:
 
 ### Changed
 
+- Vectorized the VAR autoregression in ``MeteorNoiseGenerator.generate_stochastic_pcs`` across realizations. Single-realization behavior is preserved byte-identical (existing seeded reproducibility tests unchanged); multi-realization output is statistically equivalent to the sequential loop. On ``gen_global_ts`` at N=1000 this reduces wall time from 228 s to 30 s (7.6× — see ``docs/profiling_baseline.md``).
 - Now possibly to send variable length temperature scaling timeseries, fixed noise generator for wrong ordering of base data dimensions
 
 ### Fixed

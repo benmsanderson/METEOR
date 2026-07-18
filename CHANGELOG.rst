@@ -17,6 +17,10 @@ The changes listed in this file are categorised as follows:
 [Unreleased]
 ---------------------
 
+### Added
+
+- Performance profiling harness (``scripts/profiling/run_profile.py``, ``scripts/profiling/analyze.py``) with parameterized workloads covering training and generation. Baseline numbers and optimization targets documented in ``docs/profiling_baseline.md``.
+
 ### Changed
 
 - Now possibly to send variable length temperature scaling timeseries, fixed noise generator for wrong ordering of base data dimensions

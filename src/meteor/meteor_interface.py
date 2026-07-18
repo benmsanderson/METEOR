@@ -2082,18 +2082,12 @@ class MeteorInterface:
                     coords={"month": np.arange(n_months)},
                 )
 
-                # Calculate degree days for each realization
-                # Both HDD and CDD are calculated in the same call
-                hdd_results = []
-                cdd_results = []
-                for i in range(n_realizations):
-                    result = dd_model.calculate(temp_celsius[i])
-                    hdd_results.append(result.data["annual_hdd"].values)
-                    cdd_results.append(result.data["annual_cdd"].values)
-
-                # Stack back into arrays (n_realizations, n_years)
-                impacts["hdd"][key] = np.array(hdd_results)
-                impacts["cdd"][key] = np.array(cdd_results)
+                # DegreeDaysCalculator is internally vectorized over the
+                # 'month' dimension, so we pass the whole (realization, month)
+                # array in a single call rather than looping per realization.
+                result = dd_model.calculate(temp_celsius)
+                impacts["hdd"][key] = result.data["annual_hdd"].values
+                impacts["cdd"][key] = result.data["annual_cdd"].values
 
                 if verbose:  # pragma: no cover
                     print(f"         • HDD for {key}")

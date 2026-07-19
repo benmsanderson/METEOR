@@ -19,6 +19,7 @@ The changes listed in this file are categorised as follows:
 
 ### Changed
 
+- Streamed the gridded distribution-transform path (``MeteorInterface._generate_gridded``) so peak memory is bounded by chunk size rather than by ``n_realizations``. Two-pass approach: accumulate per-month-of-year per-gridpoint moments to fit the Gaussian half of the quantile map, then reconstruct each chunk again and apply the transform per requested slice. Output is bitwise-identical to the previous full-window path (verified to ≤1e-16 relative on NorESM2-MM ``pr``). Chunk size defaults to ~5 GB per chunk and is overridable via ``METEOR_GRIDDED_CHUNK_SIZE``. In practice this lifts the previous silent OOM at ``n_realizations ≳ 8`` on a full-resolution CMIP6 grid: gridded ensembles at N=50 now complete on a 32 GB machine with peak ≈22 GB (was OOM).
 - Now possibly to send variable length temperature scaling timeseries, fixed noise generator for wrong ordering of base data dimensions
 
 ### Fixed

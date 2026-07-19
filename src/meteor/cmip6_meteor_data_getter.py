@@ -1130,7 +1130,12 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         expected_name = f"cmip6-{model_name}-{scenario}"
         if variable is not None:
             expected_name = f"{expected_name}-{variable}"
-        expected_vars = set(self.flds)
+            # Per-variable caches only carry that one variable; asking for all
+            # of self.flds here would spuriously reject a valid single-variable
+            # cache and force a re-fit.
+            expected_vars = {variable}
+        else:
+            expected_vars = set(self.flds)
 
         info = {
             "expected_name": expected_name,

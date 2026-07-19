@@ -2290,7 +2290,7 @@ class MeteorInterface:
 
                 # Convert from anomaly (K) to absolute temperature (°C)
                 # ts_data is anomaly in K, baseline_k is absolute temperature in K
-                n_realizations, n_months = ts_data.shape
+                n_months = ts_data.shape[1]
 
                 # Create xarray with month dimension (required by calculator)
                 # Absolute temperature in Celsius = (anomaly_K + baseline_K) - 273.15

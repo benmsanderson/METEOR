@@ -269,7 +269,9 @@ def _build_small_fitted_generator(n_modes=3, n_years=25, n_lat=5, n_lon=6, seed=
         global_signal[:, None, None]
         + spatial
         + 0.5 * rng.standard_normal((n_time, n_lat, n_lon))
-    )[..., None]  # add ens axis
+    )[
+        ..., None
+    ]  # add ens axis
 
     tas_da = xr.DataArray(
         tas_data,
@@ -306,21 +308,25 @@ def test_generate_stochastic_pcs_batched_matches_sequential():
     X_exog = generator._extract_exog_variables(X)
     n_time = len(trajectory)
     sequential = np.stack(
-        [generator._generate_stochastic_pcs(X_exog, n_time) for _ in range(n_realizations)]
+        [
+            generator._generate_stochastic_pcs(X_exog, n_time)
+            for _ in range(n_realizations)
+        ]
     )
 
     # Batched
     np.random.seed(1234)
-    batched = generator._generate_stochastic_pcs_batched(
-        X_exog, n_time, n_realizations
-    )
+    batched = generator._generate_stochastic_pcs_batched(X_exog, n_time, n_realizations)
 
     assert batched.shape == (n_realizations, n_time, generator.n_modes)
     assert sequential.shape == batched.shape
 
     # Machine-precision agreement across realizations
     np.testing.assert_allclose(
-        batched, sequential, rtol=0, atol=1e-10,
+        batched,
+        sequential,
+        rtol=0,
+        atol=1e-10,
         err_msg="Batched VAR sim diverged from sequential path.",
     )
 
@@ -330,9 +336,7 @@ def test_generate_stochastic_pcs_public_batched_route():
     through the batched path and return (n_realizations, n_time, n_modes).
     """
     generator, trajectory = _build_small_fitted_generator(n_modes=3, n_years=25)
-    out = generator.generate_stochastic_pcs(
-        trajectory, n_realizations=5, random_seed=7
-    )
+    out = generator.generate_stochastic_pcs(trajectory, n_realizations=5, random_seed=7)
     assert out.shape == (5, len(trajectory), generator.n_modes)
 
     # Single-realization path unchanged: 2-D output, reproducible under seed.

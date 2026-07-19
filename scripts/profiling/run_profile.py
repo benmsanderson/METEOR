@@ -151,8 +151,9 @@ def workload_gen_no_noise(params):
 
 
 def workload_gen_gridded(params):
-    """Ex.4: gridded output at capped N (<=10 per user constraint)."""
-    n = min(params["n"], 10)
+    """Ex.4: gridded output. Previously OOMed at N>~8 with the full-window
+    path; the streaming builder lifts this."""
+    n = params["n"]
     emu = _make_emulator(REAL_CACHE)
     emu.train(verbose=False)
     gc.collect()

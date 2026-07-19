@@ -18,6 +18,7 @@ from meteor.meteor_interface import (
     MeteorInterface,
     PatternScalingResult,
     _get_default_config,
+    _resolve_gridded_chunk_size,
     _stack_realizations,
 )
 from meteor.precipitation_transform import (
@@ -60,6 +61,37 @@ def mock_interface(interface_factory):
     )
     _set_trained(interface, ["tas", "pr"])
     yield interface
+
+
+def test_resolve_gridded_chunk_size_env_var(monkeypatch):
+    """METEOR_GRIDDED_CHUNK_SIZE overrides the default; invalid values fall back
+    to the auto-sized target of ~5 GB per chunk.
+
+    Auto-size formula: chunk = 5 GB / (n_time * n_lat * n_lon * 8 bytes),
+    capped at n_realizations.
+    """
+    # No env var -> auto-size based on per-realization memory footprint.
+    monkeypatch.delenv("METEOR_GRIDDED_CHUNK_SIZE", raising=False)
+    # Small grid: per-real footprint tiny, so chunk should max out at N.
+    assert _resolve_gridded_chunk_size(10, 24, 8, 8) == 10
+    # Large grid where a single realization is ~1.3 GB -> chunk ≈ 5/1.3 ≈ 3.
+    chunk = _resolve_gridded_chunk_size(100, 3012, 192, 288)
+    assert 1 <= chunk <= 100
+    assert chunk == 4  # deterministic given the 5-GB target
+
+    # Env-var override honored and capped by n_realizations.
+    monkeypatch.setenv("METEOR_GRIDDED_CHUNK_SIZE", "2")
+    assert _resolve_gridded_chunk_size(10, 3012, 192, 288) == 2
+    monkeypatch.setenv("METEOR_GRIDDED_CHUNK_SIZE", "20")
+    assert _resolve_gridded_chunk_size(10, 3012, 192, 288) == 10  # capped
+
+    # Malformed values silently fall back to auto-size (so a typo in a batch
+    # script can't crash METEOR at import time).
+    monkeypatch.setenv("METEOR_GRIDDED_CHUNK_SIZE", "not-an-int")
+    fallback = _resolve_gridded_chunk_size(100, 3012, 192, 288)
+    assert fallback == 4
+    monkeypatch.setenv("METEOR_GRIDDED_CHUNK_SIZE", "0")
+    assert _resolve_gridded_chunk_size(100, 3012, 192, 288) == 4
 
 
 def test_get_default_config():

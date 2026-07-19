@@ -19,7 +19,11 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import xarray as xr
 from scipy import stats
-from scipy.special import digamma, gammaincinv, polygamma
+from scipy.special import (  # pylint: disable=no-name-in-module
+    digamma,
+    gammaincinv,
+    polygamma,
+)
 
 
 def _resolve_gamma_ppf_threads():
@@ -105,7 +109,6 @@ def _vectorized_gamma_mle(data, max_iter=8, tol=1e-8):
     shape, scale : ndarray (n_series,)
     """
     x = np.asarray(data, dtype=np.float64)
-    n_obs = x.shape[0]
 
     valid = (x > 0) & np.isfinite(x)
     n_valid = valid.sum(axis=0)
@@ -124,9 +127,7 @@ def _vectorized_gamma_mle(data, max_iter=8, tol=1e-8):
 
     # Choi-Wette initial guess for k (only used where fittable)
     with np.errstate(invalid="ignore", divide="ignore"):
-        k = (3.0 - s + np.sqrt(np.maximum((s - 3.0) ** 2 + 24.0 * s, 0.0))) / (
-            12.0 * s
-        )
+        k = (3.0 - s + np.sqrt(np.maximum((s - 3.0) ** 2 + 24.0 * s, 0.0))) / (12.0 * s)
     k = np.where(fittable, k, 1.0)
     k = np.clip(k, 1e-6, 1e6)
 
@@ -144,6 +145,7 @@ def _vectorized_gamma_mle(data, max_iter=8, tol=1e-8):
     shape = np.where(fittable, k, 1.0)
     scale = np.where(fittable, mean_x / shape, np.where(n_valid > 0, mean_x, 0.01))
     return shape, scale
+
 
 # =============================================================================
 # PATH 1: 1D Transform (for regional/global mean time series)
@@ -322,8 +324,6 @@ def fit_distribution_parameters_3d(spatial_data, distribution="gamma"):
             f"4D (n_ensemble, n_time, n_lat, n_lon), got shape {data_array.shape}"
         )
 
-    n_spatial = n_lat * n_lon
-
     if distribution == "gaussian":
         # Fit Gaussian: simple mean and std at each grid point
         mean_params = np.mean(data_reshaped, axis=0).reshape(n_lat, n_lon)
@@ -458,9 +458,7 @@ def apply_distribution_transform(
         if target_dist == "gamma":
             shape_grid = target_params["shape"].flatten()
             scale_grid = target_params["scale"].flatten()
-            transformed_flat = _threaded_gamma_ppf_3d(
-                uniform, shape_grid, scale_grid
-            )
+            transformed_flat = _threaded_gamma_ppf_3d(uniform, shape_grid, scale_grid)
         else:
             raise ValueError(
                 f"Only 'gamma' distribution supported for 3D data, got {target_dist}"

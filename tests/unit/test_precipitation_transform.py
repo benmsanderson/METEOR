@@ -2,8 +2,6 @@
 Unit tests for precipitation transform functions.
 """
 
-import os
-
 import numpy as np
 import pytest
 import xarray as xr
@@ -137,12 +135,14 @@ def test_vectorized_gamma_mle_handles_invalid_columns():
     rather than propagating NaN or crashing.
     """
     n_obs = 100
-    data = np.column_stack([
-        np.random.default_rng(0).gamma(2.0, 1.0, size=n_obs),
-        np.zeros(n_obs),                     # all zeros -> not fittable
-        np.full(n_obs, np.nan),              # all NaN -> not fittable
-        np.array([1.0] + [0.0] * (n_obs - 1)),  # single positive value
-    ])
+    data = np.column_stack(
+        [
+            np.random.default_rng(0).gamma(2.0, 1.0, size=n_obs),
+            np.zeros(n_obs),  # all zeros -> not fittable
+            np.full(n_obs, np.nan),  # all NaN -> not fittable
+            np.array([1.0] + [0.0] * (n_obs - 1)),  # single positive value
+        ]
+    )
 
     shape, scale = _vectorized_gamma_mle(data)
 

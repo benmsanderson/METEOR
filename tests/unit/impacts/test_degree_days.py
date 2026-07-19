@@ -95,9 +95,7 @@ def test_degree_days_calculate_batches_realizations():
         + 8.0 * np.sin(2 * np.pi * t / 12.0)[None, :]
         + 0.4 * rng.standard_normal((n_real, n_month))
     )
-    ds = xr.DataArray(
-        temps, dims=["realization", "month"], coords={"month": t}
-    )
+    ds = xr.DataArray(temps, dims=["realization", "month"], coords={"month": t})
 
     # Per-realization loop (reference)
     serial_hdd = np.stack(

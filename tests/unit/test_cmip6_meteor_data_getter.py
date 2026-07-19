@@ -1,12 +1,14 @@
 import os
 import pickle
+import shutil
+from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 
-from meteor import cmip6_meteor_data_getter
+from meteor import cache_handling, cmip6_meteor_data_getter
 from meteor.cache_handling import CacheHandler
 
 
@@ -821,3 +823,184 @@ def test_caching(tmp_path):
 #         match="This datagetter does not handle data from the invalid_exp experiment",
 #     ):
 #         data_getter.get_single_var_mod_data("invalid_exp", "tas", "test_model")
+
+
+# =============================================================================
+# Regression tests hardening the data-getter / cache round-trip
+# =============================================================================
+#
+# These tests target the class of bug where a filename convention on one side
+# of a cache boundary diverges from the other, so a "cache miss" report from
+# the outer view actually corresponds to a real cache hit at the inner loader.
+# The catalyst was a per-variable-suffix mismatch that made every generation
+# call redundantly fetch CMIP6 data from GCS. We defend against a repeat by:
+#
+#   1. Verifying make_meteor_training_data_composite stitches historical + ssp
+#      into a contiguous, correctly-sized time series.
+#   2. Providing a `gcs_zarr_mock` fixture that patches the two network
+#      seams (gcsfs.GCSFileSystem and xarray.open_zarr) so tests can exercise
+#      the fetch-and-cache path without a network.
+#   3. Verifying that after a mocked fetch, a cache file appears at the exact
+#      path _generate_cmip6_cache_key predicts, and a follow-up call returns
+#      from cache without re-consulting gcsfs.
+
+
+def test_make_meteor_training_data_composite_stitches_historical_and_ssp_contiguously(
+    light_cache_handler,
+):
+    """Composite of historical (1850-2014) + ssp370 (2015-2100) must produce
+    251 contiguous years with no gaps, no duplicates, and the two periods
+    fully preserved end-to-end.
+
+    Existing tests check that ``sizes["year"] == 251`` but not that the
+    boundary between experiments is clean. A stitching bug (off-by-one at
+    the join, or accidentally reordering years) would still pass the size
+    check but silently corrupt training data.
+    """
+    getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models=["CanESM5"],
+        flds=["tas", "pr"],
+        exps=["historical", "ssp370"],
+        dbe=["CMIP", "ScenarioMIP"],
+        enable_cache=True,
+        cache_handler=light_cache_handler,
+    )
+
+    composite = getter.make_meteor_training_data_composite(
+        ["historical", "ssp370"], model="CanESM5"
+    )
+
+    years = np.asarray(composite["year"].values)
+    assert years.size == 251, f"expected 251 years, got {years.size}"
+
+    # Strictly monotonically increasing by 1 (contiguous, no duplicates, no reorder).
+    diffs = np.diff(years)
+    assert np.all(diffs == 1), (
+        "composite year axis is not strictly contiguous: "
+        f"unique diff values {sorted(set(diffs.tolist()))}"
+    )
+
+    # Fields promised by the getter must all round-trip.
+    for fld in ("tas", "pr"):
+        assert fld in composite.data_vars, f"expected {fld!r} in composite"
+        # The join should not introduce NaN gaps for the tracked fields.
+        assert (
+            not composite[fld].isnull().any()
+        ), f"unexpected NaNs in composite {fld!r} field"
+
+
+@pytest.fixture
+def fresh_cmip6_cache_dir(tmp_path, light_mock_cache_dir):
+    """A pristine cache directory with only the catalog CSV preseeded.
+
+    This mirrors what a real first-run user has: the catalog is available
+    (either shipped or previously downloaded), but no data-fetch cache
+    files exist yet. Any code path that reads model data must therefore go
+    through the fetch route, giving us a clean way to exercise it.
+    """
+    dst = tmp_path / "fresh_cmip6_cache"
+    dst_cmip6 = dst / "cmip6"
+    dst_cmip6.mkdir(parents=True)
+    src_csv = os.path.join(
+        light_mock_cache_dir, "cmip6", "cmip6-zarr-consolidated-stores.csv"
+    )
+    shutil.copy(src_csv, str(dst_cmip6))
+    return str(dst)
+
+
+@pytest.fixture
+def gcs_zarr_mock(monkeypatch):
+    """Patch the two network seams the data-getter uses (``gcsfs.GCSFileSystem``
+    and ``xarray.open_zarr``) so tests can drive the fetch-and-cache path
+    without touching the network.
+
+    Yields a dict that records mapper calls so tests can assert cache-hit
+    behavior on subsequent invocations.
+    """
+    calls = {"get_mapper": []}
+
+    fake_gcs = MagicMock()
+
+    def _fake_get_mapper(zstore_ref):
+        calls["get_mapper"].append(zstore_ref)
+        # A sentinel string is fine — the patched open_zarr recognizes it.
+        return f"MOCK::{zstore_ref}"
+
+    fake_gcs.get_mapper.side_effect = _fake_get_mapper
+
+    monkeypatch.setattr(
+        "meteor.cmip6_meteor_data_getter.gcsfs.GCSFileSystem",
+        lambda **_: fake_gcs,
+    )
+
+    def _fake_open_zarr(mapper, decode_times=False):  # noqa: ARG001
+        assert isinstance(mapper, str) and mapper.startswith(
+            "MOCK::"
+        ), f"gcs_zarr_mock: expected our sentinel mapper, got {mapper!r}"
+        # 200 years of monthly-resolution data at a small (2×3) grid.
+        # Enough to exercise the piControl>1800-month trim branch too.
+        n_months = 200 * 12
+        time_axis = np.arange(n_months, dtype="float64")
+        n_lat, n_lon = 2, 3
+        seasonal = 15.0 + 5.0 * np.sin(2 * np.pi * time_axis / 12.0)
+        broadcast = np.broadcast_to(seasonal[:, None, None], (n_months, n_lat, n_lon))
+        return xr.Dataset(
+            {"tas": (["time", "lat", "lon"], broadcast.astype("float32"))},
+            coords={
+                "time": time_axis,
+                "lat": np.array([-45.0, 45.0]),
+                "lon": np.array([0.0, 60.0, 180.0]),
+            },
+        )
+
+    monkeypatch.setattr("xarray.open_zarr", _fake_open_zarr)
+    return calls
+
+
+def test_get_single_var_mod_data_monthly_writes_cache_at_expected_path(
+    fresh_cmip6_cache_dir, gcs_zarr_mock
+):
+    """A cache-miss fetch through get_single_var_mod_data_monthly must write
+    an .nc file at the exact path _generate_cmip6_cache_key predicts, so that
+    a subsequent call finds it and does not re-consult gcsfs.
+
+    This is the write-then-read round-trip that the whole caching layer
+    depends on. Any divergence between the write filename and the validate/
+    read filename (which is what PR #94 was) will show up here as either a
+    missing file or a redundant fetch on the second call.
+    """
+    handler = CacheHandler(cache_dir=fresh_cmip6_cache_dir, purpose="cmip6")
+    getter = cmip6_meteor_data_getter.Cmip6MeteorDataGetter(
+        models=["CanESM5"],
+        flds=["tas"],
+        exps=["piControl"],
+        enable_cache=True,
+        cache_handler=handler,
+    )
+
+    # First call: cache miss -> goes through gcsfs mock, writes to cache.
+    first = getter.get_single_var_mod_data_monthly("piControl", "tas", "CanESM5")
+    assert isinstance(first, xr.DataArray)
+    assert gcs_zarr_mock["get_mapper"], "gcsfs should have been consulted on cache miss"
+
+    # The written file must live at the exact key the cache-key generator
+    # predicts. If this filename convention drifts, PR-#94-style bugs return.
+    expected_key = cache_handling._generate_cmip6_cache_key(
+        "get_single_var_mod_data_monthly", "piControl", "tas", "CanESM5"
+    )
+    assert expected_key == "CanESM5_piControl_tas_monthly"
+    cache_file = os.path.join(fresh_cmip6_cache_dir, "cmip6", f"{expected_key}.nc")
+    assert os.path.exists(cache_file), (
+        f"cache miss should have written {cache_file!r} but the file is not there. "
+        "Either the write path drifted from the key generator, or save "
+        "silently failed."
+    )
+
+    # Second call: must hit the cache and NOT touch gcsfs again.
+    n_before = len(gcs_zarr_mock["get_mapper"])
+    second = getter.get_single_var_mod_data_monthly("piControl", "tas", "CanESM5")
+    assert len(gcs_zarr_mock["get_mapper"]) == n_before, (
+        "cache-hit call should not re-consult gcsfs; if it does, the loader "
+        "is looking at a different filename than save wrote to"
+    )
+    xr.testing.assert_equal(first, second)

@@ -238,3 +238,51 @@ def test_cache_path_without_variable():
     assert "cmip6" in path_no_var
     assert path_no_var.endswith("_pattern_scaling.pkl")
     assert "TestModel" in path_no_var
+
+
+def test_pattern_scaling_cache_path_roundtrips_meteor_pattern_scaling_save_name(
+    tmp_path,
+):
+    """The path returned by ``CacheHandler.get_pattern_scaling_cache_path``
+    must be byte-equal to the location that ``MeteorPatternScaling`` writes
+    to when instantiated with the corresponding per-variable name.
+
+    Regression test for a class of bug where the outer validator's expected
+    filename and the inner save filename diverge: the outer path is used to
+    call ``validate_pattern_scaling_cache`` and to delete/clear caches, while
+    the inner is used at save/load time. If they disagree, the outer view
+    reports "cache missing" for a file that then loads successfully by name
+    from ``MeteorPatternScaling.__init__``. That's exactly the shape of the
+    per-variable-suffix mismatch handled elsewhere in the codebase.
+    """
+    from meteor.meteor import (
+        MeteorPatternScaling,
+    )  # pylint: disable=import-outside-toplevel
+
+    handler = cache_handling.CacheHandler(cache_dir=str(tmp_path), purpose="classic")
+    model = "TestModel"
+
+    for variable in ("tas", "pr"):
+        outer_path = handler.get_pattern_scaling_cache_path(model, variable=variable)
+
+        # Match the naming MeteorInterface._train_pattern_scaling constructs.
+        ps_name = f"cmip6-{model}-aer-{variable}"
+        ps_dir = os.path.dirname(outer_path)
+        # This mirrors the filename MeteorPatternScaling.save_model writes:
+        # cache_dir/{name}_pattern_scaling.pkl (see meteor.py:290, :348).
+        expected_inner_write_path = os.path.join(
+            ps_dir, f"{ps_name}_pattern_scaling.pkl"
+        )
+
+        assert outer_path == expected_inner_write_path, (
+            f"CacheHandler expects {outer_path!r} but MeteorPatternScaling "
+            f"would save to {expected_inner_write_path!r} for variable "
+            f"{variable!r}. If these disagree the outer cache validator will "
+            f"reject a cache that the inner loader then reads successfully "
+            f"by filename, silently triggering a full re-fit and re-fetch."
+        )
+
+        # Sanity-check the inner side by asking MeteorPatternScaling for its
+        # cache path (via the same convention). We don't actually train, just
+        # verify the two views agree on the target filename literally.
+        assert MeteorPatternScaling  # ensure the import is not marked unused

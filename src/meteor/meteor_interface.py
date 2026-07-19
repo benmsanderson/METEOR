@@ -25,7 +25,11 @@ from .geo_data_utils import (
 )
 from .impacts import DegreeDaysCalculator
 from .meteor import MeteorPatternScaling
-from .noise_generator import train_noise_model_from_cmip6, validate_noise_model_cache
+from .noise_generator import (
+    find_time_dim_and_cut,
+    train_noise_model_from_cmip6,
+    validate_noise_model_cache,
+)
 from .scm_input_lib import (
     load_emissions_concentrations,
     load_emissions_concentrations_from_name,
@@ -1689,9 +1693,7 @@ class MeteorInterface:
                     s_idx = year_to_month_idx(cs)
                     e_idx = year_to_month_idx(ce + 1)
                     if 0 <= s_idx and e_idx <= n_months:
-                        slice_specs.append(
-                            ((s_idx, e_idx, True), s_idx, e_idx, True)
-                        )
+                        slice_specs.append(((s_idx, e_idx, True), s_idx, e_idx, True))
             # Deduplicate: a year listed under multiple output kinds only needs
             # one streaming slot; the results dict lookup pulls from the same key.
             seen = set()
@@ -1975,14 +1977,19 @@ class MeteorInterface:
 
         n_realizations, n_time, _ = stochastic_pcs_chunk.shape
 
-        # Seasonal cycle (shared across chunk) - noise_only=True path
+        # Seasonal cycle (shared across chunk) - noise_only=True path.
+        # We call two "protected" helpers on the noise model here rather than
+        # duplicating the harmonic + physical-components math: this method is
+        # the streaming counterpart of MeteorNoiseGenerator.generate_realization
+        # (which uses the same helpers directly) and is tightly coupled to
+        # that class' internal contract.
+        # pylint: disable=protected-access
         time = np.arange(n_time)
         X = noise_model._create_harmonic_features(time, monthly_warming)
         seasonal_cycle = noise_model.seasonal_model.predict(X)
         intercept_effect = noise_model.seasonal_model.intercept_
         temp_effect = (
-            noise_model.seasonal_model.coef_[:, 0]
-            * monthly_warming[:, np.newaxis]
+            noise_model.seasonal_model.coef_[:, 0] * monthly_warming[:, np.newaxis]
         )
         seasonal_cycle_np = (
             seasonal_cycle - intercept_effect[np.newaxis, :] - temp_effect
@@ -1993,7 +2000,6 @@ class MeteorInterface:
         base_values = monthly_prediction.values
         if base_values.ndim == 4:
             base_values = base_values.squeeze()
-        from .noise_generator import find_time_dim_and_cut
         base_values = find_time_dim_and_cut(base_values, n_time, n_lat, n_lon)
         base_clim_np = base_values.reshape(n_time, n_lat, n_lon)
 
@@ -2133,9 +2139,7 @@ class MeteorInterface:
 
         # -------- Pass 2: transform + extract requested slices --------
         if verbose:  # pragma: no cover
-            print(
-                f"      → Pass 2/2: streaming transform + slice extraction"
-            )
+            print("      → Pass 2/2: streaming transform + slice extraction")
 
         # Allocate output arrays keyed by slice key.
         outputs = {}
@@ -2157,9 +2161,7 @@ class MeteorInterface:
                     "lat": noise_model.coords["lat"],
                     "lon": noise_model.coords["lon"],
                 }
-            outputs[key] = (
-                np.empty(out_shape, dtype=np.float64), dims, coords
-            )
+            outputs[key] = (np.empty(out_shape, dtype=np.float64), dims, coords)
 
         for start in chunk_starts:
             end = min(start + chunk_size, n_realizations)

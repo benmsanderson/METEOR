@@ -774,14 +774,15 @@ def test_caching(tmp_path):
     assert "Error reading cached file" in info["message"]
 
     # variable= must be honored so that per-variable caches (which
-    # MeteorPatternScaling saves under `cmip6-{model}-aer-{variable}`) round-trip.
+    # MeteorPatternScaling saves under `cmip6-{model}-aer-{variable}` and which
+    # only carry that one variable in patternflds) round-trip.
     # Without this, MeteorInterface prepares training data on every call because
     # this check returns "invalid" even when the pkl loads fine by filename.
     per_var_file = tmp_path / "per_variable.pkl"
     per_var_name = "cmip6-ModelA-aer-tas"
     with open(per_var_file, "wb") as handle:
         pickle.dump(
-            {"name": per_var_name, "patternflds": {"tas": None, "pr": None}},
+            {"name": per_var_name, "patternflds": {"tas": None}},
             handle,
         )
 
@@ -792,7 +793,8 @@ def test_caching(tmp_path):
     assert is_valid is False
     assert "Model name mismatch" in info["message"]
 
-    # variable="tas": matches; cache is accepted.
+    # variable="tas": matches name AND expected_vars is narrowed to just
+    # {"tas"} instead of self.flds, so the single-variable pkl is accepted.
     is_valid, cached_model, info = data_getter.validate_pattern_scaling_cache(
         str(per_var_file), "ModelA", variable="tas"
     )

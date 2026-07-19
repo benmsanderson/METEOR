@@ -23,6 +23,7 @@ The changes listed in this file are categorised as follows:
 
 ### Fixed
 
+- ``Cmip6MeteorDataGetter.validate_pattern_scaling_cache`` now accepts an optional ``variable`` argument matching the per-variable suffix ``MeteorPatternScaling`` saves under (``cmip6-{model}-aer-{variable}``). Without it, a cache that ``MeteorPatternScaling.__init__`` loads successfully by filename was reported as "invalid" by the outer validator, causing ``MeteorInterface`` to run ``prepare_pattern_scaling_training_data`` (which fetches and assembles CMIP6 data over the network) on every generation call and immediately discard the result. Threading ``variable=`` through ``_train_pattern_scaling`` fixes the mismatch and eliminates the redundant work (~13–18 s per generation call in the NorESM2-MM profiling workloads).
 - Variable length timeseries now works also when don't have "year" as time dimension.
 - Fixes to generate annual and monthly gridded ensembles with unified noise and preserving more of the variance.
 

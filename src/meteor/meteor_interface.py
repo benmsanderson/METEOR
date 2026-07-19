@@ -405,9 +405,14 @@ class MeteorInterface:
             self.model, variable=variable
         )
 
-        # Check cache
+        # Check cache. The variable suffix must match the name
+        # MeteorPatternScaling saves under (``cmip6-{model}-aer-{variable}``);
+        # without it the validator returns "invalid" for a cache that then
+        # loads successfully by filename, causing wasted training-data prep.
         is_valid, cached_model, info = (  # pylint: disable=unused-variable
-            self.data_getter.validate_pattern_scaling_cache(cache_file, self.model)
+            self.data_getter.validate_pattern_scaling_cache(
+                cache_file, self.model, variable=variable
+            )
         )
 
         if is_valid:

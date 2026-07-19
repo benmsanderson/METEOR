@@ -773,6 +773,33 @@ def test_caching(tmp_path):
     assert cached_model is None
     assert "Error reading cached file" in info["message"]
 
+    # variable= must be honored so that per-variable caches (which
+    # MeteorPatternScaling saves under `cmip6-{model}-aer-{variable}`) round-trip.
+    # Without this, MeteorInterface prepares training data on every call because
+    # this check returns "invalid" even when the pkl loads fine by filename.
+    per_var_file = tmp_path / "per_variable.pkl"
+    per_var_name = "cmip6-ModelA-aer-tas"
+    with open(per_var_file, "wb") as handle:
+        pickle.dump(
+            {"name": per_var_name, "patternflds": {"tas": None, "pr": None}},
+            handle,
+        )
+
+    # No variable= arg: legacy validator, mismatches per-variable name.
+    is_valid, _, info = data_getter.validate_pattern_scaling_cache(
+        str(per_var_file), "ModelA"
+    )
+    assert is_valid is False
+    assert "Model name mismatch" in info["message"]
+
+    # variable="tas": matches; cache is accepted.
+    is_valid, cached_model, info = data_getter.validate_pattern_scaling_cache(
+        str(per_var_file), "ModelA", variable="tas"
+    )
+    assert is_valid is True
+    assert cached_model is not None
+    assert "Cache valid" in info["message"]
+
 
 # def test_error_handling_for_invalid_experiments_and_fields():
 #     """Test error handling for invalid experiments and fields to hit lines 585-593."""

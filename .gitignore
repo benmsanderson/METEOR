@@ -167,3 +167,6 @@ bulk_cache_checkpoint.json
 paper_figures/*
 
 notebooks/output_data/*
+
+# Fastmip branch things to ignore
+scripts/FastMIP_phase2_trainMETEOR_noisetest.py

@@ -4,9 +4,8 @@ import xarray as xr
 import pandas as pd
 import regionmask
 import glob
-import random
-import flox
 from cdo import Cdo
+from datetime import datetime
 
 # =========================================================
 # SETUP
@@ -17,13 +16,19 @@ scenario_list = ['SSP2 - Low Emissions', 'SSP2 - Medium Emissions', 'SSP3 - High
 scenarios_short = ['L','M','H','VL']
 quantile_list = [0.01, 0.025, 0.05, 0.33, 0.5, 0.67, 0.95, 0.975, 0.99] # 1%, 2.5%, 5%, 33%, median, 67%, 95%, 97.5%, 99%
 
-output_dir = '../data/FASTMIP_phase2/METEOR_emulations/raw/'
-aggregate_dir = '../data/FASTMIP_phase2/METEOR_emulations/aggregated/'
-processed_dir = '../data/FASTMIP_phase2/METEOR_emulations/processed/'
+base_dir = '/div/no-backup-nac/users/maurad/METEOR/data/FASTMIP_phase2/METEOR_emulations/'
+
+output_dir = f'{base_dir}raw/'
+aggregate_dir = f'{base_dir}aggregated/'
+processed_dir = f'{base_dir}processed/'
 
 os.makedirs(aggregate_dir, exist_ok=True)
 os.makedirs(processed_dir, exist_ok=True)
 
+# (needed for Marit's data)
+# if there are mutliple versions of METEOR raw output, filter for those made after this date:
+#output_dir = '/div/no-backup-nac/users/masan/METEOR/data/FASTMIP_phase2/METEOR_emulations/raw/'
+#file_cutoff = datetime(2026, 6, 29).timestamp()
 
 # =========================================================
 # Some utils
@@ -89,15 +94,9 @@ def compute_regional_means(ds, ar6_mask):
     return da_regions
 
 
-def save_outputs(tas, pr, processed_dir, aggregation, quantity, scenario_short_name=None, fair_realisation_numbers=None):
+def save_outputs(tas, pr, processed_dir, aggregation, quantity, scenario_short_name=None):
 
-    # add METEOR metadata:
-    tas = tas.assign_attrs({
-        'scenario': f'{aggregation} {quantity} for scenario {scenario_short_name if scenario_short_name is not None else "cross-scenario"}',
-        'FAIR ensemble members': fair_realisation_numbers.tolist(),
-    })
-    pr = pr.assign_attrs(tas.attrs)
-
+    # attributed are added later, with script FastMIP_phase2_attrs.py
     tas = tas.compute()
     pr = pr.compute()
 
@@ -254,8 +253,11 @@ for scenario_short_name in scenarios_short:
     for esm in ESM_list:
 
         # get list of files for this ESM and scenario:
-        esm_files = sorted(glob.glob(f"{output_dir}METEOR_{esm}_{scenario_short_name}_scaledtoFAIRens_*.nc"))
-
+        esm_files = sorted(f for f in glob.glob(f"{output_dir}METEOR_{esm}_{scenario_short_name}_scaledtoFAIRens_*.nc")) #if os.path.getctime(f) > file_cutoff)
+        print(len(esm_files), 'files found for ESM ', esm, ' and scenario ', scenario_short_name)
+        if len(esm_files) > 20:
+            print('Too many files found for ESM ', esm, ' and scenario ', scenario_short_name, ' (', len(esm_files), '), skipping this ESM.')
+            continue
         # check for cdo weights file for this ESM, and create if it doesn't exist
         cdo = Cdo()
         target_grid = '../data/FASTMIP_phase2/g025.txt'
@@ -292,6 +294,7 @@ for scenario_short_name in scenarios_short:
     scenario_filename = f"{aggregate_dir}METEOR_{scenario_short_name}_scaledtoFAIR_combinedESMs_regridded.nc"
     with xr.open_dataset(scenario_filename) as ds_regridded:
 
+
         ar6=regionmask.defined_regions.ar6.land
         ar6_mask=ar6.mask(ds_regridded.lat, ds_regridded.lon).persist()
 
@@ -301,39 +304,39 @@ for scenario_short_name in scenarios_short:
 
         # 0. Check that dimension sizes are as expected.
         # TO-DO: the expected size of 'fair_realisation' dimension is hard coded to 20, this should probably be updated.     
-        if ds_regridded.sizes['fair_realisation'] > 20:
-            print('Densifying FAIR realisation dimension')
-            ds_regridded = ds_regridded.groupby("esm").map(densify_fair)
+        #if ds_regridded.sizes['fair_realisation'] > 20:
+        #    print('Densifying FAIR realisation dimension')
+        #    ds_regridded = ds_regridded.groupby("esm").map(densify_fair) #this was messing up the attrubutes, don't use here as is. 
 
         # 1. Random subset of 10 members across both FAIR and noise realisations:
         print('starting output for scenario ', scenario_short_name)
         subset_ds = random_subset(ds_regridded, n=10)
-        save_outputs(subset_ds['tas'].to_dataset(promote_attrs=True), subset_ds['pr'].to_dataset(promote_attrs=True), processed_dir, 'gridcell', 'selected-realisations', scenario_short_name, np.unique(subset_ds['fair_realisation'].values.astype(int)))
+        save_outputs(subset_ds['tas'].to_dataset(promote_attrs=True), subset_ds['pr'].to_dataset(promote_attrs=True), processed_dir, 'gridcell', 'selected-realisations', scenario_short_name)
 
 
         # 2. Gridwise mean and quantiles by ESM:
         tas, pr = compute_quantiles(ds_regridded, quantile_list, 'quantiles-by-ESM', 'gridcell')
-        save_outputs(tas, pr, processed_dir, 'gridcell', 'quantiles-by-ESM', scenario_short_name, all_fair_realisation_numbers)
+        save_outputs(tas, pr, processed_dir, 'gridcell', 'quantiles-by-ESM', scenario_short_name)
 
         # 3. Regional mean and quantiles by ESM:
         tas, pr = compute_quantiles(ds_regridded, quantile_list, 'quantiles-by-ESM', 'regional', ar6_mask=ar6_mask)
-        save_outputs(tas, pr, processed_dir, 'regional', 'quantiles-by-ESM', scenario_short_name, all_fair_realisation_numbers)
+        save_outputs(tas, pr, processed_dir, 'regional', 'quantiles-by-ESM', scenario_short_name)
 
         # 4. Gridwise mean and quantiles across ESMs:
         tas, pr = compute_quantiles(ds_regridded, quantile_list, 'quantiles-across-ESM', 'gridcell')
-        save_outputs(tas, pr, processed_dir, 'gridcell', 'quantiles-across-ESM', scenario_short_name, all_fair_realisation_numbers)
+        save_outputs(tas, pr, processed_dir, 'gridcell', 'quantiles-across-ESM', scenario_short_name)
 
         # 5. Regional mean and quantiles across ESMs:
         tas, pr = compute_quantiles(ds_regridded, quantile_list, 'quantiles-across-ESM', 'regional', ar6_mask=ar6_mask)
-        save_outputs(tas, pr, processed_dir, 'regional', 'quantiles-across-ESM', scenario_short_name, all_fair_realisation_numbers)
+        save_outputs(tas, pr, processed_dir, 'regional', 'quantiles-across-ESM', scenario_short_name)
 
         # 6. Uncertainty decomposition by region:
         tas, pr = compute_uncertainty_per_scenario(ds_regridded, 'regional', ar6_mask=ar6_mask)
-        save_outputs(tas, pr, processed_dir, 'regional', 'uncertainty', scenario_short_name, all_fair_realisation_numbers)
+        save_outputs(tas, pr, processed_dir, 'regional', 'uncertainty', scenario_short_name)
 
         # 7. Uncertainty decomposition gridwise:
         tas, pr = compute_uncertainty_per_scenario(ds_regridded, 'gridcell')
-        save_outputs(tas, pr, processed_dir, 'gridcell', 'uncertainty', scenario_short_name, all_fair_realisation_numbers)
+        save_outputs(tas, pr, processed_dir, 'gridcell', 'uncertainty', scenario_short_name)
 
 
 print('starting across-scenario outputs')
@@ -356,10 +359,10 @@ if combined_ds.sizes['fair_realisation'] > 20:
 # 8. Uncertainty decomposition by region, across scenarios:
 tas, pr = compute_uncertainty_across_scenarios(combined_ds, 'regional', ar6_mask=ar6_mask)
 print('saving across-scenario uncertainty decomposition by region')
-save_outputs(tas, pr, processed_dir, 'regional', 'across-scenario-uncertainty', scenario_short_name=None, fair_realisation_numbers=all_fair_realisation_numbers)
+save_outputs(tas, pr, processed_dir, 'regional', 'across-scenario-uncertainty', scenario_short_name=None)
 
 # 9. Uncertainty decomposition gridwise, across scenarios:
 tas, pr = compute_uncertainty_across_scenarios(combined_ds, 'gridcell')
 print('saving across-scenario uncertainty decomposition gridwise')
-save_outputs(tas, pr, processed_dir, 'gridcell', 'across-scenario-uncertainty', scenario_short_name=None, fair_realisation_numbers=all_fair_realisation_numbers)
+save_outputs(tas, pr, processed_dir, 'gridcell', 'across-scenario-uncertainty', scenario_short_name=None)
 

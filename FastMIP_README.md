@@ -8,10 +8,10 @@ April 2026 by Maura Dewey (maura.dewey@cicero.oslo.no)
 		c. Disconnect from the tmux session and let it run. This will train METEOR and create all the raw METEOR output for the given list of ESMs and scenarios (takes ~10 hrs for Tier 1, if also training new METEOR instances)
 
 	2. Create FastMIP specific output files. This is done with a conda env fastmip_env
-		a. setup modules, deactivate METEOR venv, and activate conda environment with: ". FastMIP_env_setup.sh"
+		a. setup modules, deactivate METEOR venv, and activate conda environment with: "FastMIP_env_setup.sh"
 		b. cd to scripts folder and create FastMIP specific output files with: "python FastMIP_phase2_makeoutput.py"
 		c. disconnect from the tmux session and let it run (takes a couple hours). 
-		d. Once the output is done, update netCDF attributes with: "python FastMIP_phase2_atts.py"
+		d. Once the output is done, update netCDF attributes with: "python FastMIP_phase2_attrs.py"
 
 	3. Create plots 
 		The notebook FastMIP_phase2_plots.ipynb will create all the plots from the Fastmip phase2 example notebook (https://github.com/sarasita/fastMIP/blob/main/requested_output/tour_through_requested_output.ipynb) with METEOR results. 

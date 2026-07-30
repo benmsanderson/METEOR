@@ -9,10 +9,11 @@ import re
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
-from meteor.ensemble_output import EnsembleOutput
+from meteor.ensemble_output import EnsembleOutput, VariableOutput
 from meteor.meteor_interface import (
     GenerationInputs,
     MeteorInterface,
@@ -1029,3 +1030,544 @@ def test_apply_gridded_transform_drops_singleton_ens_dim(interface_factory):
     assert result.shape == (2, 12, 2, 2)
     # ... and the gamma transform guarantees non-negative precipitation.
     assert np.all(result.values >= 0)
+
+
+def test_tabids_are_extended_when_tas_is_not_requested():
+    """A user-supplied tabid list must stay aligned with the implicit 'tas' field."""
+    with patch("meteor.meteor_interface.Cmip6MeteorDataGetter") as mock_getter_class:
+        MeteorInterface(
+            model="TestModel",
+            variables=["pr"],
+            cache_dir="/tmp/test",
+            data_getter_kwargs={"tabids": "Amon"},
+        )
+
+    _, call_kwargs = mock_getter_class.call_args
+    assert call_kwargs["flds"] == ["pr", "tas"]
+    # One tabid per field, so the extra 'tas' request gets its own entry.
+    assert call_kwargs["tabids"] == ["Amon", "Amon"]
+
+
+def test_generate_ensemble_outputs_attaches_crop_impacts(interface_factory):
+    """Crop yields depend on several variables, so they live on the EnsembleOutput."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+    _set_trained(interface, ["tas"])
+
+    interface._generate_timeseries = MagicMock(
+        return_value={"global": np.zeros((1, 12))}
+    )
+    crop_impacts = {"maize": {"global": np.ones(3)}}
+    interface._apply_crop_yields = MagicMock(return_value=crop_impacts)
+
+    ensemble = interface.generate_ensemble_outputs(
+        scenario="ssp245",
+        start_year=2020,
+        end_year=2022,
+        n_realizations=1,
+        timeseries=["global"],
+        impacts={"crop_yield": {"crops": ["maize"]}},
+        verbose=False,
+    )
+
+    assert ensemble.crop_impacts == crop_impacts
+    # The requested time series aggregations are forwarded to the crop emulator.
+    _, call_kwargs = interface._apply_crop_yields.call_args
+    assert call_kwargs["timeseries_keys"] == ["global"]
+
+
+def test_pattern_scaling_custom_scenario_clips_and_extends(interface_factory):
+    """Custom forcing is padded to 2100 for the SCM, but output is clipped to data."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+    _set_trained(interface, ["tas"])
+
+    years = list(range(2000, 2051))
+    em_data = pd.DataFrame({"CO2": np.zeros(len(years))}, index=years)
+    conc_data = pd.DataFrame({"CO2": np.zeros(len(years))}, index=years)
+
+    annual_prediction = xr.DataArray(
+        np.zeros(101), dims=["year"], coords={"year": np.arange(2000, 2101)}
+    )
+    interface.pattern_models["tas"].predict_from_combined_experiment.return_value = {
+        "tas": annual_prediction
+    }
+    interface.pattern_models["tas"].to_monthly.return_value = xr.DataArray(
+        np.zeros(101 * 12), dims=["month"], coords={"month": np.arange(101 * 12)}
+    )
+
+    with (
+        patch(
+            "meteor.meteor_interface.parse_scenario_input",
+            return_value={
+                "type": "custom",
+                "name": "my_scenario",
+                "emissions": "em.txt",
+                "concentrations": "conc.txt",
+            },
+        ),
+        patch(
+            "meteor.meteor_interface.load_emissions_concentrations",
+            return_value=(em_data, conc_data),
+        ),
+        patch(
+            "meteor.meteor_interface.global_mean",
+            return_value=xr.DataArray(np.zeros(101 * 12), dims=["month"]),
+        ),
+    ):
+        pattern = interface._get_or_compute_pattern_scaling(
+            "tas",
+            {"emissions": "em.txt"},
+            start_year=1990,
+            end_year=2060,
+            verbose=False,
+        )
+
+    # Forcing is held constant out to 2100 so the SCM can run its default horizon.
+    assert pattern.em_data.index[-1] == 2100
+    assert pattern.conc_data.index[-1] == 2100
+    # ... while the output window is clipped to the years the data actually covers.
+    assert pattern.base_year == 2000
+    assert pattern.start_month_idx == 0
+    assert pattern.end_month_idx == (2050 - 2000 + 1) * 12
+
+
+def _annual_field(values, years):
+    """Single-gridpoint annual field so the real global_mean can be used."""
+    return xr.DataArray(
+        np.array(values, dtype=float).reshape(len(years), 1, 1),
+        dims=["year", "lat", "lon"],
+        coords={"year": years, "lat": [0.0], "lon": [0.0]},
+    )
+
+
+def test_timeseries_scaling_uses_tas_pattern_for_other_variables(interface_factory):
+    """Non-temperature variables are scaled by the *temperature* response ratio."""
+    interface, _ = interface_factory(model="TestModel", variables=("pr",))
+    _set_trained(interface, ["pr"])
+    interface.pattern_models["tas"] = MagicMock()
+    interface.pattern_models["tas"].predict_from_combined_experiment.return_value = {
+        "tas": _annual_field([1.0, 2.0], [0, 1])
+    }
+
+    annual_prediction = _annual_field([1.0, 3.0], [0, 1])
+    temp_scaling_ts = xr.DataArray([0.0, 2.0], dims=["year"], coords={"year": [0, 1]})
+
+    scaled = interface._compute_timeseries_scaling(
+        "pr", annual_prediction, 0, "em", "conc", temp_scaling_ts
+    )
+
+    interface.pattern_models[
+        "tas"
+    ].predict_from_combined_experiment.assert_called_once_with("em", "conc", ["tas"])
+    # Target warming is 2x the predicted tas anomaly, so the pr anomaly doubles.
+    print(scaled.values.shape)
+    assert np.isclose(scaled.values[0, 0, 0], 1.0)
+    assert np.isclose(scaled.values[0, 0, 1], 5.0)
+
+
+def test_timeseries_scaling_extends_shorter_scaling_input(interface_factory):
+    """A scaling series shorter than the prediction is extended, not rejected."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+    _set_trained(interface, ["tas"])
+
+    annual_prediction = _annual_field([1.0, 2.0, 3.0], [0, 1, 2])
+    temp_scaling_ts = xr.DataArray([0.0, 2.0], dims=["year"], coords={"year": [0, 1]})
+
+    scaled = interface._compute_timeseries_scaling(
+        "tas", annual_prediction, 0, "em", "conc", temp_scaling_ts
+    )
+
+    assert scaled.sizes["year"] == 3
+    assert np.isclose(scaled.values[0, 0, 1], 3.0)
+    # Year 2 has no scaling input, so it falls back to the unscaled prediction.
+    assert np.isclose(scaled.values[0, 0, 2], 3.0)
+
+
+def _composite_dataset(variable, n_months, values=None, start_year_attr=None):
+    """Minimal (month, lat, lon) composite as returned by the data getter."""
+    if values is None:
+        values = np.broadcast_to(
+            np.arange(n_months, dtype=float)[:, None, None], (n_months, 2, 2)
+        )
+    data = xr.DataArray(
+        np.array(values, dtype=float) * np.ones((n_months, 2, 2)),
+        dims=["month", "lat", "lon"],
+        coords={"month": np.arange(n_months), "lat": [0.0, 45.0], "lon": [0.0, 180.0]},
+    )
+    if start_year_attr is not None:
+        data.attrs["start_year"] = start_year_attr
+    return xr.Dataset({variable: data})
+
+
+def _composite_side_effect(variable, n_months, start_year_attr=None):
+    def _side_effect(exps, _model, monthly=True):
+        if "piControl" in exps:
+            return _composite_dataset(variable, n_months, values=1.0)
+        return _composite_dataset(variable, n_months, start_year_attr=start_year_attr)
+
+    return _side_effect
+
+
+def test_load_transform_reference_tas_converts_to_anomalies(interface_factory):
+    """tas reference data is returned as anomalies and has no pr baseline field."""
+    interface, mock_getter = interface_factory(model="TestModel", variables=("tas",))
+    mock_getter.make_meteor_training_data_composite.side_effect = (
+        _composite_side_effect("tas", 24)
+    )
+
+    ssp_data, pr_first_year_mean = interface._load_transform_reference(
+        "tas", 2000, 2001, verbose=False
+    )
+
+    assert pr_first_year_mean is None
+    # piControl is a flat 1.0 field, so the anomaly is the raw month index minus 1.
+    assert np.allclose(ssp_data.values[:, 0, 0], np.arange(24) - 1.0)
+
+
+def test_load_transform_reference_pr_uses_declared_start_year(interface_factory):
+    """A composite that declares its start year is sliced directly from it."""
+    interface, mock_getter = interface_factory(model="TestModel", variables=("pr",))
+    mock_getter.make_meteor_training_data_composite.side_effect = (
+        _composite_side_effect("pr", 240, start_year_attr=2000)
+    )
+
+    ssp_data, pr_first_year_mean = interface._load_transform_reference(
+        "pr", 2005, 2010, verbose=False
+    )
+
+    # 2005-2010 inclusive, starting 60 months into the composite.
+    assert ssp_data.sizes["month"] == 72
+    assert np.isclose(float(pr_first_year_mean.values[0, 0]), np.arange(60, 72).mean())
+
+
+def test_load_transform_reference_pr_infers_start_year_from_length(interface_factory):
+    """Without a declared start year it is inferred from the composite length."""
+    interface, mock_getter = interface_factory(model="TestModel", variables=("pr",))
+    mock_getter.make_meteor_training_data_composite.side_effect = (
+        _composite_side_effect("pr", 240)
+    )
+
+    ssp_data, pr_first_year_mean = interface._load_transform_reference(
+        "pr", 2000, 2010, verbose=False
+    )
+
+    # 240 months ending in 2010 implies the composite starts in 1991.
+    assert ssp_data.sizes["month"] == 132
+    assert np.isclose(
+        float(pr_first_year_mean.values[0, 0]), np.arange(108, 120).mean()
+    )
+
+
+def test_load_transform_reference_pr_rejects_out_of_range_window(interface_factory):
+    """Requesting years outside the composite is an error, not a silent clip."""
+    interface, mock_getter = interface_factory(model="TestModel", variables=("pr",))
+    mock_getter.make_meteor_training_data_composite.side_effect = (
+        _composite_side_effect("pr", 240, start_year_attr=2000)
+    )
+
+    with pytest.raises(ValueError, match="before the composite data start year"):
+        interface._load_transform_reference("pr", 1990, 2010, verbose=False)
+
+    with pytest.raises(ValueError, match="beyond the composite data end year"):
+        interface._load_transform_reference("pr", 2005, 2025, verbose=False)
+
+
+def _timeseries_gen_inputs(n_months=24, n_realizations=2):
+    monthly_prediction = xr.DataArray(
+        np.arange(n_months * 3 * 4, dtype=float).reshape(n_months, 3, 4),
+        dims=["month", "lat", "lon"],
+        coords={
+            "month": np.arange(n_months),
+            "lat": [-45.0, 0.0, 45.0],
+            "lon": [0.0, 90.0, 180.0, 270.0],
+        },
+    )
+    return GenerationInputs(
+        pattern=PatternScalingResult(
+            monthly_prediction=monthly_prediction,
+            monthly_warming=np.zeros(n_months),
+            em_data=None,
+            conc_data=None,
+            full_monthly_warming=np.zeros(n_months),
+            base_year=2000,
+            start_month_idx=0,
+            end_month_idx=n_months,
+        ),
+        stochastic_pcs=np.zeros((n_realizations, n_months, 3)),
+    )
+
+
+def test_generate_timeseries_custom_region_and_point_with_noise(interface_factory):
+    """Custom-region and point aggregations produce (n_realizations, n_months)."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+    _set_trained(interface, ["tas"])
+    interface.noise_models["tas"].generate_regional_mean_realizations.return_value = (
+        xr.DataArray(np.zeros((2, 24)), dims=["realization", "month"])
+    )
+
+    results = interface._generate_timeseries(
+        "tas",
+        "ssp245",
+        2000,
+        2001,
+        2,
+        ["regional:custom:nordic", "point:0.0,90.0"],
+        gen_inputs=_timeseries_gen_inputs(),
+        custom_regions={"nordic": {"lat": (0.0, 90.0), "lon": (0.0, 180.0)}},
+        include_noise=True,
+        verbose=False,
+    )
+
+    assert results["regional:custom:nordic"].shape == (2, 24)
+    assert results["point:0.0,90.0"].shape == (2, 24)
+
+    calls = interface.noise_models[
+        "tas"
+    ].generate_regional_mean_realizations.call_args_list
+    # There are no EOFs for custom regions, so global noise is used as a proxy.
+    assert calls[0].kwargs["region"] == "global"
+    # Point aggregations request noise at the requested coordinates instead.
+    assert (calls[1].kwargs["lat"], calls[1].kwargs["lon"]) == (0.0, 90.0)
+
+
+def test_generate_timeseries_climatology_only_skips_noise_model(interface_factory):
+    """Without noise every aggregation returns the forced response with shape (1, t)."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+    _set_trained(interface, ["tas"])
+
+    with patch(
+        "meteor.meteor_interface.regional_mean",
+        return_value=xr.DataArray(np.zeros(24), dims=["month"]),
+    ):
+        results = interface._generate_timeseries(
+            "tas",
+            "ssp245",
+            2000,
+            2001,
+            5,
+            ["global", "regional:NEU", "regional:custom:nordic", "point:0.0,90.0"],
+            gen_inputs=_timeseries_gen_inputs(),
+            custom_regions={"nordic": {"lat": (0.0, 90.0), "lon": (0.0, 180.0)}},
+            include_noise=False,
+            verbose=False,
+        )
+
+    interface.noise_models[
+        "tas"
+    ].generate_regional_mean_realizations.assert_not_called()
+    assert all(array.shape == (1, 24) for array in results.values())
+
+
+def test_generate_timeseries_unknown_custom_region_raises(interface_factory):
+    """A custom region name must be resolvable against custom_regions."""
+    interface, _ = interface_factory(model="TestModel", variables=("tas",))
+    _set_trained(interface, ["tas"])
+
+    with pytest.raises(ValueError, match="not found in custom_regions"):
+        interface._generate_timeseries(
+            "tas",
+            "ssp245",
+            2000,
+            2001,
+            1,
+            ["regional:custom:nordic"],
+            gen_inputs=_timeseries_gen_inputs(),
+            custom_regions=None,
+            include_noise=False,
+            verbose=False,
+        )
+
+
+def test_generate_gridded_slice_wraps_single_realization(interface_factory):
+    """Noise models returning a bare DataArray are normalised to a one-member list."""
+    interface, _ = interface_factory(model="TestModel", variables=("pr",))
+    noise_model = MagicMock()
+
+    monthly_prediction = xr.DataArray(
+        np.zeros((24, 2, 2)),
+        dims=["month", "lat", "lon"],
+        coords={"month": np.arange(24), "lat": [0, 1], "lon": [0, 1]},
+    )
+    single_realization = monthly_prediction.isel(month=slice(0, 12))
+    noise_model.generate_realization.return_value = single_realization
+
+    transformed = xr.DataArray(
+        np.ones((1, 12, 2, 2)),
+        dims=["realization", "month", "lat", "lon"],
+        coords={
+            "realization": [0],
+            "month": np.arange(12),
+            "lat": [0, 1],
+            "lon": [0, 1],
+        },
+    )
+    interface._apply_gridded_transform = MagicMock(return_value=transformed)
+
+    result = interface._generate_gridded_slice(
+        monthly_prediction,
+        np.zeros(24),
+        noise_model,
+        stochastic_pcs=np.zeros((1, 24, 3)),
+        start_idx=0,
+        end_idx=12,
+        include_noise=True,
+        reduce_time=True,
+        transform_config=VariableTransformConfig("pr", "gamma", "positivity"),
+    )
+
+    interface._apply_gridded_transform.assert_called_once()
+    assert result.dims == ("realization", "lat", "lon")
+    assert result.sizes["realization"] == 1
+
+
+def test_apply_gridded_transform_baseline_variants(interface_factory):
+    """The baseline is optional, and a plain (lat, lon) baseline needs no reduction."""
+    interface, _ = interface_factory(model="TestModel", variables=("pr",))
+
+    ensemble = xr.DataArray(
+        np.random.default_rng(0).normal(0.0, 1e-6, size=(2, 12, 2, 2)),
+        dims=["realization", "month", "lat", "lon"],
+        coords={
+            "realization": [0, 1],
+            "month": np.arange(12),
+            "lat": [0, 1],
+            "lon": [0, 1],
+        },
+    )
+    target_params = fit_distribution_parameters_3d(
+        np.random.default_rng(1).uniform(1e-5, 3e-5, size=(24, 2, 2)), "gamma"
+    )
+    config = VariableTransformConfig(
+        "pr",
+        "gamma",
+        "positivity",
+        fit_3d_func=fit_distribution_parameters_3d,
+        apply_func=apply_distribution_transform,
+    )
+
+    without_baseline = interface._apply_gridded_transform(
+        ensemble, config, target_params, None
+    )
+    plain_baseline = xr.DataArray(
+        np.full((2, 2), 1e-5),
+        dims=["lat", "lon"],
+        coords={"lat": [0, 1], "lon": [0, 1]},
+    )
+    with_baseline = interface._apply_gridded_transform(
+        ensemble, config, target_params, plain_baseline
+    )
+
+    assert without_baseline.dims == ("realization", "month", "lat", "lon")
+    assert with_baseline.dims == ("realization", "month", "lat", "lon")
+    assert np.all(without_baseline.values >= 0)
+    assert np.all(with_baseline.values >= 0)
+
+
+def test_build_full_window_transformed_ensemble_without_baseline(interface_factory):
+    """A missing pr baseline leaves the generated ensemble untouched before fitting."""
+    interface, _ = interface_factory(model="TestModel", variables=("pr",))
+    noise_model = MagicMock()
+
+    monthly_prediction = xr.DataArray(
+        np.zeros((24, 2, 2)),
+        dims=["month", "lat", "lon"],
+        coords={"month": np.arange(24), "lat": [0, 1], "lon": [0, 1]},
+    )
+    # Single realization, not a list, to exercise the normalisation path.
+    noise_model.generate_realization.return_value = monthly_prediction
+    interface._load_transform_reference = MagicMock(
+        return_value=(monthly_prediction, None)
+    )
+
+    config = MagicMock()
+    config.transform_type = "gamma"
+    config.fit_3d_seasonal_func = MagicMock(return_value={})
+    config.apply_seasonal_func = MagicMock(return_value=np.ones((1, 24, 2, 2)))
+
+    result = interface._build_full_window_transformed_ensemble(
+        "pr",
+        monthly_prediction,
+        np.zeros(24),
+        noise_model,
+        np.zeros((1, 24, 3)),
+        2000,
+        2001,
+        config,
+        include_noise=True,
+        verbose=False,
+    )
+
+    passed_data = config.apply_seasonal_func.call_args[0][0]
+    assert np.allclose(passed_data, 0.0)
+    assert result.dims == ("realization", "month", "lat", "lon")
+    assert result.sizes["realization"] == 1
+
+
+def _picontrol_getter(mock_interface, value=288.0):
+    picontrol = xr.DataArray(
+        np.full((24, 3, 4), value),
+        dims=["month", "lat", "lon"],
+        coords={
+            "month": np.arange(24),
+            "lat": [-45.0, 0.0, 45.0],
+            "lon": [0.0, 90.0, 180.0, 270.0],
+        },
+    )
+    mock_interface.data_getter.make_meteor_training_data = MagicMock(
+        return_value={"tas": picontrol}
+    )
+
+
+def test_apply_impacts_requires_a_base_temperature(mock_interface):
+    """Degree days are undefined without an hdd_base or cdd_base."""
+    var_output = VariableOutput("tas")
+    var_output.timeseries = {"global": np.zeros((1, 24))}
+
+    with pytest.raises(ValueError, match="hdd_base"):
+        mock_interface._apply_impacts(
+            var_output, "tas", {"degree_days": {}}, verbose=False
+        )
+
+
+def test_apply_impacts_custom_region_and_point_baselines(mock_interface):
+    """Each aggregation type gets its own piControl baseline before degree days."""
+    _picontrol_getter(mock_interface)
+
+    var_output = VariableOutput("tas")
+    var_output.timeseries = {
+        "regional:custom:nordic": np.zeros((2, 24)),
+        "point:0.0,90.0": np.zeros((2, 24)),
+    }
+
+    impacts = mock_interface._apply_impacts(
+        var_output,
+        "tas",
+        {"degree_days": {"hdd_base": 18.0}},
+        custom_regions={"nordic": {"lat": (0.0, 90.0), "lon": (0.0, 180.0)}},
+        verbose=False,
+    )
+
+    assert set(impacts["hdd"]) == {"regional:custom:nordic", "point:0.0,90.0"}
+    assert impacts["hdd"]["point:0.0,90.0"].shape[0] == 2
+    assert impacts["cdd"]["regional:custom:nordic"].shape[0] == 2
+
+
+def test_apply_impacts_rejects_unusable_aggregation_keys(mock_interface):
+    """Unknown keys, and custom regions without a definition, are errors."""
+    _picontrol_getter(mock_interface)
+
+    var_output = VariableOutput("tas")
+    var_output.timeseries = {"regional:custom:nordic": np.zeros((1, 24))}
+    with pytest.raises(ValueError, match="not found in custom_regions"):
+        mock_interface._apply_impacts(
+            var_output,
+            "tas",
+            {"degree_days": {"cdd_base": 18.0}},
+            custom_regions=None,
+            verbose=False,
+        )
+
+    var_output.timeseries = {"nonsense": np.zeros((1, 24))}
+    with pytest.raises(ValueError, match="Unknown aggregation type"):
+        mock_interface._apply_impacts(
+            var_output, "tas", {"degree_days": {"cdd_base": 18.0}}, verbose=False
+        )

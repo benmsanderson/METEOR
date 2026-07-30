@@ -177,7 +177,7 @@ class EnsembleOutput:
             if include_impacts:
                 for impact_name, impact_dict in var_data.impacts.items():
                     for agg_name, impact_array in impact_dict.items():
-                        if type(impact_array) is xr.DataArray:
+                        if isinstance(impact_array, xr.DataArray):
                             dimensions = impact_array.dims
                             data = impact_array.data
                         elif isinstance(impact_array, np.ndarray):
@@ -187,6 +187,10 @@ class EnsembleOutput:
                             else:
                                 dimensions = ("month", "year")
                                 data = impact_array
+                        else:
+                            raise ValueError(
+                                f"Unexpected type for impact array: {type(impact_array)}"
+                            )
                         safe_agg = agg_name.replace(":", "_").replace(".", "p")
                         ds[f"{var_name}_{impact_name}_{safe_agg}"] = (
                             dimensions,

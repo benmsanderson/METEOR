@@ -32,6 +32,7 @@ The changes listed in this file are categorised as follows:
 ### Changed
 
 - Now possibly to send variable length temperature scaling timeseries, fixed noise generator for wrong ordering of base data dimensions
+- Ensemble output generation fixed for impact arrays of are climatology or on numpy array format rather than xarray Dataarray
 
 ### Fixed
 

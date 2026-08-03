@@ -140,6 +140,8 @@ dmypy.json
 
 # Noise caches
 notebooks/noise_cache/*.pkl
+notebooks/notebooks_v16_description_paper/stationarity_cache/
+notebooks/notebooks_v16_description_paper/diagnostics_cache/
 examples/noise_cache
 
 examples/cache

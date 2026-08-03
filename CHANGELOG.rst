@@ -23,6 +23,7 @@ The changes listed in this file are categorised as follows:
 
 ### Changed
 
+- Vectorized ``MeteorInterface._apply_impacts``' per-realization loop. The underlying ``DegreeDaysCalculator.calculate`` is already vectorized over the ``month`` dimension via xarray, so passing the whole ``(realization, month)`` DataArray in one call produces identical results (verified in ``test_degree_days_calculate_batches_realizations`` to ``atol=1e-9``) without the per-realization Python overhead. At N=100 this removes ~20 s from ``gen_impacts``; scales linearly in N.
 - Now possibly to send variable length temperature scaling timeseries, fixed noise generator for wrong ordering of base data dimensions
 
 ### Fixed

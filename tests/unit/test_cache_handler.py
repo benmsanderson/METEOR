@@ -255,9 +255,9 @@ def test_pattern_scaling_cache_path_roundtrips_meteor_pattern_scaling_save_name(
     from ``MeteorPatternScaling.__init__``. That's exactly the shape of the
     per-variable-suffix mismatch handled elsewhere in the codebase.
     """
-    from meteor.meteor import (
+    from meteor.meteor import (  # pylint: disable=import-outside-toplevel
         MeteorPatternScaling,
-    )  # pylint: disable=import-outside-toplevel
+    )
 
     handler = cache_handling.CacheHandler(cache_dir=str(tmp_path), purpose="classic")
     model = "TestModel"

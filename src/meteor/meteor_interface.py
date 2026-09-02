@@ -1219,22 +1219,23 @@ class MeteorInterface:
                 # Default assumption: historical+scenario composite starts at 1850
                 expected_months_from_1850 = (end_year - 1850 + 1) * 12
                 if n_months < expected_months_from_1850:
-                    composite_start_year = end_year - (n_months // 12) + 1
-                else:
                     composite_start_year = 1850
+                else:
+                    composite_start_year = end_year - (n_months // 12) + 1
 
             start_year_idx = (start_year - composite_start_year) * 12
-            end_year_idx = (end_year - composite_start_year + 1) * 12  # inclusive
-
             composite_end_year = composite_start_year + n_months // 12 - 1
+            end_year_idx = (
+                composite_end_year - composite_start_year + 1
+            ) * 12  # inclusive
 
             if start_year_idx < 0:
                 raise ValueError(
                     f"start_year {start_year} is before the composite data start year {composite_start_year}. "
                     f"Valid range: {composite_start_year}-{composite_end_year}"
                 )
-            if end_year_idx > n_months:
-                raise ValueError(
+            if composite_end_year < end_year:
+                print(
                     f"end_year {end_year} is beyond the composite data end year {composite_end_year}. "
                     f"Valid range: {composite_start_year}-{composite_end_year}"
                 )

@@ -470,14 +470,12 @@ class MeteorNoiseGenerator:
         X = self._create_harmonic_features(time, global_temp_trajectory)
         X_exog = self._extract_exog_variables(X)
 
-        # Generate stochastic PCs for each realization
+        # Generate stochastic PCs. Single-realization path is preserved
+        # byte-identical for reproducibility with a given seed; multi-realization
+        # path is vectorized across realizations to avoid the Python loop.
         if n_realizations == 1:
             return self._generate_stochastic_pcs(X_exog, n_time)
-        all_pcs = []
-        for _ in range(n_realizations):
-            pcs = self._generate_stochastic_pcs(X_exog, n_time)
-            all_pcs.append(pcs)
-        return np.array(all_pcs)  # Shape: (n_realizations, n_time, n_modes)
+        return self._generate_stochastic_pcs_batched(X_exog, n_time, n_realizations)
 
     # pylint: disable=too-many-locals
     def generate_realization(
@@ -695,6 +693,55 @@ class MeteorNoiseGenerator:
             synthetic_pcs[t] = forecast + all_shocks[t]
 
         return synthetic_pcs
+
+    # pylint: disable=invalid-name
+    def _generate_stochastic_pcs_batched(self, X_exog, n_time, n_realizations):
+        """Batched VARX simulation across realizations.
+
+        Same VAR(p) autoregression as :meth:`_generate_stochastic_pcs`, but the
+        state at each timestep is carried as ``(n_realizations, n_modes)`` so
+        the per-timestep operation becomes a single BLAS matmul across all
+        realizations. The time loop remains serial (unavoidable for AR
+        recursion) but the ``n_realizations`` axis is fully vectorized.
+
+        Returns
+        -------
+        np.ndarray
+            Shape ``(n_realizations, n_time, n_modes)``.
+        """
+        params = self.varx_results.params
+        n_exog = X_exog.shape[1] if X_exog is not None else 0
+        n_modes = self.n_modes
+
+        intercept = params[0, :]
+        A_matrices_T = [
+            params[1 + i * n_modes : 1 + (i + 1) * n_modes, :]
+            for i in range(self.lag_order)
+        ]  # each is (n_modes, n_modes); equals A_i.T so pcs @ A_T is A @ pcs
+        B_matrix = params[-n_exog:, :].T if n_exog else None
+        residual_cov = self.varx_results.sigma_u
+
+        # Precompute per-timestep constant contribution: intercept + B x_t.
+        # Shape: (n_time, n_modes). Broadcasts along the leading realization axis.
+        constant_term = np.broadcast_to(intercept, (n_time, n_modes)).copy()
+        if X_exog is not None:
+            constant_term += X_exog @ B_matrix.T
+
+        # All shocks for all realizations in one MVN call.
+        # Shape: (n_realizations, n_time, n_modes).
+        all_shocks = np.random.multivariate_normal(
+            np.zeros(n_modes), residual_cov, size=(n_realizations, n_time)
+        )
+
+        pcs = np.zeros((n_realizations, n_time, n_modes))
+        for t in range(self.lag_order, n_time):
+            forecast = constant_term[t] + all_shocks[:, t, :]
+            for lag_i, A_T in enumerate(A_matrices_T):
+                # pcs[:, t-lag-1, :] is (R, m); A_T is (m, m); result (R, m)
+                forecast += pcs[:, t - lag_i - 1, :] @ A_T
+            pcs[:, t, :] = forecast
+
+        return pcs
 
     # TODO check if we can use the weights calculator from geo_data_utils.py
     def _compute_spatial_weights(self):

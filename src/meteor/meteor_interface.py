@@ -431,9 +431,14 @@ class MeteorInterface:
             self.model, variable=variable
         )
 
-        # Check cache
+        # Check cache. The variable suffix must match the name
+        # MeteorPatternScaling saves under (``cmip6-{model}-aer-{variable}``);
+        # without it the validator returns "invalid" for a cache that then
+        # loads successfully by filename, causing wasted training-data prep.
         is_valid, cached_model, info = (  # pylint: disable=unused-variable
-            self.data_getter.validate_pattern_scaling_cache(cache_file, self.model)
+            self.data_getter.validate_pattern_scaling_cache(
+                cache_file, self.model, variable=variable
+            )
         )
 
         if is_valid:
@@ -1240,22 +1245,23 @@ class MeteorInterface:
                 # Default assumption: historical+scenario composite starts at 1850
                 expected_months_from_1850 = (end_year - 1850 + 1) * 12
                 if n_months < expected_months_from_1850:
-                    composite_start_year = end_year - (n_months // 12) + 1
-                else:
                     composite_start_year = 1850
+                else:
+                    composite_start_year = end_year - (n_months // 12) + 1
 
             start_year_idx = (start_year - composite_start_year) * 12
-            end_year_idx = (end_year - composite_start_year + 1) * 12  # inclusive
-
             composite_end_year = composite_start_year + n_months // 12 - 1
+            end_year_idx = (
+                composite_end_year - composite_start_year + 1
+            ) * 12  # inclusive
 
             if start_year_idx < 0:
                 raise ValueError(
                     f"start_year {start_year} is before the composite data start year {composite_start_year}. "
                     f"Valid range: {composite_start_year}-{composite_end_year}"
                 )
-            if end_year_idx > n_months:
-                raise ValueError(
+            if composite_end_year < end_year:
+                print(
                     f"end_year {end_year} is beyond the composite data end year {composite_end_year}. "
                     f"Valid range: {composite_start_year}-{composite_end_year}"
                 )
@@ -2285,7 +2291,7 @@ class MeteorInterface:
 
                 # Convert from anomaly (K) to absolute temperature (°C)
                 # ts_data is anomaly in K, baseline_k is absolute temperature in K
-                n_realizations, n_months = ts_data.shape
+                n_months = ts_data.shape[1]
 
                 # Create xarray with month dimension (required by calculator)
                 # Absolute temperature in Celsius = (anomaly_K + baseline_K) - 273.15
@@ -2295,18 +2301,12 @@ class MeteorInterface:
                     coords={"month": np.arange(n_months)},
                 )
 
-                # Calculate degree days for each realization
-                # Both HDD and CDD are calculated in the same call
-                hdd_results = []
-                cdd_results = []
-                for i in range(n_realizations):
-                    result = dd_model.calculate(temp_celsius[i])
-                    hdd_results.append(result.data["annual_hdd"].values)
-                    cdd_results.append(result.data["annual_cdd"].values)
-
-                # Stack back into arrays (n_realizations, n_years)
-                impacts["hdd"][key] = np.array(hdd_results)
-                impacts["cdd"][key] = np.array(cdd_results)
+                # DegreeDaysCalculator is internally vectorized over the
+                # 'month' dimension, so we pass the whole (realization, month)
+                # array in a single call rather than looping per realization.
+                result = dd_model.calculate(temp_celsius)
+                impacts["hdd"][key] = result.data["annual_hdd"].values
+                impacts["cdd"][key] = result.data["annual_cdd"].values
 
                 if verbose:  # pragma: no cover
                     print(f"         • HDD for {key}")

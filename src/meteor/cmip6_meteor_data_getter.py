@@ -1083,7 +1083,9 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         )
         return training_data
 
-    def validate_pattern_scaling_cache(self, cache_file, model_name, scenario="aer"):
+    def validate_pattern_scaling_cache(
+        self, cache_file, model_name, scenario="aer", variable=None
+    ):
         """
         Validate a cached pattern scaling model file.
 
@@ -1098,6 +1100,11 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             Expected model name
         scenario : str, optional
             Scenario suffix for expected model name. Default is "aer".
+        variable : str, optional
+            Variable suffix appended to the expected model name (e.g. "tas").
+            Must match the name ``MeteorPatternScaling`` uses when saving the
+            per-variable model. When omitted, the legacy (no-suffix) form is
+            used, but this will mismatch caches saved with per-variable names.
 
         Returns
         -------
@@ -1121,7 +1128,14 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         ...     print(f"✅ {info['message']}")
         """
         expected_name = f"cmip6-{model_name}-{scenario}"
-        expected_vars = set(self.flds)
+        if variable is not None:
+            expected_name = f"{expected_name}-{variable}"
+            # Per-variable caches only carry that one variable; asking for all
+            # of self.flds here would spuriously reject a valid single-variable
+            # cache and force a re-fit.
+            expected_vars = {variable}
+        else:
+            expected_vars = set(self.flds)
 
         info = {
             "expected_name": expected_name,

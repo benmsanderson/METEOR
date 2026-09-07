@@ -17,13 +17,19 @@ The changes listed in this file are categorised as follows:
 [Unreleased]
 ---------------------
 
+### Added
+
+- Performance profiling harness (``scripts/profiling/run_profile.py``, ``scripts/profiling/analyze.py``) with parameterized workloads covering training and generation. Baseline numbers and optimization targets documented in ``docs/profiling_baseline.md``.
+
 ### Changed
 
 - Vectorized the VAR autoregression in ``MeteorNoiseGenerator.generate_stochastic_pcs`` across realizations. Single-realization behavior is preserved byte-identical (existing seeded reproducibility tests unchanged); multi-realization output is statistically equivalent to the sequential loop. On ``gen_global_ts`` at N=1000 this reduces wall time from 228 s to 30 s (7.6× — see ``docs/profiling_baseline.md``).
+- Vectorized ``MeteorInterface._apply_impacts``' per-realization loop. The underlying ``DegreeDaysCalculator.calculate`` is already vectorized over the ``month`` dimension via xarray, so passing the whole ``(realization, month)`` DataArray in one call produces identical results (verified in ``test_degree_days_calculate_batches_realizations`` to ``atol=1e-9``) without the per-realization Python overhead. At N=100 this removes ~20 s from ``gen_impacts``; scales linearly in N.
 - Now possibly to send variable length temperature scaling timeseries, fixed noise generator for wrong ordering of base data dimensions
 
 ### Fixed
 
+- ``Cmip6MeteorDataGetter.validate_pattern_scaling_cache`` now accepts an optional ``variable`` argument matching the per-variable suffix ``MeteorPatternScaling`` saves under (``cmip6-{model}-aer-{variable}``). Without it, a cache that ``MeteorPatternScaling.__init__`` loads successfully by filename was reported as "invalid" by the outer validator, causing ``MeteorInterface`` to run ``prepare_pattern_scaling_training_data`` (which fetches and assembles CMIP6 data over the network) on every generation call and immediately discard the result. Threading ``variable=`` through ``_train_pattern_scaling`` fixes the mismatch and eliminates the redundant work (~13–18 s per generation call in the NorESM2-MM profiling workloads).
 - Variable length timeseries now works also when don't have "year" as time dimension.
 - Fixes to generate annual and monthly gridded ensembles with unified noise and preserving more of the variance.
 

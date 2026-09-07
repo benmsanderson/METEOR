@@ -7,6 +7,7 @@ pattern scaling and noise generation capabilities.
 
 import os
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 import numpy as np
@@ -135,6 +136,34 @@ class GenerationInputs:
 
     pattern: PatternScalingResult
     stochastic_pcs: Any
+
+
+def _months_since(year, origin_year):
+    """Month index of January of ``year``, counted from January of ``origin_year``.
+
+    Monthly arrays throughout this module are indexed from January of some
+    origin year, but the origin differs by context (``base_year`` for pattern
+    scaling output, ``composite_start_year`` for composite training data,
+    ``start_year`` for the generation window). Mixing them up silently
+    misaligns the series rather than raising, so the conversion is named here
+    and the origin is always passed explicitly.
+
+    To get the index one past the last month of ``year`` (i.e. an exclusive end
+    bound covering all of ``year``), pass ``year + 1``.
+
+    Parameters
+    ----------
+    year : int
+        Calendar year to convert.
+    origin_year : int
+        Calendar year that month index 0 corresponds to.
+
+    Returns
+    -------
+    int
+        Month index. Negative if ``year`` precedes ``origin_year``.
+    """
+    return (year - origin_year) * 12
 
 
 def _resolve_gridded_chunk_size(n_realizations, n_time, n_lat, n_lon):
@@ -963,10 +992,9 @@ class MeteorInterface:
         else:
             effective_end_year = end_year
 
-        start_month_idx = (start_year - base_year) * 12
-        end_month_idx = (
-            effective_end_year - base_year + 1
-        ) * 12  # +1 to include end_year
+        start_month_idx = _months_since(start_year, base_year)
+        # +1 to include end_year
+        end_month_idx = _months_since(effective_end_year + 1, base_year)
 
         monthly_prediction_sliced = full_monthly_prediction.isel(
             month=slice(start_month_idx, end_month_idx)
@@ -1249,11 +1277,10 @@ class MeteorInterface:
                 else:
                     composite_start_year = end_year - (n_months // 12) + 1
 
-            start_year_idx = (start_year - composite_start_year) * 12
+            start_year_idx = _months_since(start_year, composite_start_year)
             composite_end_year = composite_start_year + n_months // 12 - 1
-            end_year_idx = (
-                composite_end_year - composite_start_year + 1
-            ) * 12  # inclusive
+            # +1 to include composite_end_year
+            end_year_idx = _months_since(composite_end_year + 1, composite_start_year)
 
             if start_year_idx < 0:
                 raise ValueError(
@@ -1671,9 +1698,9 @@ class MeteorInterface:
         # Window-relative month index. monthly_prediction, monthly_warming and the
         # sliced stochastic PCs all share the same origin (start_year), which is
         # derived from base_year inside _get_or_compute_pattern_scaling, so all
-        # three stay aligned.
-        def year_to_month_idx(year):
-            return (year - start_year) * 12
+        # three stay aligned. Binding the origin once here is deliberate: every
+        # use below is then guaranteed to share it.
+        year_to_month_idx = partial(_months_since, origin_year=start_year)
 
         # For variables with a distribution transform (e.g. pr) we generate the
         # ensemble in streaming chunks and apply the seasonal (per-month-of-year,

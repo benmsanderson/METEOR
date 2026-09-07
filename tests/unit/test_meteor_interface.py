@@ -18,6 +18,7 @@ from meteor.meteor_interface import (
     MeteorInterface,
     PatternScalingResult,
     _get_default_config,
+    _months_since,
     _resolve_gridded_chunk_size,
     _stack_realizations,
 )
@@ -1061,3 +1062,22 @@ def test_apply_gridded_transform_drops_singleton_ens_dim(interface_factory):
     assert result.shape == (2, 12, 2, 2)
     # ... and the gamma transform guarantees non-negative precipitation.
     assert np.all(result.values >= 0)
+
+
+def test_months_since():
+    """Month-index conversion, including the exclusive-end-bound idiom."""
+    assert _months_since(1850, 1850) == 0
+    assert _months_since(1851, 1850) == 12
+    assert _months_since(2015, 1850) == (2015 - 1850) * 12
+
+    # Years before the origin index negatively rather than clamping; callers
+    # bounds-check the result (`if 0 <= s_idx and e_idx <= n_months`).
+    assert _months_since(1849, 1850) == -12
+
+    # Passing year + 1 gives the exclusive end bound covering all of `year`,
+    # which is how the "+1 to include end year" call sites are written.
+    for year, origin in ((2015, 1850), (1850, 1850), (2100, 2015)):
+        assert _months_since(year + 1, origin) - _months_since(year, origin) == 12
+
+    # Origin is a real parameter, not incidental: same year, different origins.
+    assert _months_since(2015, 1850) != _months_since(2015, 1900)

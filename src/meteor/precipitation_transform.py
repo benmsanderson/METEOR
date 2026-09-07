@@ -14,6 +14,7 @@ Author: METEOR Development Team
 """
 
 import os
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -25,6 +26,15 @@ from scipy.special import (  # pylint: disable=no-name-in-module
     polygamma,
 )
 
+# Upper bound on user-requested threads, as a multiple of the CPU count.
+# Oversubscription itself is harmless (measured flat from 8 threads to 256 on a
+# 10-core box, output bitwise-identical throughout), so this is not a
+# performance cap. It exists because one task is submitted per chunk, so an
+# absurd value like METEOR_GAMMA_PPF_THREADS=100000 would try to spawn that
+# many OS threads and die with "can't start new thread" — a crash from a typo,
+# which is exactly what the malformed-value fallback below exists to prevent.
+_GAMMA_PPF_THREAD_LIMIT_FACTOR = 8
+
 
 def _resolve_gamma_ppf_threads():
     """Pick thread count for :func:`_threaded_gamma_ppf_3d`.
@@ -34,16 +44,33 @@ def _resolve_gamma_ppf_threads():
     Falls back to ``min(8, cpu_count())`` — bounded because the underlying
     scipy special function has diminishing returns past ~8 threads on typical
     hardware. Set to ``1`` to disable threading entirely.
+
+    Modest oversubscription is honoured as requested: it costs nothing measurable
+    and the caller may know something we do not about their machine. Only values
+    beyond ``_GAMMA_PPF_THREAD_LIMIT_FACTOR * cpu_count`` are clamped, with a
+    warning, to keep a typo from exhausting the thread table.
     """
+    n_cpu = os.cpu_count() or 1
     env = os.environ.get("METEOR_GAMMA_PPF_THREADS")
     if env:
         try:
             n = int(env)
             if n >= 1:
+                ceiling = _GAMMA_PPF_THREAD_LIMIT_FACTOR * n_cpu
+                if n > ceiling:
+                    warnings.warn(
+                        f"METEOR_GAMMA_PPF_THREADS={n} exceeds {ceiling} "
+                        f"({_GAMMA_PPF_THREAD_LIMIT_FACTOR}x the {n_cpu} available "
+                        f"CPUs); clamping to {ceiling}. Thread scaling is flat well "
+                        f"below this, so nothing is lost.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    return ceiling
                 return n
         except ValueError:
             pass
-    return min(8, os.cpu_count() or 1)
+    return min(8, n_cpu)
 
 
 def _threaded_gamma_ppf_3d(u, shape_flat, scale_flat, n_threads=None):
@@ -67,6 +94,8 @@ def _threaded_gamma_ppf_3d(u, shape_flat, scale_flat, n_threads=None):
     n_spatial = shape_flat.shape[0]
     if n_threads is None:
         n_threads = _resolve_gamma_ppf_threads()
+    # More threads than gridpoints would hand empty chunks to idle workers.
+    n_threads = min(n_threads, n_spatial)
     if n_threads <= 1 or n_spatial < 4096:
         return scale_flat * gammaincinv(shape_flat, u)
 
@@ -115,7 +144,10 @@ def _vectorized_gamma_mle(data, max_iter=8, tol=1e-8):
 
     # Sum and log-sum with invalid entries zeroed out
     x_masked = np.where(valid, x, 0.0)
-    logx_masked = np.where(valid, np.log(np.maximum(x, np.finfo(float).tiny)), 0.0)
+    # Substitute 1.0 (log 1 == 0) at invalid entries *before* taking the log, so
+    # the log is never handed a negative, a zero, or a NaN. `valid` already
+    # requires x > 0, so no clamping of the surviving entries is needed.
+    logx_masked = np.log(np.where(valid, x, 1.0))
 
     with np.errstate(invalid="ignore", divide="ignore"):
         mean_x = x_masked.sum(axis=0) / n_valid

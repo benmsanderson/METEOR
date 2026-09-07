@@ -2,12 +2,16 @@
 Unit tests for precipitation transform functions.
 """
 
+import os
+import warnings
+
 import numpy as np
 import pytest
 import xarray as xr
 from scipy import stats
 
 from meteor.precipitation_transform import (
+    _GAMMA_PPF_THREAD_LIMIT_FACTOR,
     _resolve_gamma_ppf_threads,
     _threaded_gamma_ppf_3d,
     _vectorized_gamma_mle,
@@ -155,6 +159,51 @@ def test_vectorized_gamma_mle_handles_invalid_columns():
     assert shape[3] == 1.0
 
 
+def test_vectorized_gamma_mle_excludes_negatives_without_warning():
+    """Negative, -inf and NaN samples must be excluded from the fit, not merely
+    tolerated, and must not trip a log-domain warning on the way through.
+
+    The estimator masks before taking logs, so `np.log` is never handed a
+    non-positive value. Asserting on warnings here is the point: a refactor that
+    took the log first and masked afterwards would still return correct numbers
+    (the mask discards the NaNs) but would emit invalid-value RuntimeWarnings,
+    and under `-W error` would crash outright.
+    """
+    rng = np.random.default_rng(0)
+    n_obs = 400
+    positives = rng.gamma(2.0, 3.0, size=n_obs)
+    mixed = np.concatenate(
+        [rng.gamma(2.0, 3.0, size=n_obs - 50), -rng.gamma(2.0, 3.0, size=50)]
+    )
+    with_inf = np.concatenate([rng.gamma(2.0, 3.0, size=n_obs - 1), [-np.inf]])
+    all_negative = -rng.gamma(2.0, 3.0, size=n_obs)
+
+    data = np.column_stack([positives, mixed, with_inf, all_negative])
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # any RuntimeWarning fails the test
+        shape, scale = _vectorized_gamma_mle(data)
+
+    assert np.all(np.isfinite(shape))
+    assert np.all(np.isfinite(scale))
+
+    # A column whose negatives were *excluded* must match scipy fitted on the
+    # surviving positives alone. A column whose negatives merely became NaN and
+    # got averaged in would not.
+    survivors = mixed[mixed > 0]
+    exp_shape, _, exp_scale = stats.gamma.fit(survivors, floc=0)
+    np.testing.assert_allclose(shape[1], exp_shape, rtol=1e-6)
+    np.testing.assert_allclose(scale[1], exp_scale, rtol=1e-6)
+
+    # -inf is dropped the same way.
+    exp_shape, _, exp_scale = stats.gamma.fit(with_inf[np.isfinite(with_inf)], floc=0)
+    np.testing.assert_allclose(shape[2], exp_shape, rtol=1e-6)
+    np.testing.assert_allclose(scale[2], exp_scale, rtol=1e-6)
+
+    # Nothing positive left to fit -> documented fallback, no NaN.
+    assert shape[3] == 1.0
+
+
 def test_threaded_gamma_ppf_3d_matches_scipy():
     """Threaded ppf must reproduce scipy.stats.gamma.ppf bitwise."""
     rng = np.random.default_rng(0)
@@ -201,6 +250,44 @@ def test_resolve_gamma_ppf_threads_env_var(monkeypatch):
     # Zero (i.e. "no threads") is also invalid; fall back.
     monkeypatch.setenv("METEOR_GAMMA_PPF_THREADS", "0")
     assert _resolve_gamma_ppf_threads() == default
+
+
+def test_resolve_gamma_ppf_threads_clamps_absurd_values(monkeypatch):
+    """An absurd thread count is clamped with a warning, not honoured.
+
+    One task is submitted per chunk, so an unclamped value would try to spawn
+    that many OS threads and fail with "can't start new thread". Modest
+    oversubscription is deliberately left alone -- measured scaling is flat
+    rather than harmful past the CPU count.
+    """
+    n_cpu = os.cpu_count() or 1
+    ceiling = _GAMMA_PPF_THREAD_LIMIT_FACTOR * n_cpu
+
+    # Modest oversubscription is honoured verbatim.
+    monkeypatch.setenv("METEOR_GAMMA_PPF_THREADS", str(n_cpu + 1))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert _resolve_gamma_ppf_threads() == n_cpu + 1
+
+    # Absurd values are clamped, and say so.
+    monkeypatch.setenv("METEOR_GAMMA_PPF_THREADS", "100000")
+    with pytest.warns(RuntimeWarning, match="clamping"):
+        assert _resolve_gamma_ppf_threads() == ceiling
+
+
+def test_threaded_gamma_ppf_3d_never_exceeds_gridpoints():
+    """Thread count is bounded by the number of gridpoints, so no worker is
+    handed an empty chunk, and the result is unaffected."""
+    rng = np.random.default_rng(1)
+    n_time, n_spatial = 8, 5_000  # > 4096 so the threaded path is taken
+    shape = rng.uniform(0.5, 5.0, size=n_spatial)
+    scale = rng.uniform(0.1, 10.0, size=n_spatial)
+    u = rng.uniform(0.01, 0.99, size=(n_time, n_spatial))
+
+    expected = stats.gamma.ppf(u, a=shape[None, :], scale=scale[None, :])
+    got = _threaded_gamma_ppf_3d(u, shape, scale, n_threads=n_spatial * 10)
+
+    np.testing.assert_array_equal(expected, got)
 
 
 def test_apply_distribution_transform():

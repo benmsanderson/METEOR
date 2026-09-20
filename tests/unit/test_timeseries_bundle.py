@@ -426,3 +426,85 @@ def test_forced_response_tolerates_zero_step_experiments(tmp_path):
     assert np.all(np.isfinite(with_base)), "zero-step experiment produced NaN"
     # 'base' carries no forced response, so including it must change nothing.
     np.testing.assert_allclose(with_base, without_base, rtol=1e-12, atol=1e-12)
+
+
+def test_bundle_ships_cholesky_of_innovation_covariance(tmp_path):
+    """Clients get the factor they need to draw correlated shocks."""
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    path = str(tmp_path / "bundle.nc")
+    export_timeseries_bundle(
+        noise, pattern, path, LOCATIONS, variable="tas", dtype=np.float64
+    )
+    bundle = load_timeseries_bundle(path)
+
+    assert "varx_residual_chol" in bundle
+    chol = bundle["varx_residual_chol"].values
+    # Lower triangular, and reconstructs the covariance.
+    assert np.allclose(np.triu(chol, k=1), 0.0)
+    np.testing.assert_allclose(
+        chol @ chol.T, bundle["varx_residual_cov"].values, rtol=1e-10, atol=1e-12
+    )
+
+
+def test_bundle_documents_annual_to_monthly_rule(tmp_path):
+    """The expansion rule a client must implement is stated in the artifact."""
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    path = str(tmp_path / "bundle.nc")
+    export_timeseries_bundle(noise, pattern, path, LOCATIONS, variable="tas")
+    bundle = load_timeseries_bundle(path)
+    assert "repeated" in bundle.attrs["annual_to_monthly"]
+
+
+def test_forcing_from_bundle_errors_without_scenarios(tmp_path):
+    """A bundle exported without scenarios says so, rather than returning junk."""
+    from meteor.timeseries_bundle import forcing_from_bundle
+
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    path = str(tmp_path / "bundle.nc")
+    export_timeseries_bundle(noise, pattern, path, LOCATIONS, variable="tas")
+    bundle = load_timeseries_bundle(path)
+
+    assert bundle.attrs["forcing_year_start"] == -1
+    assert "scenario_forcing" not in bundle
+    with pytest.raises(KeyError, match="no scenario forcing"):
+        forcing_from_bundle(bundle, "ssp245")
+
+
+def test_bundle_with_scenario_forcing_closes_the_loop(tmp_path):
+    """A bundle carrying forcing needs nothing external to drive a scenario."""
+    from meteor.timeseries_bundle import forcing_from_bundle
+
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    path = str(tmp_path / "bundle_scen.nc")
+    export_timeseries_bundle(
+        noise,
+        pattern,
+        path,
+        LOCATIONS,
+        variable="tas",
+        scenarios=["ssp245"],
+        dtype=np.float64,
+    )
+    bundle = load_timeseries_bundle(path)
+
+    assert bundle["scenario_forcing"].shape == (1, len(pattern.exp_list), 351)
+    assert bundle.attrs["forcing_year_start"] == 1750
+
+    forcing = forcing_from_bundle(bundle, "ssp245")
+    assert set(forcing) <= set(pattern.exp_list)
+
+    # The zero-step 'base' experiment is present in the mapping and must not
+    # poison the result.
+    series = forced_response_from_bundle(
+        bundle, "global", forcing, year_0=bundle.attrs["forcing_year_start"]
+    )
+    assert series.shape == (351,)
+    assert np.all(np.isfinite(series))
+    assert np.any(series != 0)
+
+    with pytest.raises(KeyError, match="not in bundle"):
+        forcing_from_bundle(bundle, "ssp585")

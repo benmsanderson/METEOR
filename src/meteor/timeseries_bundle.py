@@ -35,7 +35,7 @@ import json
 import numpy as np
 import xarray as xr
 
-from . import pattern_logic_lib
+from . import pattern_logic_lib, scm_forcer_engine
 from .geo_data_utils import extract_point, global_mean, regional_mean
 from .portable_artifact import (
     SCHEMA_VERSION,
@@ -43,6 +43,7 @@ from .portable_artifact import (
     _provenance_attrs,
     _step_response_arrays,
 )
+from .scm_input_lib import load_emissions_concentrations_from_name
 
 #: ``format`` attribute identifying a compact timeseries bundle.
 BUNDLE_FORMAT = "meteor-timeseries-bundle"
@@ -165,6 +166,80 @@ def _noise_weight_vector(noise_model, location):
     return noise_model.region_weight_vector(region=location["region"])
 
 
+def compute_scenario_forcing(pattern_model, scenarios):
+    """
+    Run the simple climate model to get per-experiment forcing per scenario.
+
+    This is the one step a browser client cannot perform for itself: turning
+    emissions and concentrations into effective radiative forcing requires
+    CICERO-SCM. Running it here, at export time, lets the bundle ship the
+    resulting trajectories so the client only has to convolve them with the
+    step-response kernel.
+
+    Parameters
+    ----------
+    pattern_model : MeteorPatternScaling
+        Supplies the experiment list the forcing is split across.
+    scenarios : list of str
+        Scenario names (e.g. ``['ssp126', 'ssp245', 'ssp585']``).
+
+    Returns
+    -------
+    tuple
+        ``(forcing, year_start)`` where ``forcing`` has shape
+        ``(n_scenarios, n_exps, n_years)`` with NaN for absent experiments,
+        and ``year_start`` is the first calendar year of the trajectories.
+
+    Raises
+    ------
+    ValueError
+        If the scenarios do not share a common start year or length.
+    """
+    exps = list(pattern_model.exp_list)
+    per_scenario = []
+    year_start = None
+    n_years = None
+    for scenario in scenarios:
+        emissions, concentrations = load_emissions_concentrations_from_name(scenario)
+        start = int(emissions.index[0])
+        if year_start is None:
+            year_start = start
+        elif start != year_start:
+            raise ValueError(
+                f"scenario {scenario!r} starts at {start}, but {scenarios[0]!r} "
+                f"starts at {year_start}; bundles need a common year axis"
+            )
+        engine = scm_forcer_engine.ScmEngineForPatternScaling(
+            {
+                "conc_run": False,
+                "nystart": start,
+                "emstart": start + 100,
+                "nyend": 2100,
+                "concentrations_data": concentrations,
+                "emissions_data": emissions,
+            }
+        )
+        series = engine.run_and_return_per_forcer_results(exps)
+        lengths = {len(np.asarray(v)) for v in series.values() if v is not None}
+        if len(lengths) != 1:
+            raise ValueError(
+                f"scenario {scenario!r} returned ragged forcing: {lengths}"
+            )
+        length = lengths.pop()
+        if n_years is None:
+            n_years = length
+        elif length != n_years:
+            raise ValueError(
+                f"scenario {scenario!r} has {length} years, expected {n_years}"
+            )
+        block = np.full((len(exps), length), np.nan)
+        for j, exp in enumerate(exps):
+            if series.get(exp) is not None:
+                block[j] = np.asarray(series[exp], dtype=np.float64)
+        per_scenario.append(block)
+    return np.stack(per_scenario), year_start
+
+
 def export_timeseries_bundle(
     noise_model,
     pattern_model,
@@ -176,6 +251,7 @@ def export_timeseries_bundle(
     training_config=None,
     pr_reference=None,
     pr_reference_start_year=None,
+    scenarios=None,
     dtype=np.float32,
 ):
     """
@@ -201,6 +277,11 @@ def export_timeseries_bundle(
         1D gamma transform without re-fetching CMIP6 data at generation time.
     pr_reference_start_year : int, optional
         First calendar year of ``pr_reference``, needed to index it by year.
+    scenarios : list of str, optional
+        Scenario names whose forcing trajectories should be baked in. Without
+        these a client has the step-response kernel but no forcing to convolve
+        it with, and obtaining forcing means running CICERO-SCM -- which a
+        browser cannot do. Costs roughly 4 KB per scenario.
     dtype : np.dtype, default np.float32
         Storage precision. float32 is the default here: a bundle is a wire
         format consumed by reimplementations that will not reproduce float64
@@ -305,6 +386,27 @@ def export_timeseries_bundle(
             np.asarray(noise_model.varx_B, dtype),
         )
 
+    # Lower-triangular factor of the innovation covariance. Clients need it to
+    # draw correlated shocks; shipping it removes both the cost and the
+    # convention ambiguity of factoring a 40x40 matrix in the browser.
+    try:
+        chol = np.linalg.cholesky(np.asarray(noise_model.varx_sigma_u, np.float64))
+        data_vars["varx_residual_chol"] = (("mode", "mode_in"), chol.astype(dtype))
+    except np.linalg.LinAlgError:
+        # Not positive definite: omit rather than ship something misleading.
+        # Clients fall back to factoring varx_residual_cov themselves.
+        pass
+
+    forcing_year_start = -1
+    if scenarios:
+        forcing, forcing_year_start = compute_scenario_forcing(
+            pattern_model, list(scenarios)
+        )
+        data_vars["scenario_forcing"] = (
+            ("scenario", "exp", "year"),
+            forcing.astype(dtype),
+        )
+
     if pr_reference is not None:
         reference = np.stack([_project_field(pr_reference, p) for p in parsed])
         data_vars["pr_reference"] = (
@@ -325,6 +427,21 @@ def export_timeseries_bundle(
             ),
             "exp": ("exp", np.array(exps, dtype="U64")),
             "pattern_mode": ("pattern_mode", np.arange(n_pattern_modes)),
+            **(
+                {
+                    "scenario": ("scenario", np.array(list(scenarios), dtype="U32")),
+                    "year": (
+                        "year",
+                        np.arange(
+                            forcing_year_start,
+                            forcing_year_start
+                            + data_vars["scenario_forcing"][1].shape[2],
+                        ),
+                    ),
+                }
+                if scenarios
+                else {}
+            ),
         },
     )
 
@@ -347,6 +464,8 @@ def export_timeseries_bundle(
         "pr_reference_start_year": (
             -1 if pr_reference_start_year is None else int(pr_reference_start_year)
         ),
+        "forcing_year_start": int(forcing_year_start),
+        "annual_to_monthly": "each annual value is repeated for all 12 months",
         **_provenance_attrs(
             cmip6_model, training_scenario, training_config, created=None
         ),
@@ -620,3 +739,54 @@ def export_golden_fixture(
     }
     ds.to_netcdf(filepath)
     return filepath
+
+
+def forcing_from_bundle(bundle, scenario):
+    """
+    Read a scenario's per-experiment forcing out of a bundle.
+
+    Together with :func:`forced_response_from_bundle` this closes the loop: a
+    client with only the bundle can produce a named scenario's forced response
+    without running the simple climate model.
+
+    Parameters
+    ----------
+    bundle : xr.Dataset
+        Bundle from :func:`load_timeseries_bundle`.
+    scenario : str
+        Scenario name present in the bundle's ``scenario`` coordinate.
+
+    Returns
+    -------
+    dict
+        Mapping of experiment name to forcing trajectory, ready to pass to
+        :func:`forced_response_from_bundle`.
+
+    Raises
+    ------
+    KeyError
+        If the bundle carries no forcing, or not for this scenario.
+
+    Examples
+    --------
+    >>> forcing = forcing_from_bundle(bundle, "ssp245")  # doctest: +SKIP
+    >>> series = forced_response_from_bundle(  # doctest: +SKIP
+    ...     bundle, "global", forcing, year_0=bundle.attrs["forcing_year_start"]
+    ... )
+    """
+    if "scenario_forcing" not in bundle:
+        raise KeyError(
+            "bundle carries no scenario forcing; re-export with scenarios=[...]"
+        )
+    names = [str(s) for s in bundle["scenario"].values]
+    if scenario not in names:
+        raise KeyError(f"scenario {scenario!r} not in bundle; has {names}")
+    idx = names.index(scenario)
+    block = bundle["scenario_forcing"].values[idx]
+    out = {}
+    for j, exp in enumerate(str(e) for e in bundle["exp"].values):
+        series = block[j]
+        if np.all(np.isnan(series)):
+            continue
+        out[exp] = series
+    return out

@@ -162,6 +162,8 @@ This is what a browser client downloads. It never carries the EOF maps.
 | Name | Dims | Notes |
 |---|---|---|
 | `varx_intercept`, `varx_A`, `varx_residual_cov`, `varx_B` | as above | Shared across locations |
+| `varx_residual_chol` | `(mode, mode_in)` | Lower-triangular Cholesky factor of `varx_residual_cov` |
+| `scenario_forcing` | `(scenario, exp, year)` | Per-scenario forcing; NaN for absent experiments |
 | `eof_projection` | `(location, mode)` | EOF basis projected onto the location |
 | `seasonal_coef` | `(location, feature)` | Nine coefficients per location |
 | `seasonal_intercept` | `(location,)` | |
@@ -171,6 +173,10 @@ This is what a browser client downloads. It never carries the EOF maps.
 | `location_kind` | `(location,)` | `global` / `region` / `point` |
 | `location_lat`, `location_lon` | `(location,)` | NaN for non-point locations |
 | `pr_reference` | `(location, reference_month)` | Optional; see below |
+
+`scenario_forcing` and `varx_residual_chol` are present only when the export
+requested them. `forcing_year_start` gives the first calendar year of the
+forcing axis (`-1` when absent).
 
 The `location` coordinate holds specifiers in the same grammar the generation
 API uses: `global`, `regional:<AR6 code>`, `point:<lat>,<lon>`.
@@ -203,16 +209,36 @@ series = X @ seasonal_coef[loc] + seasonal_intercept[loc]
 ```
 
 `timeseries_bundle.forced_response_from_bundle` is the reference implementation
-of the last term.
+of the last term; `forcing_from_bundle` reads a bundled scenario's forcing out
+of the artifact, so the two together need nothing external.
+
+Experiments whose `exp_forc` is zero carry no forced response — this is the
+`base` experiment — and must be skipped. Dividing the forcing increments by a
+zero step magnitude otherwise yields NaN and poisons the sum.
+
+**Annual to monthly.** The forced response is annual. METEOR expands it by
+repeating each annual value for all twelve months of that year; the
+`annual_to_monthly` attribute records this. The seasonal and stochastic terms
+are monthly throughout.
+
+**Drawing the innovations.** `ε_t ~ N(0, varx_residual_cov)` is generated as
+`varx_residual_chol @ z` with `z` a vector of `n_modes` independent standard
+normals. The factor is shipped (lower triangular, `L @ L.T == cov`) so clients
+need not factor the matrix themselves. A port will not reproduce NumPy's PCG64
+stream, so its ensemble will differ realisation by realisation while matching
+in distribution — see the golden fixture format for how to validate the
+deterministic parts.
 
 ### What is deliberately absent
 
 * **Gridded output** (`gridded_output = 0`). Reconstructing fields needs the EOF
   maps and per-gridpoint seasonal coefficients — use the full artifacts.
-* **Custom emissions scenarios** (`custom_emissions = 0`). A bundle ships the
-  step-response kernel, so a client can convolve any *forcing* trajectory it
-  supplies, including rescaled forcers. Turning raw *emissions* into forcing
-  requires the simple climate model, which is not in the bundle.
+* **Custom emissions scenarios** (`custom_emissions = 0`). Turning raw
+  *emissions* into forcing requires CICERO-SCM, which is not in the bundle. A
+  bundle instead ships pre-computed forcing for the scenarios it was exported
+  with (~4 KB each), and the step-response kernel, so a client can drive any
+  bundled scenario and can rescale or combine those forcers freely. What it
+  cannot do is start from an emissions trajectory it invented.
 * **Arbitrary locations.** A bundle covers the locations it was built for.
 
 ### Precipitation reference

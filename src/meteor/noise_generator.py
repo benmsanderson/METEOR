@@ -26,6 +26,29 @@ from statsmodels.tsa.api import VAR
 from .geo_data_utils import find_time_dim_and_cut, global_mean
 
 
+def _shock_source(rng=None):
+    """
+    Resolve the random source used to draw VARX innovations.
+
+    Passing ``None`` keeps the historical behaviour of drawing from the global
+    ``numpy.random`` state, so existing ``random_seed`` usage is unchanged.
+    Passing an explicit :class:`numpy.random.Generator` isolates a run from
+    global state, which is what makes a golden fixture reproducible across
+    processes and reimplementations.
+
+    Parameters
+    ----------
+    rng : np.random.Generator, optional
+        Explicit generator. When None, the legacy global state is used.
+
+    Returns
+    -------
+    np.random.Generator or module
+        Object exposing ``multivariate_normal``.
+    """
+    return np.random if rng is None else rng
+
+
 class MeteorNoiseGenerator:
     """
     Climate noise generator using PCA and VARX modeling.
@@ -528,6 +551,7 @@ class MeteorNoiseGenerator:
         global_temp_trajectory,
         n_realizations=1,
         random_seed=None,
+        rng=None,
     ):
         """
         Generate stochastic principal component time series.
@@ -573,7 +597,7 @@ class MeteorNoiseGenerator:
         if not self.fitted:
             raise ValueError("Model must be fitted before generating realizations")
 
-        if random_seed is not None:
+        if random_seed is not None and rng is None:
             np.random.seed(random_seed)
 
         n_time = len(global_temp_trajectory)
@@ -587,8 +611,10 @@ class MeteorNoiseGenerator:
         # byte-identical for reproducibility with a given seed; multi-realization
         # path is vectorized across realizations to avoid the Python loop.
         if n_realizations == 1:
-            return self._generate_stochastic_pcs(X_exog, n_time)
-        return self._generate_stochastic_pcs_batched(X_exog, n_time, n_realizations)
+            return self._generate_stochastic_pcs(X_exog, n_time, rng=rng)
+        return self._generate_stochastic_pcs_batched(
+            X_exog, n_time, n_realizations, rng=rng
+        )
 
     # pylint: disable=too-many-locals
     def generate_realization(
@@ -734,7 +760,7 @@ class MeteorNoiseGenerator:
         return realizations if n_realizations > 1 else realizations[0]
 
     # pylint: disable=invalid-name
-    def _generate_stochastic_pcs(self, X_exog, n_time):
+    def _generate_stochastic_pcs(self, X_exog, n_time, rng=None):
         """
         Generate stochastic principal components using fitted VARX model.
 
@@ -765,7 +791,7 @@ class MeteorNoiseGenerator:
         # 🚀 KEY OPTIMIZATION: Pre-generate ALL random shocks at once
         # This eliminates 97% of the bottleneck (4,212 separate MVN calls → 1 batched call)
         mean_shock = np.zeros(self.n_modes)
-        all_shocks = np.random.multivariate_normal(
+        all_shocks = _shock_source(rng).multivariate_normal(
             mean_shock, residual_cov, size=n_time
         )
 
@@ -794,7 +820,9 @@ class MeteorNoiseGenerator:
         return synthetic_pcs
 
     # pylint: disable=invalid-name
-    def _generate_stochastic_pcs_batched(self, X_exog, n_time, n_realizations):
+    def _generate_stochastic_pcs_batched(
+        self, X_exog, n_time, n_realizations, rng=None
+    ):
         """Batched VARX simulation across realizations.
 
         Same VAR(p) autoregression as :meth:`_generate_stochastic_pcs`, but the
@@ -824,7 +852,7 @@ class MeteorNoiseGenerator:
 
         # All shocks for all realizations in one MVN call.
         # Shape: (n_realizations, n_time, n_modes).
-        all_shocks = np.random.multivariate_normal(
+        all_shocks = _shock_source(rng).multivariate_normal(
             np.zeros(n_modes), residual_cov, size=(n_realizations, n_time)
         )
 
@@ -896,6 +924,20 @@ class MeteorNoiseGenerator:
             return self.eof_components
         return self.eof_components / self.eof_weights
 
+    def physical_eof_components(self):
+        """
+        EOF components in physical (unweighted) gridcell space.
+
+        Public accessor for the exporters, which need the same physical-units
+        basis that the generation paths reconstruct from.
+
+        Returns
+        -------
+        np.ndarray
+            EOF components, shape (n_modes, n_space).
+        """
+        return self._physical_components()
+
     def _get_point_eof_values(self, lat, lon):
         """
         Get EOF values at a specific point (no averaging).
@@ -935,6 +977,72 @@ class MeteorNoiseGenerator:
         return eof_point_values
 
     # TODO region masking and averaging from geo_data_utils.py could be reused here?
+
+    def region_weight_vector(
+        self, region="global", region_mask=None, lat=None, lon=None
+    ):
+        """
+        Spatial weights that reduce a gridded field to one location's series.
+
+        Returns the linear functional applied by
+        :meth:`_weighted_mean_over_region`, flattened over the stacked spatial
+        axis. Because that reduction is linear and data-independent, any field
+        of the form ``X @ M.T + c`` can be collapsed to a single location before
+        the matrix multiply: ``mean_region(X @ M.T + c) = X @ (M.T @ w) + c @ w``.
+        That identity is what lets a timeseries-only client ship nine seasonal
+        coefficients per location instead of nine per gridpoint.
+
+        Point extraction is expressed in the same form, as a one-hot vector at
+        the nearest gridpoint.
+
+        Parameters
+        ----------
+        region : str, default 'global'
+            Region identifier: ``'global'`` or an AR6 region code. Ignored when
+            ``lat``/``lon`` are given.
+        region_mask : np.ndarray, optional
+            Custom 2D boolean mask (n_lat, n_lon), overriding ``region``.
+        lat, lon : float, optional
+            Point coordinates; must be supplied together.
+
+        Returns
+        -------
+        np.ndarray
+            Weights summing to 1, shape (n_lat * n_lon,).
+
+        Examples
+        --------
+        >>> w = model.region_weight_vector(region="NEU")  # doctest: +SKIP
+        >>> seasonal_coef_neu = model.seasonal_coef.T @ w  # doctest: +SKIP
+        """
+        n_lat = len(self.coords["lat"])
+        n_lon = len(self.coords["lon"])
+
+        if (lat is None) != (lon is None):
+            raise ValueError(
+                "Both lat and lon must be provided together for point extraction"
+            )
+        if lat is not None:
+            weights = np.zeros((n_lat, n_lon))
+            lat_idx, lon_idx = self._find_nearest_gridpoint(lat, lon)
+            weights[lat_idx, lon_idx] = 1.0
+            return weights.reshape(-1)
+
+        lat_weights = self._compute_spatial_weights()
+        weight_grid = np.repeat(lat_weights[:, np.newaxis], n_lon, axis=1)
+        if region == "global" and region_mask is None:
+            return (weight_grid / (np.sum(lat_weights) * n_lon)).reshape(-1)
+
+        if region_mask is None:
+            region_mask = self._get_ar6_region_mask(region)
+        masked = np.where(region_mask, weight_grid, 0.0)
+        total = masked.sum()
+        if total <= 0:
+            raise ValueError(
+                f"Region '{region}' covers no gridpoints on this model grid "
+                f"({n_lat}x{n_lon}); it is too small to resolve"
+            )
+        return (masked / total).reshape(-1)
 
     def _get_regional_eof_projection(self, region, region_mask=None):
         """

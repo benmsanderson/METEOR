@@ -7,6 +7,7 @@ pattern scaling and noise generation capabilities.
 
 import os
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 import numpy as np
@@ -25,7 +26,11 @@ from .geo_data_utils import (
 )
 from .impacts import DegreeDaysCalculator
 from .meteor import MeteorPatternScaling
-from .noise_generator import train_noise_model_from_cmip6, validate_noise_model_cache
+from .noise_generator import (
+    find_time_dim_and_cut,
+    train_noise_model_from_cmip6,
+    validate_noise_model_cache,
+)
 from .scm_input_lib import (
     load_emissions_concentrations,
     load_emissions_concentrations_from_name,
@@ -131,6 +136,56 @@ class GenerationInputs:
 
     pattern: PatternScalingResult
     stochastic_pcs: Any
+
+
+def _months_since(year, origin_year):
+    """Month index of January of ``year``, counted from January of ``origin_year``.
+
+    Monthly arrays throughout this module are indexed from January of some
+    origin year, but the origin differs by context (``base_year`` for pattern
+    scaling output, ``composite_start_year`` for composite training data,
+    ``start_year`` for the generation window). Mixing them up silently
+    misaligns the series rather than raising, so the conversion is named here
+    and the origin is always passed explicitly.
+
+    To get the index one past the last month of ``year`` (i.e. an exclusive end
+    bound covering all of ``year``), pass ``year + 1``.
+
+    Parameters
+    ----------
+    year : int
+        Calendar year to convert.
+    origin_year : int
+        Calendar year that month index 0 corresponds to.
+
+    Returns
+    -------
+    int
+        Month index. Negative if ``year`` precedes ``origin_year``.
+    """
+    return (year - origin_year) * 12
+
+
+def _resolve_gridded_chunk_size(n_realizations, n_time, n_lat, n_lon):
+    """Pick the number of realizations to hold in-memory per chunk during
+    streaming gridded generation.
+
+    Reads ``METEOR_GRIDDED_CHUNK_SIZE`` for explicit override. Otherwise
+    targets a ~5 GB working set per chunk, sized from the per-realization
+    reconstruction cost (``n_time * n_lat * n_lon * 8`` bytes).
+    """
+    env = os.environ.get("METEOR_GRIDDED_CHUNK_SIZE")
+    if env:
+        try:
+            n = int(env)
+            if n >= 1:
+                return min(n, n_realizations)
+        except ValueError:
+            pass
+    per_real_bytes = n_time * n_lat * n_lon * 8  # float64
+    target_bytes = 5 * 1024**3  # 5 GB
+    chunk = max(1, target_bytes // per_real_bytes)
+    return int(min(chunk, n_realizations))
 
 
 def _stack_realizations(realizations):
@@ -937,10 +992,9 @@ class MeteorInterface:
         else:
             effective_end_year = end_year
 
-        start_month_idx = (start_year - base_year) * 12
-        end_month_idx = (
-            effective_end_year - base_year + 1
-        ) * 12  # +1 to include end_year
+        start_month_idx = _months_since(start_year, base_year)
+        # +1 to include end_year
+        end_month_idx = _months_since(effective_end_year + 1, base_year)
 
         monthly_prediction_sliced = full_monthly_prediction.isel(
             month=slice(start_month_idx, end_month_idx)
@@ -1223,11 +1277,10 @@ class MeteorInterface:
                 else:
                     composite_start_year = end_year - (n_months // 12) + 1
 
-            start_year_idx = (start_year - composite_start_year) * 12
+            start_year_idx = _months_since(start_year, composite_start_year)
             composite_end_year = composite_start_year + n_months // 12 - 1
-            end_year_idx = (
-                composite_end_year - composite_start_year + 1
-            ) * 12  # inclusive
+            # +1 to include composite_end_year
+            end_year_idx = _months_since(composite_end_year + 1, composite_start_year)
 
             if start_year_idx < 0:
                 raise ValueError(
@@ -1636,18 +1689,53 @@ class MeteorInterface:
         elif verbose:  # pragma: no cover
             print("      → Using shared stochastic PC realizations (gridded)")
 
-        # Resolve transform. For variables with a distribution transform (e.g.
-        # pr) we generate the full prediction window in one shot and apply the
-        # seasonal (per-month-of-year, per-gridpoint) transform once on the
-        # whole window. Doing it per year-slice (the old path) re-fitted the
-        # Gaussian on just 12 months at each gridpoint, which normalised every
-        # year to its own local mean and wiped the climate-change trend.
         transform_config = self._get_transform_config(variable)
-        pre_transformed_ensemble = None
         target_params = None
         pr_baseline_field = None
+
+        n_months = len(monthly_warming)
+
+        # Window-relative month index. monthly_prediction, monthly_warming and the
+        # sliced stochastic PCs all share the same origin (start_year), which is
+        # derived from base_year inside _get_or_compute_pattern_scaling, so all
+        # three stay aligned. Binding the origin once here is deliberate: every
+        # use below is then guaranteed to share it.
+        year_to_month_idx = partial(_months_since, origin_year=start_year)
+
+        # For variables with a distribution transform (e.g. pr) we generate the
+        # ensemble in streaming chunks and apply the seasonal (per-month-of-year,
+        # per-gridpoint) transform on the FULL window in one Gaussian fit.
+        # Doing it per year-slice (the old per-slice path) re-fitted the Gaussian
+        # on just 12 months at each gridpoint, normalising every year to its own
+        # local mean and wiping the climate-change trend. Streaming preserves
+        # that correctness while keeping peak memory bounded by chunk size.
+        streamed_slices = None
         if transform_config and transform_config.transform_type:
-            pre_transformed_ensemble = self._build_full_window_transformed_ensemble(
+            slice_specs = []
+            for kind, reduce_time in (("annual", True), ("monthly", False)):
+                for year in gridded_spec.get(kind, []):
+                    s_idx = year_to_month_idx(year)
+                    e_idx = s_idx + 12
+                    if 0 <= s_idx and e_idx <= n_months:
+                        slice_specs.append(
+                            ((s_idx, e_idx, reduce_time), s_idx, e_idx, reduce_time)
+                        )
+            for period in gridded_spec.get("climatology", []):
+                if isinstance(period, (list, tuple)) and len(period) == 2:
+                    cs, ce = period
+                    s_idx = year_to_month_idx(cs)
+                    e_idx = year_to_month_idx(ce + 1)
+                    if 0 <= s_idx and e_idx <= n_months:
+                        slice_specs.append(((s_idx, e_idx, True), s_idx, e_idx, True))
+            # Deduplicate: a year listed under multiple output kinds only needs
+            # one streaming slot; the results dict lookup pulls from the same key.
+            seen = set()
+            unique_specs = []
+            for spec in slice_specs:
+                if spec[0] not in seen:
+                    seen.add(spec[0])
+                    unique_specs.append(spec)
+            streamed_slices = self._build_ensemble_slices_streaming(
                 variable,
                 monthly_prediction,
                 monthly_warming,
@@ -1657,27 +1745,17 @@ class MeteorInterface:
                 end_year,
                 transform_config,
                 include_noise,
+                slice_specs=unique_specs,
                 verbose=verbose,
             )
 
         # Extract requested time slices
         results = {}
-        n_months = len(monthly_warming)
-
-        # Window-relative month index. monthly_prediction, monthly_warming and the
-        # sliced stochastic PCs all share the same origin (start_year), which is
-        # derived from base_year inside _get_or_compute_pattern_scaling, so all
-        # three stay aligned.
-        def year_to_month_idx(year):
-            return (year - start_year) * 12
 
         def _get_ensemble_slice(s_idx, e_idx, reduce_time):
-            """Slice the pre-transformed ensemble, or generate+transform per slice."""
-            if pre_transformed_ensemble is not None:
-                sliced = pre_transformed_ensemble.isel(month=slice(s_idx, e_idx))
-                if reduce_time:
-                    sliced = sliced.mean(dim="month")
-                return sliced
+            """Retrieve the streaming slice, or generate+transform per slice."""
+            if streamed_slices is not None:
+                return streamed_slices[(s_idx, e_idx, reduce_time)]
             return self._generate_gridded_slice(
                 monthly_prediction,
                 monthly_warming,
@@ -1901,7 +1979,72 @@ class MeteorInterface:
         )
         return xr.DataArray(transformed, coords=data.coords, dims=data.dims)
 
-    def _build_full_window_transformed_ensemble(
+    def _reconstruct_chunk(
+        self,
+        noise_model,
+        monthly_prediction,
+        monthly_warming,
+        stochastic_pcs_chunk,
+        include_noise,
+    ):
+        """Reconstruct a chunk of realizations as a plain 4-D numpy array.
+
+        Returns shape ``(chunk_size, n_time, n_lat, n_lon)`` matching what the
+        current ``generate_realization(..., add_base=monthly_prediction)`` +
+        ``_stack_realizations`` path produces for the same PCs, but computed
+        as a single batched matmul so no per-realization Python overhead and
+        no ``xr.concat`` roundup.
+
+        When ``include_noise`` is False, ``stochastic_pcs_chunk`` is ignored
+        and a single-realization ``monthly_prediction``-only array is returned.
+        """
+        n_lat = len(noise_model.coords["lat"])
+        n_lon = len(noise_model.coords["lon"])
+
+        if not include_noise:
+            # (1, n_time, n_lat, n_lon) climatology-only path.
+            base_values = monthly_prediction.values
+            if base_values.ndim == 4:
+                base_values = base_values.squeeze()
+            return base_values.reshape(1, -1, n_lat, n_lon).copy()
+
+        n_realizations, n_time, _ = stochastic_pcs_chunk.shape
+
+        # Seasonal cycle (shared across chunk) - noise_only=True path.
+        # We call two "protected" helpers on the noise model here rather than
+        # duplicating the harmonic + physical-components math: this method is
+        # the streaming counterpart of MeteorNoiseGenerator.generate_realization
+        # (which uses the same helpers directly) and is tightly coupled to
+        # that class' internal contract.
+        # pylint: disable=protected-access
+        time = np.arange(n_time)
+        X = noise_model._create_harmonic_features(time, monthly_warming)
+        seasonal_cycle = noise_model.seasonal_model.predict(X)
+        intercept_effect = noise_model.seasonal_model.intercept_
+        temp_effect = (
+            noise_model.seasonal_model.coef_[:, 0] * monthly_warming[:, np.newaxis]
+        )
+        seasonal_cycle_np = (
+            seasonal_cycle - intercept_effect[np.newaxis, :] - temp_effect
+        )
+        seasonal_cycle_reshaped = seasonal_cycle_np.reshape(n_time, n_lat, n_lon)
+
+        # Base climatology (monthly pattern-scaling prediction)
+        base_values = monthly_prediction.values
+        if base_values.ndim == 4:
+            base_values = base_values.squeeze()
+        base_values = find_time_dim_and_cut(base_values, n_time, n_lat, n_lon)
+        base_clim_np = base_values.reshape(n_time, n_lat, n_lon)
+
+        # Batched anomaly reconstruction across the chunk:
+        # (chunk, T, m) @ (m, n_lat*n_lon) -> (chunk, T, n_lat*n_lon)
+        chunk = stochastic_pcs_chunk @ noise_model._physical_components()
+        chunk = chunk.reshape(n_realizations, n_time, n_lat, n_lon)
+        chunk += seasonal_cycle_reshaped
+        chunk += base_clim_np
+        return chunk
+
+    def _build_ensemble_slices_streaming(
         self,
         variable,
         monthly_prediction,
@@ -1912,36 +2055,60 @@ class MeteorInterface:
         end_year,
         transform_config,
         include_noise,
+        slice_specs,
+        chunk_size=None,
         verbose=True,
     ):
-        """
-        Generate the gridded ensemble over the FULL prediction window and apply
-        the seasonal (per-month-of-year, per-gridpoint) distribution transform
-        once.
+        """Streaming variant: never materializes the full 4-D transformed
+        ensemble in memory.
 
-        Fitting the Gaussian half of the quantile map over the full window — and
-        per month-of-year rather than across all months at once — keeps the
-        long-term trend in the variance the map carries through (so the gridded
-        trend is preserved) while removing the seasonal cycle from σ (so the
-        inter-realization noise band is preserved at every gridpoint).
+        Processes realizations in chunks. Two passes: (1) accumulate per
+        (month-of-year, gridpoint) sum + sum-of-squares to fit the Gaussian
+        half of the quantile map on the full-window ensemble (correctness-
+        equivalent to fitting on the concatenated array); (2) reconstruct each
+        chunk again, apply the transform, and extract only the requested time
+        slices into per-slice output arrays.
+
+        Peak working set drops from O(N × T × lat × lon × 3) to
+        O(chunk × T × lat × lon × 2) plus the tiny output slices, which is
+        what unlocks N>~8 at NorESM2-MM resolution.
+
+        Parameters
+        ----------
+        slice_specs : list of (key, s_idx, e_idx, reduce_time)
+            ``key`` is any hashable identifier passed through to the output
+            dict. ``s_idx``/``e_idx`` are month-indices into the full
+            ``start_year..end_year`` window. ``reduce_time=True`` collapses
+            the month dimension via mean (for annual/climatology outputs).
 
         Returns
         -------
-        xr.DataArray
-            Transformed monthly ensemble (realization, month, lat, lon) spanning
-            ``start_year..end_year`` inclusive. Callers slice this once per
-            requested annual / monthly / climatology field.
+        dict
+            ``{key: xr.DataArray}``. Each DataArray has dims
+            ``("realization", "lat", "lon")`` for ``reduce_time=True`` slices
+            or ``("realization", "month", "lat", "lon")`` otherwise.
         """
         if verbose:  # pragma: no cover
             print(
-                "      → Generating full-window gridded ensemble for "
+                "      → Streaming full-window gridded ensemble for "
                 f"{transform_config.transform_type} transform"
             )
 
+        n_realizations = stochastic_pcs.shape[0] if include_noise else 1
+        n_time = len(monthly_warming)
+        n_lat = len(noise_model.coords["lat"])
+        n_lon = len(noise_model.coords["lon"])
+
+        if chunk_size is None:
+            chunk_size = _resolve_gridded_chunk_size(
+                n_realizations, n_time, n_lat, n_lon
+            )
+        chunk_size = max(1, min(chunk_size, n_realizations))
+
+        # Load reference and fit target params (small, done once).
         ssp_data, pr_baseline_field = self._load_transform_reference(
             variable, start_year, end_year, verbose=verbose
         )
-
         if verbose:  # pragma: no cover
             print(
                 f"      → Fitting per-month-of-year per-gridpoint "
@@ -1951,42 +2118,115 @@ class MeteorInterface:
             ssp_data, transform_config.transform_type
         )
 
-        if include_noise:
-            realizations = noise_model.generate_realization(
-                monthly_warming,
-                noise_only=True,
-                add_base=monthly_prediction,
-                stochastic_pcs=stochastic_pcs,
-            )
-            if not isinstance(realizations, list):
-                realizations = [realizations]
-        else:
-            realizations = [monthly_prediction]
-        ensemble = _stack_realizations(realizations)
-
-        data = ensemble
+        # pr_baseline_field is (lat, lon) after squeezing.
+        pr_baseline_np = None
         if pr_baseline_field is not None:
             extra_dims = [d for d in pr_baseline_field.dims if d not in ("lat", "lon")]
             if extra_dims:
                 pr_baseline_field = pr_baseline_field.isel(
                     {d: 0 for d in extra_dims}, drop=True
                 )
-            data = data + pr_baseline_field
+            pr_baseline_np = pr_baseline_field.values
 
+        # Determine chunk offsets.
+        chunk_starts = list(range(0, n_realizations, chunk_size))
+        month_of_year = np.arange(n_time) % 12  # (T,)
+
+        # -------- Pass 1: accumulate Gaussian moments per (moy, lat, lon) --------
         if verbose:  # pragma: no cover
             print(
-                "      → Fitting per-month-of-year per-gridpoint Gaussian on "
-                "full-window generated ensemble..."
+                f"      → Pass 1/2: Gaussian moment accumulation "
+                f"({len(chunk_starts)} chunks of ≤{chunk_size} realizations)"
             )
-        gaussian_params = transform_config.fit_3d_seasonal_func(data.values, "gaussian")
+        sum_moy = np.zeros((12, n_lat, n_lon), dtype=np.float64)
+        sumsq_moy = np.zeros((12, n_lat, n_lon), dtype=np.float64)
+        count_moy = np.zeros(12, dtype=np.int64)
 
-        transformed = transform_config.apply_seasonal_func(
-            data.values,
-            gaussian_params,
-            target_params,
-            target_dist=transform_config.transform_type,
-        )
-        return xr.DataArray(transformed, coords=data.coords, dims=data.dims)
+        for start in chunk_starts:
+            end = min(start + chunk_size, n_realizations)
+            pcs_chunk = stochastic_pcs[start:end] if include_noise else None
+            chunk = self._reconstruct_chunk(
+                noise_model,
+                monthly_prediction,
+                monthly_warming,
+                pcs_chunk,
+                include_noise,
+            )
+            if pr_baseline_np is not None:
+                chunk += pr_baseline_np  # broadcast (lat, lon) -> (chunk, T, lat, lon)
+            for m in range(12):
+                idx = np.where(month_of_year == m)[0]
+                sub = chunk[:, idx, :, :]
+                sum_moy[m] += sub.sum(axis=(0, 1))
+                sumsq_moy[m] += np.square(sub).sum(axis=(0, 1))
+                count_moy[m] += sub.shape[0] * sub.shape[1]
+            del chunk
+
+        mean_moy = sum_moy / count_moy[:, None, None]
+        var_moy = sumsq_moy / count_moy[:, None, None] - np.square(mean_moy)
+        # Numerical safety: variance can go slightly negative from cancellation
+        # when std is tiny (constant gridpoint). Clip to zero.
+        var_moy = np.maximum(var_moy, 0.0)
+        std_moy = np.sqrt(var_moy)
+        gaussian_params = {"mean": mean_moy, "std": std_moy}
+
+        # -------- Pass 2: transform + extract requested slices --------
+        if verbose:  # pragma: no cover
+            print("      → Pass 2/2: streaming transform + slice extraction")
+
+        # Allocate output arrays keyed by slice key.
+        outputs = {}
+        for key, s_idx, e_idx, reduce_time in slice_specs:
+            if reduce_time:
+                out_shape = (n_realizations, n_lat, n_lon)
+                dims = ("realization", "lat", "lon")
+                coords = {
+                    "realization": np.arange(n_realizations),
+                    "lat": noise_model.coords["lat"],
+                    "lon": noise_model.coords["lon"],
+                }
+            else:
+                out_shape = (n_realizations, e_idx - s_idx, n_lat, n_lon)
+                dims = ("realization", "month", "lat", "lon")
+                coords = {
+                    "realization": np.arange(n_realizations),
+                    "month": np.arange(s_idx, e_idx),
+                    "lat": noise_model.coords["lat"],
+                    "lon": noise_model.coords["lon"],
+                }
+            outputs[key] = (np.empty(out_shape, dtype=np.float64), dims, coords)
+
+        for start in chunk_starts:
+            end = min(start + chunk_size, n_realizations)
+            pcs_chunk = stochastic_pcs[start:end] if include_noise else None
+            chunk = self._reconstruct_chunk(
+                noise_model,
+                monthly_prediction,
+                monthly_warming,
+                pcs_chunk,
+                include_noise,
+            )
+            if pr_baseline_np is not None:
+                chunk += pr_baseline_np
+            transformed_chunk = transform_config.apply_seasonal_func(
+                chunk,
+                gaussian_params,
+                target_params,
+                target_dist=transform_config.transform_type,
+            )
+            del chunk
+
+            for key, s_idx, e_idx, reduce_time in slice_specs:
+                sliced = transformed_chunk[:, s_idx:e_idx, :, :]
+                if reduce_time:
+                    sliced = sliced.mean(axis=1)
+                outputs[key][0][start:end] = sliced
+            del transformed_chunk
+
+        return {
+            key: xr.DataArray(arr, dims=dims, coords=coords)
+            for key, (arr, dims, coords) in outputs.items()
+        }
 
     def _apply_impacts(
         self, var_output, variable, impact_configs, custom_regions=None, verbose=True

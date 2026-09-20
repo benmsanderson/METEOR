@@ -18,6 +18,8 @@ from meteor.meteor_interface import (
     MeteorInterface,
     PatternScalingResult,
     _get_default_config,
+    _months_since,
+    _resolve_gridded_chunk_size,
     _stack_realizations,
 )
 from meteor.precipitation_transform import (
@@ -60,6 +62,37 @@ def mock_interface(interface_factory):
     )
     _set_trained(interface, ["tas", "pr"])
     yield interface
+
+
+def test_resolve_gridded_chunk_size_env_var(monkeypatch):
+    """METEOR_GRIDDED_CHUNK_SIZE overrides the default; invalid values fall back
+    to the auto-sized target of ~5 GB per chunk.
+
+    Auto-size formula: chunk = 5 GB / (n_time * n_lat * n_lon * 8 bytes),
+    capped at n_realizations.
+    """
+    # No env var -> auto-size based on per-realization memory footprint.
+    monkeypatch.delenv("METEOR_GRIDDED_CHUNK_SIZE", raising=False)
+    # Small grid: per-real footprint tiny, so chunk should max out at N.
+    assert _resolve_gridded_chunk_size(10, 24, 8, 8) == 10
+    # Large grid where a single realization is ~1.3 GB -> chunk ≈ 5/1.3 ≈ 3.
+    chunk = _resolve_gridded_chunk_size(100, 3012, 192, 288)
+    assert 1 <= chunk <= 100
+    assert chunk == 4  # deterministic given the 5-GB target
+
+    # Env-var override honored and capped by n_realizations.
+    monkeypatch.setenv("METEOR_GRIDDED_CHUNK_SIZE", "2")
+    assert _resolve_gridded_chunk_size(10, 3012, 192, 288) == 2
+    monkeypatch.setenv("METEOR_GRIDDED_CHUNK_SIZE", "20")
+    assert _resolve_gridded_chunk_size(10, 3012, 192, 288) == 10  # capped
+
+    # Malformed values silently fall back to auto-size (so a typo in a batch
+    # script can't crash METEOR at import time).
+    monkeypatch.setenv("METEOR_GRIDDED_CHUNK_SIZE", "not-an-int")
+    fallback = _resolve_gridded_chunk_size(100, 3012, 192, 288)
+    assert fallback == 4
+    monkeypatch.setenv("METEOR_GRIDDED_CHUNK_SIZE", "0")
+    assert _resolve_gridded_chunk_size(100, 3012, 192, 288) == 4
 
 
 def test_get_default_config():
@@ -1029,3 +1062,22 @@ def test_apply_gridded_transform_drops_singleton_ens_dim(interface_factory):
     assert result.shape == (2, 12, 2, 2)
     # ... and the gamma transform guarantees non-negative precipitation.
     assert np.all(result.values >= 0)
+
+
+def test_months_since():
+    """Month-index conversion, including the exclusive-end-bound idiom."""
+    assert _months_since(1850, 1850) == 0
+    assert _months_since(1851, 1850) == 12
+    assert _months_since(2015, 1850) == (2015 - 1850) * 12
+
+    # Years before the origin index negatively rather than clamping; callers
+    # bounds-check the result (`if 0 <= s_idx and e_idx <= n_months`).
+    assert _months_since(1849, 1850) == -12
+
+    # Passing year + 1 gives the exclusive end bound covering all of `year`,
+    # which is how the "+1 to include end year" call sites are written.
+    for year, origin in ((2015, 1850), (1850, 1850), (2100, 2015)):
+        assert _months_since(year + 1, origin) - _months_since(year, origin) == 12
+
+    # Origin is a real parameter, not incidental: same year, different origins.
+    assert _months_since(2015, 1850) != _months_since(2015, 1900)

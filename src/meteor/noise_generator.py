@@ -196,8 +196,16 @@ class MeteorNoiseGenerator:
             self.seasonal_intercept = np.ascontiguousarray(
                 self.seasonal_model.intercept_
             )
+            # Hand the contiguous buffer back to the estimator. Straight after a
+            # fit these arrays are not C-contiguous, so ascontiguousarray copies
+            # them -- and keeping both the estimator's original and our copy
+            # would double the largest arrays in the model for no benefit. The
+            # values are identical; only the memory order changes.
+            self.seasonal_model.coef_ = self.seasonal_coef
+            self.seasonal_model.intercept_ = self.seasonal_intercept
         if self.pca is not None:
             self.eof_components = np.ascontiguousarray(self.pca.components_)
+            self.pca.components_ = self.eof_components
 
     def _decompose_varx_params(self):
         """

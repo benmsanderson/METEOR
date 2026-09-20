@@ -337,3 +337,41 @@ def test_pattern_artifact_rejects_foreign_file(tmp_path):
     export_noise_model(_fit_small_model(), path)
     with pytest.raises(ValueError, match="not a METEOR pattern-scaling artifact"):
         load_pattern_scaling(path)
+
+
+def test_publication_metadata_is_recorded(tmp_path):
+    """DOI and source URL travel with the artifact so a copy stays traceable."""
+    model = _fit_small_model()
+    path = str(tmp_path / "noise.nc")
+    export_noise_model(
+        model, path, doi="10.5281/zenodo.0000000", source_url="https://example.org/dep"
+    )
+    with xr.open_dataset(path) as ds:
+        assert ds.attrs["doi"] == "10.5281/zenodo.0000000"
+        assert ds.attrs["source_url"] == "https://example.org/dep"
+
+
+def test_artifacts_without_publication_metadata_are_quiet(tmp_path, recwarn):
+    """A scratch export does not nag about the working tree being dirty."""
+    model = _fit_small_model()
+    export_noise_model(model, str(tmp_path / "noise.nc"))
+    assert not [w for w in recwarn if "uncommitted changes" in str(w.message)]
+    with xr.open_dataset(str(tmp_path / "noise.nc")) as ds:
+        assert ds.attrs["doi"] == ""
+        assert ds.attrs["source_url"] == ""
+
+
+def test_depositing_from_a_dirty_tree_warns(tmp_path):
+    """Publication metadata plus an unreproducible version is flagged."""
+    import meteor.portable_artifact as pa
+
+    model = _fit_small_model()
+    original = pa.__version__
+    pa.__version__ = "1.6.1+6.gdeadbee.dirty"
+    try:
+        with pytest.warns(UserWarning, match="uncommitted changes"):
+            export_noise_model(
+                model, str(tmp_path / "n.nc"), doi="10.5281/zenodo.0000000"
+            )
+    finally:
+        pa.__version__ = original

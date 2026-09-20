@@ -252,6 +252,8 @@ def export_timeseries_bundle(
     pr_reference=None,
     pr_reference_start_year=None,
     scenarios=None,
+    doi=None,
+    source_url=None,
     dtype=np.float32,
 ):
     """
@@ -282,6 +284,11 @@ def export_timeseries_bundle(
         these a client has the step-response kernel but no forcing to convolve
         it with, and obtaining forcing means running CICERO-SCM -- which a
         browser cannot do. Costs roughly 4 KB per scenario.
+    doi : str, optional
+        DOI of the deposit this artifact belongs to, recorded so a downloaded
+        copy can be traced back.
+    source_url : str, optional
+        Where the artifact is published, recorded alongside the DOI.
     dtype : np.dtype, default np.float32
         Storage precision. float32 is the default here: a bundle is a wire
         format consumed by reimplementations that will not reproduce float64
@@ -481,7 +488,7 @@ def export_timeseries_bundle(
         "forcing_year_start": int(forcing_year_start),
         "annual_to_monthly": "each annual value is repeated for all 12 months",
         **_provenance_attrs(
-            cmip6_model, training_scenario, training_config, created=None
+            cmip6_model, training_scenario, training_config, doi, source_url
         ),
     }
 

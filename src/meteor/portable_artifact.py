@@ -20,6 +20,7 @@ See ``docs/emulator_artifact_schema.md`` for the versioned on-disk layout.
 
 import json
 import os
+import warnings
 
 import numpy as np
 import xarray as xr
@@ -53,9 +54,26 @@ SEASONAL_FEATURE_NAMES = [
 ]
 
 
-def _provenance_attrs(cmip6_model, training_scenario, training_config, created):
+def _provenance_attrs(
+    cmip6_model,
+    training_scenario,
+    training_config,
+    doi=None,
+    source_url=None,
+    created=None,
+):
     """
     Build the common provenance attribute block.
+
+    Artifacts are meant to be published outside this repository -- a deposit
+    with a DOI rather than a committed file -- so they carry the identifiers
+    needed to trace a downloaded copy back to its source.
+
+    Warns when publication metadata (``doi`` or ``source_url``) is supplied
+    while the recorded METEOR version is marked dirty: the artifact was then
+    built from an uncommitted working tree and cannot be reproduced from any
+    commit. A scratch export from a dirty tree is normal while iterating, so
+    the warning is deliberately scoped to the citable case.
 
     Parameters
     ----------
@@ -67,6 +85,10 @@ def _provenance_attrs(cmip6_model, training_scenario, training_config, created):
         Full training configuration; stored as a JSON string.
     created : str or None
         ISO-8601 creation date. Defaults to today when None.
+    doi : str or None
+        DOI of the deposit this artifact belongs to, when it has one.
+    source_url : str or None
+        Where the artifact is published, or the code that produced it.
 
     Returns
     -------
@@ -75,7 +97,20 @@ def _provenance_attrs(cmip6_model, training_scenario, training_config, created):
     """
     if created is None:
         created = np.datetime_as_string(np.datetime64("now", "s"), unit="s")
+    # Only warn when publication metadata is supplied. A scratch export from a
+    # dirty tree is normal while iterating; a *citable* one is not, and that is
+    # what a doi or source_url signals.
+    if (doi or source_url) and "dirty" in __version__:
+        warnings.warn(
+            f"Exporting with METEOR version {__version__!r}: the working tree "
+            "has uncommitted changes, so this artifact cannot be reproduced "
+            "from any commit. Commit before depositing.",
+            UserWarning,
+            stacklevel=3,
+        )
     return {
+        "doi": "" if doi is None else str(doi),
+        "source_url": "" if source_url is None else str(source_url),
         "schema_version": SCHEMA_VERSION,
         "meteor_version": __version__,
         "cmip6_model": "" if cmip6_model is None else str(cmip6_model),
@@ -95,6 +130,8 @@ def export_noise_model(
     cmip6_model=None,
     training_scenario=None,
     training_config=None,
+    doi=None,
+    source_url=None,
     dtype=np.float64,
 ):
     """
@@ -117,6 +154,16 @@ def export_noise_model(
         Training scenario, recorded as provenance.
     training_config : dict, optional
         Full training configuration, recorded as provenance.
+    doi : str, optional
+        DOI of the deposit this artifact belongs to, recorded so a downloaded
+        copy can be traced back.
+    source_url : str, optional
+        Where the artifact is published, recorded alongside the DOI.
+    doi : str, optional
+        DOI of the deposit this artifact belongs to, recorded so a downloaded
+        copy can be traced back.
+    source_url : str, optional
+        Where the artifact is published, recorded alongside the DOI.
     dtype : np.dtype, default np.float64
         Storage precision for the exported float arrays. The default preserves
         generation bit-for-bit; ``np.float32`` roughly halves the file at the
@@ -199,7 +246,7 @@ def export_noise_model(
             "space index = lat_index * n_lon + lon_index (C order over lat, lon)"
         ),
         **_provenance_attrs(
-            cmip6_model, training_scenario, training_config, created=None
+            cmip6_model, training_scenario, training_config, doi, source_url
         ),
     }
 
@@ -357,6 +404,8 @@ def export_pattern_scaling(
     cmip6_model=None,
     training_scenario=None,
     training_config=None,
+    doi=None,
+    source_url=None,
     dtype=np.float64,
 ):
     """
@@ -467,7 +516,7 @@ def export_pattern_scaling(
         "dacanom_included": 0,
         "step_response": "u_i(t) = s_i * (1 - exp(-t / tau_i)), t in years from year_0",
         **_provenance_attrs(
-            cmip6_model, training_scenario, training_config, created=None
+            cmip6_model, training_scenario, training_config, doi, source_url
         ),
     }
 

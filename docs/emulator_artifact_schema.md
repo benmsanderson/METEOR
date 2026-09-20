@@ -32,6 +32,43 @@ Measured on models trained with the shipped defaults (`n_modes=40`,
 `lag_order=2`, `use_exog='none'`, `weight_eofs=True`). The `pr` artifacts are
 the same size to within 0.01 MB.
 
+## Distribution
+
+Artifacts are **not committed to this repository**. They are data products, not
+source: a `tas` bundle is ~110 KB but a `pr` bundle is ~900 KB, full artifacts
+run to tens of megabytes, and every retraining produces a new one. Git is the
+wrong place for all of that, and the repository is already large.
+
+The intended route is a versioned deposit with a DOI (Zenodo or equivalent).
+This repository holds the *exporter* and this schema; the deposit holds the
+artifacts. Accordingly every artifact carries two provenance fields so a
+downloaded copy stays traceable to its source:
+
+| Attribute | Meaning |
+|---|---|
+| `doi` | DOI of the deposit the artifact belongs to (empty if unpublished) |
+| `source_url` | Where it is published, or the code that produced it |
+
+Pass them at export time:
+
+```python
+export_timeseries_bundle(
+    noise, pattern, "bundle.nc", locations,
+    scenarios=["ssp126", "ssp245", "ssp585"],
+    doi="10.5281/zenodo.XXXXXXX",
+    source_url="https://doi.org/10.5281/zenodo.XXXXXXX",
+)
+```
+
+Supplying either one while `meteor_version` carries a `.dirty` suffix raises a
+warning: the artifact was built from an uncommitted working tree and cannot be
+reproduced from any commit, which is tolerable for a scratch export and not for
+something citable. Commit before depositing.
+
+`training_config`, `cmip6_model`, `training_scenario`, `meteor_version` and
+`created` are recorded regardless, so an artifact describes how it was made
+even before it has a DOI.
+
 ## Precision
 
 Full artifacts default to **float64**, which makes a reload generate

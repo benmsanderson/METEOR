@@ -1530,13 +1530,22 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
     variable_name,
     n_modes=40,
     lag_order=2,
+    use_exog=None,
+    weight_eofs=None,
 ):
     """
     Validate a cached noise model file.
 
     Checks if the cached pickle file exists, can be loaded, and contains
-    the expected configuration (n_modes, lag_order, variable_name) and
-    required attributes (pca, varx_results).
+    the expected configuration (n_modes, lag_order, variable_name, and
+    optionally use_exog and weight_eofs) and required attributes
+    (pca, varx_results).
+
+    ``use_exog`` and ``weight_eofs`` change what the fitted model *is*, not
+    just how big it is, so a cache trained under different settings is not
+    interchangeable with one trained under the current configuration. They are
+    opt-in (``None`` skips the check) so that callers which do not track those
+    settings keep their existing behaviour.
 
     Parameters
     ----------
@@ -1548,6 +1557,13 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
         Expected number of PCA modes. Default is 40.
     lag_order : int, optional
         Expected temporal lag order. Default is 2.
+    use_exog : str, optional
+        Expected exogenous-variable setting ('none', 'temp_only', 'all').
+        When None (default) the setting is not checked. Note that pickles
+        written before the setting existed load as 'all'.
+    weight_eofs : bool, optional
+        Expected EOF area-weighting flag. When None (default) the flag is not
+        checked. Pickles written before weighting existed load as False.
 
     Returns
     -------
@@ -1572,6 +1588,8 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
             "variable_name": variable_name,
             "n_modes": n_modes,
             "lag_order": lag_order,
+            "use_exog": use_exog,
+            "weight_eofs": weight_eofs,
         },
         "found": {},
         "message": "",
@@ -1591,6 +1609,8 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
         info["found"]["n_modes"] = getattr(noise_model, "n_modes", None)
         info["found"]["lag_order"] = getattr(noise_model, "lag_order", None)
         info["found"]["variable_name"] = getattr(noise_model, "variable_name", None)
+        info["found"]["use_exog"] = getattr(noise_model, "use_exog", None)
+        info["found"]["weight_eofs"] = getattr(noise_model, "weight_eofs", None)
 
         # Validate n_modes
         if not hasattr(noise_model, "n_modes") or noise_model.n_modes != n_modes:
@@ -1616,6 +1636,26 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
             info["message"] = (
                 f"variable_name mismatch: expected '{variable_name}', "
                 f"found '{info['found']['variable_name']}'"
+            )
+            return False, None, info
+
+        # Validate use_exog (opt-in): a model fitted with exogenous regressors
+        # is a different model, not a differently sized one.
+        if use_exog is not None and info["found"]["use_exog"] != use_exog:
+            info["message"] = (
+                f"use_exog mismatch: expected '{use_exog}', "
+                f"found '{info['found']['use_exog']}'"
+            )
+            return False, None, info
+
+        # Validate weight_eofs (opt-in): the EOF basis differs between the
+        # weighted and unweighted fits, so the two are not interchangeable.
+        if weight_eofs is not None and bool(info["found"]["weight_eofs"]) != bool(
+            weight_eofs
+        ):
+            info["message"] = (
+                f"weight_eofs mismatch: expected {weight_eofs}, "
+                f"found {info['found']['weight_eofs']}"
             )
             return False, None, info
 

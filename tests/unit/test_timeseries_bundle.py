@@ -613,3 +613,33 @@ def test_pr_reference_rejects_real_ensemble(tmp_path):
             pr_reference=reference,
             pr_reference_start_year=1850,
         )
+
+
+def test_golden_fixture_inherits_bundle_provenance(tmp_path):
+    """A fixture is traceable to the same deposit as its bundle."""
+    from meteor.timeseries_bundle import export_golden_fixture
+
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    bundle_path = str(tmp_path / "bundle.nc")
+    export_timeseries_bundle(
+        noise,
+        pattern,
+        bundle_path,
+        LOCATIONS,
+        variable="tas",
+        cmip6_model="TEST-ESM",
+        source_url="https://example.org/deposit",
+        dtype=np.float64,
+    )
+    fixture_path = str(tmp_path / "golden.nc")
+    export_golden_fixture(
+        bundle_path, fixture_path, noise, np.linspace(0.3, 2.0, 60), seed=3
+    )
+
+    with xr.open_dataset(fixture_path) as ds:
+        assert ds.attrs["source_url"] == "https://example.org/deposit"
+        assert ds.attrs["cmip6_model"] == "TEST-ESM"
+        assert ds.attrs["meteor_version"]
+        assert ds.attrs["created"]
+        assert "doi" in ds.attrs

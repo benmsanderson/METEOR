@@ -35,7 +35,7 @@ import json
 import numpy as np
 import xarray as xr
 
-from . import pattern_logic_lib, scm_forcer_engine
+from . import __version__, pattern_logic_lib, scm_forcer_engine
 from .geo_data_utils import extract_point, global_mean, regional_mean
 from .portable_artifact import (
     SCHEMA_VERSION,
@@ -759,6 +759,13 @@ def export_golden_fixture(
         "variable_name": bundle.attrs.get("variable_name", ""),
         "cmip6_model": bundle.attrs.get("cmip6_model", ""),
         "training_scenario": bundle.attrs.get("training_scenario", ""),
+        # A fixture is derived from one specific bundle and is meaningless
+        # apart from it, so it inherits that bundle's provenance: deposited
+        # together, they must be traceable together.
+        "meteor_version": bundle.attrs.get("meteor_version", __version__),
+        "doi": bundle.attrs.get("doi", ""),
+        "source_url": bundle.attrs.get("source_url", ""),
+        "created": np.datetime_as_string(np.datetime64("now", "s"), unit="s"),
         "usage": (
             "Feed stochastic_pcs and t_glob into the reimplementation; it must "
             "reproduce series (and forced_response when present)."

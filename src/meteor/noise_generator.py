@@ -180,8 +180,15 @@ class MeteorNoiseGenerator:
         """
         Split the stacked VARX parameter matrix into named coefficient arrays.
 
-        Reproduces the row slicing the generation paths previously applied
-        inline, so this refactor is behaviour-preserving.
+        ``statsmodels`` stacks the fitted parameters row-wise in the order
+        ``[const, exog_1..exog_k, L1.y_1..L1.y_m, L2.y_1..L2.y_m, ...]`` -- the
+        exogenous rows sit immediately after the intercept, not at the end of
+        the matrix. Earlier releases read the lag blocks from ``params[1:]`` and
+        the exogenous block from ``params[-n_exog:]``, which silently
+        interleaved the exogenous rows into the first lag matrix and picked up
+        trailing lag rows as exogenous coefficients whenever ``use_exog`` was
+        ``'temp_only'`` or ``'all'``. Models fitted with ``use_exog='none'``
+        (the default) have no exogenous rows and were never affected.
 
         Sets ``varx_intercept`` (n_modes,), ``varx_A`` (lag_order, n_modes,
         n_modes), ``varx_B`` (n_modes, n_exog) or None, from ``varx_params``.
@@ -198,14 +205,17 @@ class MeteorNoiseGenerator:
 
         # Every array is stored C-contiguous. Layout is part of the contract:
         # matmul summation order depends on it, so normalizing here makes a
-        # freshly fitted model and a reloaded pickle produce bit-for-bit
-        # identical output.
+        # freshly fitted model, a reloaded pickle and a reloaded portable
+        # artifact produce bit-for-bit identical output.
         self.varx_intercept = np.ascontiguousarray(params[0, :])
-        self.varx_B = np.ascontiguousarray(params[-n_exog:, :].T) if n_exog else None
+        self.varx_B = (
+            np.ascontiguousarray(params[1 : 1 + n_exog, :].T) if n_exog else None
+        )
+        lag_start = 1 + n_exog
         self.varx_A = np.ascontiguousarray(
             np.stack(
                 [
-                    params[1 + i * n_modes : 1 + (i + 1) * n_modes, :].T
+                    params[lag_start + i * n_modes : lag_start + (i + 1) * n_modes, :].T
                     for i in range(self.lag_order)
                 ]
             )

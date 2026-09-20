@@ -392,3 +392,37 @@ def test_bundle_omits_pr_reference_when_not_supplied(tmp_path):
     bundle = load_timeseries_bundle(path)
     assert "pr_reference" not in bundle
     assert bundle.attrs["pr_reference_start_year"] == -1
+
+
+def test_forced_response_tolerates_zero_step_experiments(tmp_path):
+    """The full forcing mapping, including a zero-step 'base', is accepted.
+
+    METEOR's own _predict_combined_experiment_from_forcer_series skips 'base'
+    explicitly. The simple climate model still returns an entry for it, with a
+    zero step magnitude, and dividing the forcing increments by that yields
+    NaN. Passing a hand-picked subset of experiments hides this; passing what
+    the model actually produces does not.
+    """
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    path = str(tmp_path / "bundle.nc")
+    export_timeseries_bundle(
+        noise, pattern, path, LOCATIONS, variable="tas", dtype=np.float64
+    )
+    bundle = load_timeseries_bundle(path)
+    assert float(bundle["exp_forc"].sel(exp="base").values) == 0.0
+
+    forcing = np.linspace(0.0, 5.0, 120)
+    full = {
+        "base": np.zeros_like(forcing),
+        "co2x4": forcing,
+        "sulxanom": -0.3 * forcing,
+    }
+    subset = {"co2x4": forcing, "sulxanom": -0.3 * forcing}
+
+    with_base = forced_response_from_bundle(bundle, "global", full, year_0=1850)
+    without_base = forced_response_from_bundle(bundle, "global", subset, year_0=1850)
+
+    assert np.all(np.isfinite(with_base)), "zero-step experiment produced NaN"
+    # 'base' carries no forced response, so including it must change nothing.
+    np.testing.assert_allclose(with_base, without_base, rtol=1e-12, atol=1e-12)

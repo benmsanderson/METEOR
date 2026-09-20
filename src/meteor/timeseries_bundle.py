@@ -411,9 +411,10 @@ def forced_response_from_bundle(bundle, location, forcing_by_exp, year_0=1850):
     location : str
         Location specifier present in the bundle's ``location`` coordinate.
     forcing_by_exp : dict
-        Mapping of experiment name to an annual forcing trajectory. Experiments
-        absent from the mapping (or mapped to None) contribute nothing, which
-        matches how METEOR skips the ``base`` experiment.
+        Mapping of experiment name to an annual forcing trajectory. Accepts the
+        full mapping the simple climate model produces, including ``base``:
+        experiments that are absent, mapped to None, or carry a zero step
+        magnitude contribute nothing, matching how METEOR skips ``base``.
     year_0 : int, default 1850
         First calendar year of the forcing trajectories.
 
@@ -434,6 +435,14 @@ def forced_response_from_bundle(bundle, location, forcing_by_exp, year_0=1850):
         forcing = forcing_by_exp.get(exp)
         if forcing is None:
             continue
+        # A zero step magnitude means the experiment carries no forced response
+        # -- this is the 'base' experiment, which METEOR's own
+        # _predict_combined_experiment_from_forcer_series skips explicitly.
+        # Dividing the forcing increments by it would yield NaN, so skip it
+        # here too rather than poisoning the sum.
+        forc_step = float(bundle["exp_forc"].values[j])
+        if not np.isfinite(forc_step) or forc_step == 0.0:
+            continue
         params = {}
         for k in range(bundle.sizes["pattern_mode"]):
             params[f"t{k}"] = float(bundle["step_timescales"].values[j, k])
@@ -443,7 +452,7 @@ def forced_response_from_bundle(bundle, location, forcing_by_exp, year_0=1850):
         pcs = pattern_logic_lib.imodel_filter(
             params,
             forcing,
-            forc_step=float(bundle["exp_forc"].values[j]),
+            forc_step=forc_step,
             year_0=year_0,
         )
         projection = bundle["pattern_projection"].values[loc_idx, j]

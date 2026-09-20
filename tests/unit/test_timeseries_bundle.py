@@ -304,6 +304,9 @@ def test_golden_fixture_is_reproducible_and_self_consistent(tmp_path):
             seed=7,
             n_realizations=2,
             forcing_by_exp=forcing,
+            # float64 so the self-consistency assertion below can be exact;
+            # the default float32 is covered separately.
+            dtype=np.float64,
         )
 
     with xr.open_dataset(first) as ds_a, xr.open_dataset(second) as ds_b:
@@ -336,6 +339,47 @@ def test_golden_fixture_is_reproducible_and_self_consistent(tmp_path):
 
     assert "forced_response" in fixture
     assert fixture["forced_response"].shape == (len(LOCATIONS), 100)
+
+
+def test_golden_fixture_defaults_to_float32(tmp_path):
+    """The default precision keeps a fixture small and still self-consistent.
+
+    A fixture validates a port that reads float32 bundle arrays, so it cannot
+    be held to a tighter tolerance than single precision -- and the PC array
+    dominates the file size.
+    """
+    from meteor.timeseries_bundle import export_golden_fixture
+
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    bundle_path = str(tmp_path / "bundle.nc")
+    export_timeseries_bundle(
+        noise, pattern, bundle_path, LOCATIONS, variable="tas", dtype=np.float64
+    )
+
+    n_time = 120
+    t_glob = np.linspace(0.3, 2.4, n_time)
+    path = str(tmp_path / "golden32.nc")
+    export_golden_fixture(bundle_path, path, noise, t_glob, seed=7, n_realizations=2)
+
+    with xr.open_dataset(path) as opened:
+        fixture = opened.load()
+    assert fixture["stochastic_pcs"].dtype == np.float32
+    assert fixture["series"].dtype == np.float32
+
+    bundle = load_timeseries_bundle(bundle_path)
+    design = _harmonic_features(n_time, t_glob)
+    pcs = fixture["stochastic_pcs"].values.astype(np.float64)
+    for i, spec in enumerate(str(s) for s in fixture["location"].values):
+        idx = list(bundle["location"].values).index(spec)
+        seasonal = (
+            design @ bundle["seasonal_coef"].values[idx]
+            + bundle["seasonal_intercept"].values[idx]
+        )
+        rebuilt = seasonal[None, :] + pcs @ bundle["eof_projection"].values[idx]
+        np.testing.assert_allclose(
+            rebuilt, fixture["series"].values[i], rtol=1e-6, atol=1e-4
+        )
 
 
 def test_bundle_bakes_pr_reference_per_location(tmp_path):
@@ -508,3 +552,64 @@ def test_bundle_with_scenario_forcing_closes_the_loop(tmp_path):
 
     with pytest.raises(KeyError, match="not in bundle"):
         forcing_from_bundle(bundle, "ssp585")
+
+
+def test_pr_reference_drops_singleton_ensemble_dim(tmp_path):
+    """CMIP6 composites carry an 'ens' axis that must not leak into the bundle.
+
+    _load_transform_reference returns dims ('ens', 'month', 'lat', 'lon') with
+    ens of length 1. The spatial reduction preserves it, so the projected
+    series is (1, n_month) rather than (n_month,).
+    """
+    from meteor.timeseries_bundle import forcing_from_bundle  # noqa: F401
+
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    rng = np.random.default_rng(77)
+    n_month = 240
+    reference = xr.DataArray(
+        rng.gamma(3.0, 0.5, size=(1, n_month, N_LAT, N_LON)),
+        coords={
+            "ens": [1],
+            "month": np.arange(n_month),
+            "lat": LATS,
+            "lon": LONS,
+        },
+        dims=("ens", "month", "lat", "lon"),
+    )
+    path = str(tmp_path / "bundle_pr.nc")
+    export_timeseries_bundle(
+        noise,
+        pattern,
+        path,
+        LOCATIONS,
+        variable="pr",
+        pr_reference=reference,
+        pr_reference_start_year=1850,
+        dtype=np.float64,
+    )
+    bundle = load_timeseries_bundle(path)
+    assert bundle["pr_reference"].shape == (len(LOCATIONS), n_month)
+    assert "ens" not in bundle.dims
+
+
+def test_pr_reference_rejects_real_ensemble(tmp_path):
+    """A genuine multi-member reference is refused, not silently collapsed."""
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    rng = np.random.default_rng(78)
+    reference = xr.DataArray(
+        rng.gamma(3.0, 0.5, size=(3, 60, N_LAT, N_LON)),
+        coords={"ens": [1, 2, 3], "month": np.arange(60), "lat": LATS, "lon": LONS},
+        dims=("ens", "month", "lat", "lon"),
+    )
+    with pytest.raises(ValueError, match="expected a single time series"):
+        export_timeseries_bundle(
+            noise,
+            pattern,
+            str(tmp_path / "b.nc"),
+            LOCATIONS,
+            variable="pr",
+            pr_reference=reference,
+            pr_reference_start_year=1850,
+        )

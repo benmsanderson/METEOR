@@ -408,10 +408,24 @@ def export_timeseries_bundle(
         )
 
     if pr_reference is not None:
-        reference = np.stack([_project_field(pr_reference, p) for p in parsed])
+        rows = []
+        for location in parsed:
+            # CMIP6 composites carry a singleton 'ens' dimension that survives
+            # the spatial reduction; drop it rather than smuggle a stray axis
+            # into the bundle. A genuine multi-member reference is ambiguous
+            # here -- the caller has to decide how to combine members -- so
+            # fail loudly instead of silently picking one.
+            projected = np.squeeze(np.asarray(_project_field(pr_reference, location)))
+            if projected.ndim != 1:
+                raise ValueError(
+                    f"pr_reference reduced to shape {projected.shape} at "
+                    f"{location['spec']}; expected a single time series. Reduce "
+                    "any ensemble dimension before exporting."
+                )
+            rows.append(projected)
         data_vars["pr_reference"] = (
             ("location", "reference_month"),
-            reference.astype(dtype),
+            np.stack(rows).astype(dtype),
         )
 
     ds = xr.Dataset(
@@ -625,6 +639,7 @@ def export_golden_fixture(
     n_realizations=2,
     forcing_by_exp=None,
     year_0=1850,
+    dtype=np.float32,
 ):
     """
     Write fixed-seed reference output for validating a reimplementation.
@@ -659,6 +674,11 @@ def export_golden_fixture(
         Forcing trajectories per experiment for the forced term.
     year_0 : int, default 1850
         First year of the forcing trajectories.
+    dtype : np.dtype, default np.float32
+        Storage precision. float32 by default for the same reason bundles use
+        it: a fixture validates a reimplementation that reads float32 bundle
+        arrays, so it cannot be held to a tighter tolerance than that, and the
+        PC array dominates the file size.
 
     Returns
     -------
@@ -707,12 +727,12 @@ def export_golden_fixture(
         series[i] = seasonal[None, :] + pcs @ bundle["eof_projection"].values[i]
 
     data_vars = {
-        "t_glob": (("month",), t_glob),
-        "stochastic_pcs": (("realization", "month", "mode"), pcs),
-        "series": (("location", "realization", "month"), series),
+        "t_glob": (("month",), t_glob.astype(dtype)),
+        "stochastic_pcs": (("realization", "month", "mode"), pcs.astype(dtype)),
+        "series": (("location", "realization", "month"), series.astype(dtype)),
     }
     if forced.size:
-        data_vars["forced_response"] = (("location", "year"), forced)
+        data_vars["forced_response"] = (("location", "year"), forced.astype(dtype))
 
     ds = xr.Dataset(
         data_vars,

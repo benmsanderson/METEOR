@@ -24,9 +24,13 @@ They are also much smaller, because a pickled pattern-scaling model carries
 
 | Artifact | Pickle | netCDF (float64) | netCDF (float32) |
 |---|---:|---:|---:|
-| NorESM2-MM `tas` noise model | 25.5 MB | 21.2 MB | 10.6 MB |
+| NorESM2-MM `tas` noise model | 25.7 MB | 21.6 MB | 10.8 MB |
 | NorESM2-MM `tas` pattern scaling | 321.5 MB | 3.8 MB | 1.9 MB |
-| 61-location `tas` bundle | — | — | 64.6 KB |
+| 61-location `tas` bundle | — | — | 61.3 KB |
+
+Measured on models trained with the shipped defaults (`n_modes=40`,
+`lag_order=2`, `use_exog='none'`, `weight_eofs=True`). The `pr` artifacts are
+the same size to within 0.01 MB.
 
 ## Precision
 

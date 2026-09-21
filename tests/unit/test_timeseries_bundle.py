@@ -794,3 +794,45 @@ def test_gamma_table_is_model_independent(tmp_path):
         tables.append(load_timeseries_bundle(path)["gamma_quantile_norm"].values)
     np.testing.assert_array_equal(tables[0], tables[1])
     np.testing.assert_allclose(tables[0], build_gamma_quantile_table()[2], rtol=1e-12)
+
+
+def test_scale_to_warming_pathway_matches_meteors_formula():
+    """The rescaling reproduces METEOR's anomaly-ratio scaling."""
+    from meteor.timeseries_bundle import scale_to_warming_pathway
+
+    years = np.arange(1750, 2101)
+    forced = 0.004 * (years - 1750) ** 1.2 / 100.0
+    global_tas = 0.006 * (years - 1750) ** 1.2 / 100.0
+    pathway = np.interp(years, [1750, 2000, 2100], [0.0, 0.9, 2.6])
+
+    scaled = scale_to_warming_pathway(forced, global_tas, pathway)
+
+    # METEOR: base + anomaly * (desired_anomaly / predicted_anomaly)
+    denom = global_tas - global_tas[0]
+    want = pathway - pathway[0]
+    expected = forced[0] + (forced - forced[0]) * np.where(
+        denom != 0, want / np.where(denom == 0, 1.0, denom), 1.0
+    )
+    np.testing.assert_allclose(scaled, expected, rtol=1e-12)
+    # The base year is a fixed point: nothing to scale there.
+    assert scaled[0] == pytest.approx(forced[0])
+
+
+def test_scale_to_warming_pathway_requires_matching_years():
+    """Mismatched year axes are refused rather than broadcast into nonsense."""
+    from meteor.timeseries_bundle import scale_to_warming_pathway
+
+    with pytest.raises(ValueError, match="share a year axis"):
+        scale_to_warming_pathway(np.zeros(351), np.zeros(351), np.zeros(100))
+
+
+def test_scale_to_warming_pathway_tolerates_zero_warming():
+    """A flat predicted response does not divide by zero."""
+    from meteor.timeseries_bundle import scale_to_warming_pathway
+
+    n = 50
+    out = scale_to_warming_pathway(
+        np.full(n, 2.0), np.zeros(n), np.linspace(0.0, 3.0, n)
+    )
+    assert np.all(np.isfinite(out))
+    np.testing.assert_allclose(out, 2.0)

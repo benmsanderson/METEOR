@@ -48,6 +48,14 @@ from .scm_input_lib import load_emissions_concentrations_from_name
 #: ``format`` attribute identifying a compact timeseries bundle.
 BUNDLE_FORMAT = "meteor-timeseries-bundle"
 
+#: On-disk netCDF flavour for the wire formats. Classic netCDF-3 rather than
+#: the HDF5-backed NETCDF4, because the intended consumers are browsers: a
+#: classic file is readable by a few-kilobyte JavaScript parser, whereas HDF5
+#: needs a one-to-two megabyte WebAssembly build of libhdf5 before a single
+#: byte can be read. Every numeric array round-trips bit-for-bit, and the
+#: files come out smaller.
+WIRE_NETCDF_FORMAT = "NETCDF3_64BIT"
+
 
 def parse_location(spec):
     """
@@ -255,6 +263,7 @@ def export_timeseries_bundle(
     doi=None,
     source_url=None,
     dtype=np.float32,
+    netcdf_format=WIRE_NETCDF_FORMAT,
 ):
     """
     Write a compact per-location bundle for timeseries-only clients.
@@ -289,6 +298,10 @@ def export_timeseries_bundle(
         copy can be traced back.
     source_url : str, optional
         Where the artifact is published, recorded alongside the DOI.
+    netcdf_format : str, default 'NETCDF3_64BIT'
+        On-disk netCDF flavour. Classic netCDF-3 by default so browsers can
+        read it without a WebAssembly HDF5 build; pass ``'NETCDF4'`` for an
+        HDF5-backed file.
     dtype : np.dtype, default np.float32
         Storage precision. float32 is the default here: a bundle is a wire
         format consumed by reimplementations that will not reproduce float64
@@ -492,7 +505,7 @@ def export_timeseries_bundle(
         ),
     }
 
-    ds.to_netcdf(filepath)
+    ds.to_netcdf(filepath, format=netcdf_format)
     return filepath
 
 
@@ -647,6 +660,7 @@ def export_golden_fixture(
     forcing_by_exp=None,
     year_0=1850,
     dtype=np.float32,
+    netcdf_format=WIRE_NETCDF_FORMAT,
 ):
     """
     Write fixed-seed reference output for validating a reimplementation.
@@ -681,6 +695,8 @@ def export_golden_fixture(
         Forcing trajectories per experiment for the forced term.
     year_0 : int, default 1850
         First year of the forcing trajectories.
+    netcdf_format : str, default 'NETCDF3_64BIT'
+        On-disk netCDF flavour; see :func:`export_timeseries_bundle`.
     dtype : np.dtype, default np.float32
         Storage precision. float32 by default for the same reason bundles use
         it: a fixture validates a reimplementation that reads float32 bundle
@@ -771,7 +787,7 @@ def export_golden_fixture(
             "reproduce series (and forced_response when present)."
         ),
     }
-    ds.to_netcdf(filepath)
+    ds.to_netcdf(filepath, format=netcdf_format)
     return filepath
 
 

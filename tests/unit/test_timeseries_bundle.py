@@ -643,3 +643,69 @@ def test_golden_fixture_inherits_bundle_provenance(tmp_path):
         assert ds.attrs["meteor_version"]
         assert ds.attrs["created"]
         assert "doi" in ds.attrs
+
+
+def test_bundle_defaults_to_classic_netcdf(tmp_path):
+    """Wire formats are classic netCDF-3, not HDF5-backed NETCDF4.
+
+    A browser can parse classic netCDF with a few-kilobyte JavaScript library;
+    NETCDF4 is HDF5 and needs a one-to-two megabyte WebAssembly build of
+    libhdf5 before a single byte can be read.
+    """
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    path = str(tmp_path / "bundle.nc")
+    export_timeseries_bundle(noise, pattern, path, LOCATIONS, variable="tas")
+
+    with open(path, "rb") as handle:
+        magic = handle.read(4)
+    assert magic[:3] == b"CDF", f"expected classic netCDF magic, got {magic!r}"
+
+    # And it still loads.
+    bundle = load_timeseries_bundle(path)
+    assert bundle.sizes["location"] == len(LOCATIONS)
+
+
+def test_classic_and_hdf5_bundles_carry_identical_numbers(tmp_path):
+    """Choosing the on-disk flavour changes no value."""
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    classic = str(tmp_path / "classic.nc")
+    hdf5 = str(tmp_path / "hdf5.nc")
+    for path, fmt in ((classic, "NETCDF3_64BIT"), (hdf5, "NETCDF4")):
+        export_timeseries_bundle(
+            noise,
+            pattern,
+            path,
+            LOCATIONS,
+            variable="tas",
+            dtype=np.float64,
+            netcdf_format=fmt,
+        )
+    with open(hdf5, "rb") as handle:
+        assert handle.read(4) == b"\x89HDF"
+
+    a, b = load_timeseries_bundle(classic), load_timeseries_bundle(hdf5)
+    assert set(a.data_vars) == set(b.data_vars)
+    for name in a.data_vars:
+        left, right = np.asarray(a[name].values), np.asarray(b[name].values)
+        if left.dtype.kind in "fc":
+            np.testing.assert_array_equal(left, right, err_msg=f"{name} differs")
+        else:
+            assert list(np.ravel(left)) == list(np.ravel(right)), f"{name} differs"
+
+
+def test_golden_fixture_also_defaults_to_classic(tmp_path):
+    """Fixtures are consumed by the same clients, so they match the bundle."""
+    from meteor.timeseries_bundle import export_golden_fixture
+
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    bundle_path = str(tmp_path / "bundle.nc")
+    export_timeseries_bundle(noise, pattern, bundle_path, LOCATIONS, variable="tas")
+    fixture = str(tmp_path / "golden.nc")
+    export_golden_fixture(
+        bundle_path, fixture, noise, np.linspace(0.3, 2.0, 60), seed=3
+    )
+    with open(fixture, "rb") as handle:
+        assert handle.read(3) == b"CDF"

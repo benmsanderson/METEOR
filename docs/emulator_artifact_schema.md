@@ -80,6 +80,26 @@ Bundles default to **float32**. They are a wire format for clients that will
 not reproduce float64 arithmetic bit for bit anyway; measured error against
 METEOR's own output is ~1e-7 relative, i.e. single-precision storage noise.
 
+## On-disk netCDF flavour
+
+Bundles and golden fixtures are written as **classic netCDF-3**
+(`NETCDF3_64BIT`, magic `CDF\x02`). Full artifacts remain **NETCDF4** (HDF5,
+magic `\x89HDF`).
+
+The split is about who reads them. A browser can parse classic netCDF with a
+few-kilobyte JavaScript library; NETCDF4 is HDF5 underneath and needs a one-to-
+two megabyte WebAssembly build of libhdf5 before a single byte can be read.
+Wire formats therefore default to classic; archival artifacts, which are read
+by Python, keep NETCDF4.
+
+Nothing is lost in the conversion: every numeric array is bit-identical between
+the two, and classic files are slightly *smaller* (a 67-location `tas` bundle
+is 81 KB classic against 108 KB NETCDF4). The one representational difference
+is that fixed-width string variables come back with `object` dtype rather than
+`<U*`, carrying the same values.
+
+Both exporters accept `netcdf_format=` if you want the other flavour.
+
 ## Array layout is part of the contract
 
 All arrays are stored **C-contiguous** (row-major). This is load-bearing:

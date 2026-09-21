@@ -1040,3 +1040,73 @@ def apply_transform_from_bundle(bundle, location, values):
         curve = (1.0 - weight) * table[low] + weight * table[low + 1]
         out[:, columns] = shape * scale * np.interp(probabilities, prob_grid, curve)
     return out
+
+
+def scale_to_warming_pathway(forced_response, global_tas_response, pathway):
+    """
+    Rescale a forced response to follow a prescribed global-warming pathway.
+
+    This is the "pick or draw a warming pathway" mode: instead of running a
+    named scenario, the caller prescribes global mean warming and the forced
+    response is rescaled to match it. METEOR does this by scaling the anomaly
+    about its first year by the ratio of desired to predicted global warming.
+
+    ``global_tas_response`` is a separate argument rather than something
+    derived from the bundle because it must always be the **temperature**
+    response, even when rescaling precipitation. METEOR takes the denominator
+    from the ``tas`` pattern model regardless of the variable being generated,
+    so a precipitation client has to load the ``tas`` bundle too and pass its
+    ``global`` forced response here. Passing the precipitation response instead
+    silently produces wrong numbers, which is why this is a required argument
+    with no default.
+
+    Parameters
+    ----------
+    forced_response : array-like
+        Annual forced response at the location of interest, from
+        :func:`forced_response_from_bundle`, starting at the bundle's
+        ``forcing_year_start``.
+    global_tas_response : array-like
+        Annual **temperature** forced response at ``global``, over the same
+        years, taken from the ``tas`` bundle.
+    pathway : array-like
+        Desired global mean warming over the same years. Only its anomaly
+        relative to the first year matters.
+
+    Returns
+    -------
+    np.ndarray
+        Rescaled annual forced response, same length as the inputs.
+
+    Raises
+    ------
+    ValueError
+        If the three series are not the same length.
+
+    Examples
+    --------
+    >>> scaled = scale_to_warming_pathway(  # doctest: +SKIP
+    ...     forced_pr, forced_global_tas, drawn_pathway
+    ... )
+    """
+    forced = np.asarray(forced_response, dtype=np.float64)
+    global_tas = np.asarray(global_tas_response, dtype=np.float64)
+    wanted = np.asarray(pathway, dtype=np.float64)
+    if not forced.shape == global_tas.shape == wanted.shape:
+        raise ValueError(
+            "forced_response, global_tas_response and pathway must share a "
+            f"year axis; got {forced.shape}, {global_tas.shape}, {wanted.shape}"
+        )
+
+    anomaly = forced - forced[0]
+    denominator = global_tas - global_tas[0]
+    desired = wanted - wanted[0]
+    # Where the predicted warming is exactly zero there is nothing to scale --
+    # at the base year, and before forcing departs from it -- so leave the
+    # anomaly (itself zero there) untouched rather than divide by zero.
+    scaling = np.where(
+        denominator != 0,
+        desired / np.where(denominator == 0, 1.0, denominator),
+        1.0,
+    )
+    return forced[0] + anomaly * scaling

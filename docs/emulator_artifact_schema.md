@@ -288,6 +288,50 @@ stream, so its ensemble will differ realisation by realisation while matching
 in distribution — see the golden fixture format for how to validate the
 deterministic parts.
 
+### Generating a series, end to end
+
+The order matters, and `pr` has two steps `tas` does not.
+
+```
+1. forced response      forced_response_from_bundle(bundle, loc, forcing, year_0)
+                        -> annual, starting at forcing_year_start
+2. warming pathway      (optional) scale_to_warming_pathway(forced, global_tas, pathway)
+3. annual -> monthly    repeat each annual value 12 times
+4. stochastic part      X @ seasonal_coef[loc] + seasonal_intercept[loc]
+                        + pcs @ eof_projection[loc]
+5. baseline             pr only: add transform_baseline[loc]
+6. transform            pr only: apply_transform_from_bundle(bundle, loc, values)
+```
+
+Steps 5 and 6 are not optional for `pr` and not applicable to `tas`. Skipping
+them does not give a slightly different answer, it gives one in the wrong units:
+precipitation is generated as an anomaly of order 1e-6 kg m-2 s-1 against
+absolute values of order 1e-5.
+
+### Prescribed warming pathways
+
+A client can drive the emulator with a global warming trajectory instead of a
+named scenario — "draw a pathway" rather than "pick a scenario". METEOR
+implements this by scaling the forced anomaly about its first year:
+
+```
+scaling(t) = (desired(t) - desired(t0)) / (predicted_global_warming(t) - predicted_global_warming(t0))
+out(t)     = forced(t0) + (forced(t) - forced(t0)) * scaling(t)
+```
+
+with `scaling = 1` wherever the denominator is zero.
+
+**The denominator is always the temperature response, whatever variable you are
+generating.** METEOR takes it from the `tas` pattern model regardless, so a
+precipitation client must load the `tas` bundle as well and use its `global`
+forced response. Using the precipitation response instead produces numbers that
+look plausible and are wrong. `scale_to_warming_pathway` makes this a required
+argument for exactly that reason.
+
+Verified against `generate_ensemble_outputs(temp_scaling_ts=...)` for `global`,
+an AR6 region and a point: `tas` agrees to 1e-7, `pr` to 7.5e-4, the latter
+being the quantile-table interpolation error.
+
 ### What is deliberately absent
 
 * **Gridded output** (`gridded_output = 0`). Reconstructing fields needs the EOF

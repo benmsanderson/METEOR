@@ -34,6 +34,8 @@ import json
 
 import numpy as np
 import xarray as xr
+from scipy.stats import gamma as _gamma
+from scipy.stats import norm as _norm
 
 from . import __version__, pattern_logic_lib, scm_forcer_engine
 from .geo_data_utils import extract_point, global_mean, regional_mean
@@ -42,6 +44,10 @@ from .portable_artifact import (
     SEASONAL_FEATURE_NAMES,
     _provenance_attrs,
     _step_response_arrays,
+)
+from .precipitation_transform import (
+    _month_of_year_indices,
+    fit_distribution_parameters_1d_seasonal,
 )
 from .scm_input_lib import load_emissions_concentrations_from_name
 
@@ -248,6 +254,111 @@ def compute_scenario_forcing(pattern_model, scenarios):
     return np.stack(per_scenario), year_start
 
 
+def _gamma_probability_grid(n_body=101, n_tail=50):
+    """
+    Probability grid for the shared gamma quantile table.
+
+    Uniform through the body, geometrically refined into both tails. The
+    refinement is not cosmetic: the gamma quantile function is steep as
+    ``p`` approaches 0 or 1, and on a uniform grid linear interpolation there
+    is wrong by tens of percent.
+
+    Parameters
+    ----------
+    n_body : int
+        Points spanning the central range.
+    n_tail : int
+        Points in each tail.
+
+    Returns
+    -------
+    np.ndarray
+        Strictly increasing probabilities in (0, 1).
+    """
+    body = np.linspace(0.02, 0.98, n_body)
+    lower = 0.02 * np.geomspace(1e-4, 1.0, n_tail)
+    return np.unique(np.concatenate([lower, body, 1.0 - lower[::-1]]))
+
+
+def build_gamma_quantile_table(shape_grid=None, probability_grid=None):
+    """
+    Build the shared, model-independent gamma quantile table.
+
+    A client applying the precipitation transform needs the gamma quantile
+    function, which is awkward to implement outside SciPy. This table removes
+    that need: with ``loc=0`` the gamma factorises exactly as
+    ``ppf(p; a, scale) = scale * ppf(p; a, 1)``, so the table has to be indexed
+    by shape alone, never by scale. Storing ``ppf(p; a, 1) / a`` -- normalised
+    to unit mean -- keeps the surface smooth in ``log(a)`` and so kind to
+    linear interpolation.
+
+    The result depends on nothing but mathematics: one table serves every
+    model, variable, location and window.
+
+    Parameters
+    ----------
+    shape_grid : np.ndarray, optional
+        Gamma shape values, geometrically spaced. Defaults to 160 points
+        spanning 0.5 to 1e4, which brackets the shapes seen in fitted CMIP6
+        precipitation.
+    probability_grid : np.ndarray, optional
+        Probabilities; defaults to :func:`_gamma_probability_grid`.
+
+    Returns
+    -------
+    tuple
+        ``(shape_grid, probability_grid, table)`` with ``table`` of shape
+        ``(len(shape_grid), len(probability_grid))``.
+    """
+    if shape_grid is None:
+        shape_grid = np.geomspace(0.5, 1e4, 160)
+    if probability_grid is None:
+        probability_grid = _gamma_probability_grid()
+    table = np.array(
+        [_gamma.ppf(probability_grid, a, loc=0.0, scale=1.0) / a for a in shape_grid]
+    )
+    return shape_grid, probability_grid, table
+
+
+def _fit_transform_parameters(reference, parsed, project):
+    """
+    Fit per-location, per-month-of-year gamma parameters to a reference field.
+
+    Parameters
+    ----------
+    reference : xr.DataArray
+        Gridded reference field, already sliced to the target window.
+    parsed : list of dict
+        Parsed locations.
+    project : callable
+        Reduces the field to one location.
+
+    Returns
+    -------
+    tuple of np.ndarray
+        ``(shape, scale, baseline)`` with shapes ``(n_loc, 12)``,
+        ``(n_loc, 12)`` and ``(n_loc,)``. The baseline is the mean of the
+        first twelve months of the window, which is what the precipitation
+        path adds before transforming.
+    """
+    shape = np.full((len(parsed), 12), np.nan)
+    scale = np.full((len(parsed), 12), np.nan)
+    baseline = np.full(len(parsed), np.nan)
+    for i, location in enumerate(parsed):
+        series = np.squeeze(np.asarray(project(reference, location)))
+        if series.ndim != 1:
+            raise ValueError(
+                f"transform reference reduced to shape {series.shape} at "
+                f"{location['spec']}; expected a single time series. Reduce any "
+                "ensemble dimension before exporting."
+            )
+        params = fit_distribution_parameters_1d_seasonal(series, "gamma")
+        shape[i] = np.asarray(params["shape"])
+        scale[i] = np.asarray(params["scale"])
+        baseline[i] = float(np.mean(series[:12]))
+    return shape, scale, baseline
+
+
 def export_timeseries_bundle(
     noise_model,
     pattern_model,
@@ -257,8 +368,8 @@ def export_timeseries_bundle(
     cmip6_model=None,
     training_scenario=None,
     training_config=None,
-    pr_reference=None,
-    pr_reference_start_year=None,
+    transform_reference=None,
+    transform_window=None,
     scenarios=None,
     doi=None,
     source_url=None,
@@ -282,12 +393,16 @@ def export_timeseries_bundle(
         Variable name. Defaults to the noise model's ``variable_name``.
     cmip6_model, training_scenario, training_config : optional
         Provenance, recorded in the artifact.
-    pr_reference : xr.DataArray, optional
-        Gridded CMIP6 reference field for the precipitation transform. When
-        given it is aggregated per location and stored, so a client can fit the
-        1D gamma transform without re-fetching CMIP6 data at generation time.
-    pr_reference_start_year : int, optional
-        First calendar year of ``pr_reference``, needed to index it by year.
+    transform_reference : xr.DataArray, optional
+        Gridded CMIP6 reference field for a distribution transform, **already
+        sliced to the output window** the bundle targets. It is reduced per
+        location, fitted per month-of-year, and only the fitted gamma shape and
+        scale are stored -- two floats per location per month, rather than the
+        reference series itself.
+    transform_window : tuple of int, optional
+        ``(start_year, end_year)`` the reference was sliced to. Recorded so a
+        client can tell which window the fitted parameters are valid for; the
+        fit depends on it.
     scenarios : list of str, optional
         Scenario names whose forcing trajectories should be baked in. Without
         these a client has the step-response kernel but no forcing to convolve
@@ -427,25 +542,25 @@ def export_timeseries_bundle(
             forcing.astype(dtype),
         )
 
-    if pr_reference is not None:
-        rows = []
-        for location in parsed:
-            # CMIP6 composites carry a singleton 'ens' dimension that survives
-            # the spatial reduction; drop it rather than smuggle a stray axis
-            # into the bundle. A genuine multi-member reference is ambiguous
-            # here -- the caller has to decide how to combine members -- so
-            # fail loudly instead of silently picking one.
-            projected = np.squeeze(np.asarray(_project_field(pr_reference, location)))
-            if projected.ndim != 1:
-                raise ValueError(
-                    f"pr_reference reduced to shape {projected.shape} at "
-                    f"{location['spec']}; expected a single time series. Reduce "
-                    "any ensemble dimension before exporting."
-                )
-            rows.append(projected)
-        data_vars["pr_reference"] = (
-            ("location", "reference_month"),
-            np.stack(rows).astype(dtype),
+    gamma_grid = None
+    if transform_reference is not None:
+        shape, scale, baseline = _fit_transform_parameters(
+            transform_reference, parsed, _project_field
+        )
+        gamma_grid = build_gamma_quantile_table()
+        gamma_table = gamma_grid[2]
+        data_vars["transform_shape"] = (
+            ("location", "month_of_year"),
+            shape.astype(dtype),
+        )
+        data_vars["transform_scale"] = (
+            ("location", "month_of_year"),
+            scale.astype(dtype),
+        )
+        data_vars["transform_baseline"] = (("location",), baseline.astype(dtype))
+        data_vars["gamma_quantile_norm"] = (
+            ("gamma_shape", "gamma_probability"),
+            gamma_table.astype(dtype),
         )
 
     ds = xr.Dataset(
@@ -461,6 +576,15 @@ def export_timeseries_bundle(
             ),
             "exp": ("exp", np.array(exps, dtype="U64")),
             "pattern_mode": ("pattern_mode", np.arange(n_pattern_modes)),
+            **(
+                {
+                    "month_of_year": ("month_of_year", np.arange(1, 13)),
+                    "gamma_shape": ("gamma_shape", gamma_grid[0]),
+                    "gamma_probability": ("gamma_probability", gamma_grid[1]),
+                }
+                if transform_reference is not None
+                else {}
+            ),
             **(
                 {
                     "scenario": ("scenario", np.array(list(scenarios), dtype="U32")),
@@ -495,8 +619,12 @@ def export_timeseries_bundle(
             "+ pcs(t) @ eof_projection + sum_exp pattern_projection @ "
             "convolve(step_response, dF_exp / exp_forc)"
         ),
-        "pr_reference_start_year": (
-            -1 if pr_reference_start_year is None else int(pr_reference_start_year)
+        "transform_type": "gamma" if transform_reference is not None else "",
+        "transform_window_start": (
+            -1 if not transform_window else int(transform_window[0])
+        ),
+        "transform_window_end": (
+            -1 if not transform_window else int(transform_window[1])
         ),
         "forcing_year_start": int(forcing_year_start),
         "annual_to_monthly": "each annual value is repeated for all 12 months",
@@ -639,7 +767,7 @@ def bundle_summary(filepath):
         "n_modes": int(ds.sizes["mode"]),
         "n_pattern_modes": int(ds.sizes["pattern_mode"]),
         "experiments": [str(e) for e in ds["exp"].values],
-        "has_pr_reference": "pr_reference" in ds,
+        "has_transform": "transform_shape" in ds,
         "size_bytes": os.path.getsize(filepath),
         "schema_version": int(ds.attrs.get("schema_version", 0)),
         "provenance": json.loads(ds.attrs.get("training_config", "{}")),
@@ -839,4 +967,76 @@ def forcing_from_bundle(bundle, scenario):
         if np.all(np.isnan(series)):
             continue
         out[exp] = series
+    return out
+
+
+def apply_transform_from_bundle(bundle, location, values):
+    """
+    Apply a bundle's distribution transform using only bundle arrays.
+
+    This is the reference implementation of the transform contract, and the
+    thing a port to another language should match. It needs the normal CDF and
+    linear interpolation, and nothing else: no gamma fitting, no gamma quantile
+    function, no SciPy equivalent.
+
+    The Gaussian side is fitted here rather than shipped, because it describes
+    *the ensemble the caller just generated* and so cannot be precomputed. It
+    is only a mean and a standard deviation per month-of-year.
+
+    Parameters
+    ----------
+    bundle : xr.Dataset
+        Bundle carrying ``transform_shape``, ``transform_scale`` and
+        ``gamma_quantile_norm``.
+    location : str
+        Location specifier present in the bundle.
+    values : np.ndarray
+        Generated values, shape ``(n_realizations, n_months)``, starting in
+        January and already including ``transform_baseline``.
+
+    Returns
+    -------
+    np.ndarray
+        Transformed values, same shape as ``values``.
+
+    Raises
+    ------
+    KeyError
+        If the bundle carries no transform.
+
+    Examples
+    --------
+    >>> out = apply_transform_from_bundle(bundle, "global", ens)  # doctest: +SKIP
+    """
+    if "transform_shape" not in bundle:
+        raise KeyError(
+            "bundle carries no distribution transform; re-export with "
+            "transform_reference=..."
+        )
+    idx = list(bundle["location"].values).index(location)
+    shapes = np.asarray(bundle["transform_shape"].values[idx], dtype=np.float64)
+    scales = np.asarray(bundle["transform_scale"].values[idx], dtype=np.float64)
+    log_shape_grid = np.log(np.asarray(bundle["gamma_shape"].values, dtype=np.float64))
+    prob_grid = np.asarray(bundle["gamma_probability"].values, dtype=np.float64)
+    table = np.asarray(bundle["gamma_quantile_norm"].values, dtype=np.float64)
+
+    values = np.atleast_2d(np.asarray(values, dtype=np.float64))
+    out = np.empty_like(values)
+    for month, columns in enumerate(_month_of_year_indices(values.shape[1])):
+        block = values[:, columns]
+        mean, std = block.mean(), block.std()
+        probabilities = (
+            _norm.cdf((block - mean) / std) if std > 0 else np.full(block.shape, 0.5)
+        )
+        shape, scale = shapes[month], scales[month]
+        # Bilinear in (log shape, probability): interpolate the two bracketing
+        # shape rows, then between them. Stored quantiles are normalised to
+        # unit mean, so the physical value is shape * scale * table value.
+        position = np.interp(
+            np.log(shape), log_shape_grid, np.arange(log_shape_grid.size)
+        )
+        low = int(np.clip(np.floor(position), 0, log_shape_grid.size - 2))
+        weight = position - low
+        curve = (1.0 - weight) * table[low] + weight * table[low + 1]
+        out[:, columns] = shape * scale * np.interp(probabilities, prob_grid, curve)
     return out

@@ -229,7 +229,9 @@ This is what a browser client downloads. It never carries the EOF maps.
 | `exp_forc` | `(exp,)` | |
 | `location_kind` | `(location,)` | `global` / `region` / `point` |
 | `location_lat`, `location_lon` | `(location,)` | NaN for non-point locations |
-| `pr_reference` | `(location, reference_month)` | Optional; see below |
+| `transform_shape`, `transform_scale` | `(location, month_of_year)` | Fitted gamma parameters; optional, see below |
+| `transform_baseline` | `(location,)` | First-year mean added before transforming |
+| `gamma_quantile_norm` | `(gamma_shape, gamma_probability)` | Shared quantile table; optional, see below |
 
 `scenario_forcing` and `varx_residual_chol` are present only when the export
 requested them. `forcing_year_start` gives the first calendar year of the
@@ -298,21 +300,57 @@ deterministic parts.
   cannot do is start from an emissions trajectory it invented.
 * **Arbitrary locations.** A bundle covers the locations it was built for.
 
-### Precipitation reference
+### Precipitation transform
 
 `pr` generation normally re-fetches gridded CMIP6 data at generation time to fit
-the gamma transform. The timeseries path aggregates that reference per region
-and uses the 1D transform, so `pr_reference` stores the already-aggregated 1D
-series per location, with `pr_reference_start_year` giving its first calendar
-year (`-1` when absent).
+a gamma distribution, then quantile-maps the generated Gaussian onto it. A
+browser cannot do either: the fetch is hundreds of megabytes, and the gamma
+quantile function has no equivalent outside SciPy.
 
-Storing the aggregated *series* rather than fitted gamma parameters is
-deliberate: the fit depends on the requested output window. The reference is
-sliced to `start_year..end_year`, and the precipitation baseline is the mean of
-the first twelve months **of that window**. Since per-timestep aggregation
-commutes with both the time slice and the twelve-month mean, shipping the series
-reproduces current behaviour exactly for any window, whereas pre-fitted
-parameters would only be valid for one.
+A bundle removes both. What it stores instead:
+
+| stored | size | why |
+|---|---|---|
+| `transform_shape`, `transform_scale` | 2 floats per location per month | the fitted target distribution |
+| `transform_baseline` | 1 float per location | `pr` is generated as an anomaly and needs its baseline back before transforming |
+| `gamma_quantile_norm` | ~124 KB, **identical in every bundle** | removes the need for a gamma quantile function |
+
+The shared table exists because, with `loc = 0`, the gamma factorises exactly:
+
+```
+ppf(p; a, scale) = scale * ppf(p; a, 1)
+```
+
+so a table need only be indexed by shape, never by scale. Storing
+`ppf(p; a, 1) / a` — normalised to unit mean — keeps the surface smooth in
+`log(a)` and therefore kind to linear interpolation. The table depends on
+nothing but mathematics; one serves every model, variable, location and window.
+
+Its probability axis is **refined in the tails**. This is load-bearing: the
+gamma quantile function is steep as `p` approaches 0 or 1, and on a uniform
+grid linear interpolation there is wrong by tens of percent.
+
+To apply it, a client needs the normal CDF and linear interpolation, nothing
+more:
+
+```
+mu, sigma  = mean and sd of the generated values for this month-of-year
+p          = Phi((x - mu) / sigma)
+value      = shape * scale * interp2d(gamma_quantile_norm, log(shape), p)
+```
+
+`timeseries_bundle.apply_transform_from_bundle` is the reference
+implementation. Measured against METEOR's exact gamma path on NorESM2-MM, the
+mean relative error is 0.0005% to 0.017% depending on location.
+
+The Gaussian parameters are fitted by the client rather than shipped, because
+they describe *the ensemble it just generated* and cannot be precomputed. They
+are a mean and a standard deviation.
+
+**The fit depends on the output window.** METEOR slices the reference to
+`start_year..end_year` and takes the baseline from the first twelve months of
+that window, so the stored parameters are valid for the window recorded in
+`transform_window_start` / `transform_window_end` and not for others.
 
 ---
 

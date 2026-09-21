@@ -382,62 +382,6 @@ def test_golden_fixture_defaults_to_float32(tmp_path):
         )
 
 
-def test_bundle_bakes_pr_reference_per_location(tmp_path):
-    """The pr reference is stored already aggregated, so pr needs no network."""
-    noise = _make_noise_model()
-    pattern = _make_pattern_model()
-
-    rng = np.random.default_rng(23)
-    n_month = 600
-    reference = xr.DataArray(
-        rng.gamma(shape=3.0, scale=0.5, size=(n_month, N_LAT, N_LON)),
-        coords={"month": np.arange(n_month), "lat": LATS, "lon": LONS},
-        dims=("month", "lat", "lon"),
-    )
-
-    path = str(tmp_path / "bundle_pr.nc")
-    export_timeseries_bundle(
-        noise,
-        pattern,
-        path,
-        LOCATIONS,
-        variable="pr",
-        pr_reference=reference,
-        pr_reference_start_year=1850,
-        dtype=np.float64,
-    )
-    bundle = load_timeseries_bundle(path)
-
-    assert "pr_reference" in bundle
-    assert bundle.attrs["pr_reference_start_year"] == 1850
-    assert bundle["pr_reference"].shape == (len(LOCATIONS), n_month)
-
-    from meteor.geo_data_utils import extract_point, global_mean, regional_mean
-
-    for i, spec in enumerate(LOCATIONS):
-        location = parse_location(spec)
-        if location["kind"] == "global":
-            expected = global_mean(reference).values
-        elif location["kind"] == "region":
-            expected = regional_mean(reference, region_code=location["region"]).values
-        else:
-            expected = extract_point(reference, location["lat"], location["lon"]).values
-        np.testing.assert_allclose(
-            bundle["pr_reference"].values[i], expected, rtol=1e-12
-        )
-
-
-def test_bundle_omits_pr_reference_when_not_supplied(tmp_path):
-    """tas bundles carry no precipitation reference and no start year."""
-    noise = _make_noise_model()
-    pattern = _make_pattern_model()
-    path = str(tmp_path / "bundle_tas.nc")
-    export_timeseries_bundle(noise, pattern, path, LOCATIONS, variable="tas")
-    bundle = load_timeseries_bundle(path)
-    assert "pr_reference" not in bundle
-    assert bundle.attrs["pr_reference_start_year"] == -1
-
-
 def test_forced_response_tolerates_zero_step_experiments(tmp_path):
     """The full forcing mapping, including a zero-step 'base', is accepted.
 
@@ -554,14 +498,14 @@ def test_bundle_with_scenario_forcing_closes_the_loop(tmp_path):
         forcing_from_bundle(bundle, "ssp585")
 
 
-def test_pr_reference_drops_singleton_ensemble_dim(tmp_path):
-    """CMIP6 composites carry an 'ens' axis that must not leak into the bundle.
+def test_transform_reference_drops_singleton_ensemble_dim(tmp_path):
+    """CMIP6 composites carry an 'ens' axis that must not leak into the fit.
 
     _load_transform_reference returns dims ('ens', 'month', 'lat', 'lon') with
     ens of length 1. The spatial reduction preserves it, so the projected
-    series is (1, n_month) rather than (n_month,).
+    series is (1, n_month) rather than (n_month,), which the gamma fit cannot
+    consume.
     """
-    from meteor.timeseries_bundle import forcing_from_bundle  # noqa: F401
 
     noise = _make_noise_model()
     pattern = _make_pattern_model()
@@ -584,23 +528,24 @@ def test_pr_reference_drops_singleton_ensemble_dim(tmp_path):
         path,
         LOCATIONS,
         variable="pr",
-        pr_reference=reference,
-        pr_reference_start_year=1850,
+        transform_reference=reference,
+        transform_window=(2015, 2100),
         dtype=np.float64,
     )
     bundle = load_timeseries_bundle(path)
-    assert bundle["pr_reference"].shape == (len(LOCATIONS), n_month)
+    assert bundle["transform_shape"].shape == (len(LOCATIONS), 12)
+    assert np.all(np.isfinite(bundle["transform_shape"].values))
     assert "ens" not in bundle.dims
 
 
-def test_pr_reference_rejects_real_ensemble(tmp_path):
+def test_transform_reference_rejects_real_ensemble(tmp_path):
     """A genuine multi-member reference is refused, not silently collapsed."""
     noise = _make_noise_model()
     pattern = _make_pattern_model()
     rng = np.random.default_rng(78)
     reference = xr.DataArray(
-        rng.gamma(3.0, 0.5, size=(3, 60, N_LAT, N_LON)),
-        coords={"ens": [1, 2, 3], "month": np.arange(60), "lat": LATS, "lon": LONS},
+        rng.gamma(3.0, 0.5, size=(3, 120, N_LAT, N_LON)),
+        coords={"ens": [1, 2, 3], "month": np.arange(120), "lat": LATS, "lon": LONS},
         dims=("ens", "month", "lat", "lon"),
     )
     with pytest.raises(ValueError, match="expected a single time series"):
@@ -610,8 +555,8 @@ def test_pr_reference_rejects_real_ensemble(tmp_path):
             str(tmp_path / "b.nc"),
             LOCATIONS,
             variable="pr",
-            pr_reference=reference,
-            pr_reference_start_year=1850,
+            transform_reference=reference,
+            transform_window=(2015, 2100),
         )
 
 
@@ -709,3 +654,143 @@ def test_golden_fixture_also_defaults_to_classic(tmp_path):
     )
     with open(fixture, "rb") as handle:
         assert handle.read(3) == b"CDF"
+
+
+def _reference_field(n_month=1032, seed=91):
+    """Synthetic gridded precipitation reference with a singleton ens axis."""
+    rng = np.random.default_rng(seed)
+    seasonal = 1.0 + 0.4 * np.sin(2 * np.pi * np.arange(n_month) / 12)
+    field = seasonal[None, :, None, None] * rng.gamma(
+        3.0, 0.5, size=(1, n_month, N_LAT, N_LON)
+    )
+    return xr.DataArray(
+        field,
+        coords={
+            "ens": [1],
+            "month": np.arange(n_month),
+            "lat": LATS,
+            "lon": LONS,
+        },
+        dims=("ens", "month", "lat", "lon"),
+    )
+
+
+def test_gamma_table_factorises_exactly():
+    """ppf(p; a, scale) == scale * ppf(p; a, 1), so the table needs no scale axis."""
+    from scipy.stats import gamma as sgamma
+
+    from meteor.timeseries_bundle import build_gamma_quantile_table
+
+    shape_grid, prob_grid, table = build_gamma_quantile_table()
+    assert table.shape == (len(shape_grid), len(prob_grid))
+    assert np.all(np.diff(prob_grid) > 0)
+    # Tails must be refined; a uniform grid is wrong by tens of percent there.
+    assert prob_grid[0] < 1e-5 and prob_grid[-1] > 1 - 1e-5
+
+    for a, scale in [(0.8, 3.2e-5), (2.5, 1.1e-5), (11.0, 7.0e-6)]:
+        p = np.linspace(0.001, 0.999, 500)
+        exact = sgamma.ppf(p, a, loc=0, scale=scale)
+        factored = scale * sgamma.ppf(p, a, loc=0, scale=1.0)
+        np.testing.assert_allclose(factored, exact, rtol=1e-12)
+
+    # Stored values are normalised to unit mean.
+    i = len(shape_grid) // 2
+    a = shape_grid[i]
+    np.testing.assert_allclose(
+        table[i] * a, sgamma.ppf(prob_grid, a, loc=0, scale=1.0), rtol=1e-10
+    )
+
+
+def test_bundle_transform_matches_meteor(tmp_path):
+    """The bundle transform reproduces METEOR's gamma quantile mapping."""
+    from meteor.precipitation_transform import (
+        apply_distribution_transform_seasonal,
+        fit_distribution_parameters_1d_seasonal,
+    )
+    from meteor.timeseries_bundle import apply_transform_from_bundle
+
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    reference = _reference_field()
+    path = str(tmp_path / "bundle_pr.nc")
+    export_timeseries_bundle(
+        noise,
+        pattern,
+        path,
+        LOCATIONS,
+        variable="pr",
+        transform_reference=reference,
+        transform_window=(2015, 2100),
+        dtype=np.float64,
+    )
+    bundle = load_timeseries_bundle(path)
+    assert "pr_reference" not in bundle
+    assert bundle.attrs["transform_type"] == "gamma"
+    assert bundle.attrs["transform_window_start"] == 2015
+    assert bundle.attrs["transform_window_end"] == 2100
+    assert bundle["transform_shape"].shape == (len(LOCATIONS), 12)
+
+    rng = np.random.default_rng(5)
+    ens = np.abs(rng.normal(1.5, 0.3, (8, 240)))
+    for spec in LOCATIONS:
+        location = parse_location(spec)
+        series = np.squeeze(np.asarray(_reference_series(reference, location)))
+        gaussian = fit_distribution_parameters_1d_seasonal(ens, "gaussian")
+        target = fit_distribution_parameters_1d_seasonal(series, "gamma")
+        expected = np.asarray(
+            apply_distribution_transform_seasonal(
+                ens, gaussian, target, target_dist="gamma"
+            )
+        )
+        actual = apply_transform_from_bundle(bundle, spec, ens)
+        rel = np.abs(actual - expected) / np.abs(expected).mean()
+        assert rel.mean() < 5e-3, f"{spec}: mean rel err {rel.mean():.2e}"
+        assert np.percentile(rel, 99) < 5e-2, f"{spec}: p99 {np.percentile(rel,99):.2e}"
+
+
+def _reference_series(reference, location):
+    """Reduce the reference the way the exporter does."""
+    from meteor.timeseries_bundle import _project_field
+
+    return _project_field(reference, location)
+
+
+def test_transform_absent_by_default_and_errors_clearly(tmp_path):
+    """A tas bundle has no transform, and asking for one says so."""
+    from meteor.timeseries_bundle import apply_transform_from_bundle
+
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    path = str(tmp_path / "bundle_tas.nc")
+    export_timeseries_bundle(noise, pattern, path, LOCATIONS, variable="tas")
+    bundle = load_timeseries_bundle(path)
+    assert "transform_shape" not in bundle
+    assert bundle.attrs["transform_type"] == ""
+    assert bundle.attrs["transform_window_start"] == -1
+    with pytest.raises(KeyError, match="no distribution transform"):
+        apply_transform_from_bundle(bundle, "global", np.ones((2, 24)))
+
+
+def test_gamma_table_is_model_independent(tmp_path):
+    """The shared table depends on mathematics alone, not on the model."""
+    from meteor.timeseries_bundle import build_gamma_quantile_table
+
+    noise_a, noise_b = _make_noise_model(seed=5), _make_noise_model(seed=99)
+    pattern = _make_pattern_model()
+    reference = _reference_field()
+    tables = []
+    for i, noise in enumerate((noise_a, noise_b)):
+        path = str(tmp_path / f"b{i}.nc")
+        export_timeseries_bundle(
+            noise,
+            pattern,
+            path,
+            LOCATIONS,
+            variable="pr",
+            transform_reference=reference,
+            transform_window=(2015, 2100),
+            dtype=np.float64,
+        )
+        tables.append(load_timeseries_bundle(path)["gamma_quantile_norm"].values)
+    np.testing.assert_array_equal(tables[0], tables[1])
+    np.testing.assert_allclose(tables[0], build_gamma_quantile_table()[2], rtol=1e-12)

@@ -836,3 +836,215 @@ def test_scale_to_warming_pathway_tolerates_zero_warming():
     )
     assert np.all(np.isfinite(out))
     np.testing.assert_allclose(out, 2.0)
+
+
+def test_golden_fixture_covers_only_requested_locations(tmp_path):
+    """A fixture need not carry every location of the bundle it came from."""
+    from meteor.timeseries_bundle import export_golden_fixture
+
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    bundle_path = str(tmp_path / "bundle.nc")
+    export_timeseries_bundle(
+        noise, pattern, bundle_path, LOCATIONS, variable="tas", dtype=np.float64
+    )
+
+    wanted = ["global", "point:59.9,10.8"]
+    path = str(tmp_path / "golden_subset.nc")
+    export_golden_fixture(
+        bundle_path,
+        path,
+        noise,
+        np.linspace(0.3, 2.4, 120),
+        seed=7,
+        n_realizations=2,
+        locations=wanted,
+        dtype=np.float64,
+    )
+
+    with xr.open_dataset(path) as ds:
+        fixture = ds.load()
+
+    assert [str(s) for s in fixture["location"].values] == wanted
+
+    # The subset must carry the same numbers it would have as part of the whole,
+    # so selecting locations is a projection and not a different calculation.
+    full_path = str(tmp_path / "golden_full.nc")
+    export_golden_fixture(
+        bundle_path,
+        full_path,
+        noise,
+        np.linspace(0.3, 2.4, 120),
+        seed=7,
+        n_realizations=2,
+        dtype=np.float64,
+    )
+    with xr.open_dataset(full_path) as ds:
+        full = ds.load()
+
+    all_specs = [str(s) for s in full["location"].values]
+    for i, spec in enumerate(wanted):
+        np.testing.assert_array_equal(
+            fixture["series"].values[i], full["series"].values[all_specs.index(spec)]
+        )
+
+
+def test_golden_fixture_rejects_locations_outside_the_bundle(tmp_path):
+    """Asking for a location the bundle does not cover says which one."""
+    from meteor.timeseries_bundle import export_golden_fixture
+
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    bundle_path = str(tmp_path / "bundle.nc")
+    export_timeseries_bundle(
+        noise, pattern, bundle_path, LOCATIONS, variable="tas", dtype=np.float64
+    )
+
+    with pytest.raises(ValueError, match="regional:NOWHERE"):
+        export_golden_fixture(
+            bundle_path,
+            str(tmp_path / "golden.nc"),
+            noise,
+            np.linspace(0.3, 2.4, 120),
+            locations=["global", "regional:NOWHERE"],
+        )
+
+
+def test_golden_fixture_exercises_the_precipitation_path(tmp_path):
+    """
+    A pr fixture carries the transformed series, not just the Gaussian part.
+
+    Without it a port passes every array in the file with its precipitation
+    path unimplemented: ``series`` stops before the baseline and the quantile
+    mapping, which are the two steps unique to ``pr``.
+    """
+    from meteor.timeseries_bundle import (
+        apply_transform_from_bundle,
+        export_golden_fixture,
+    )
+
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    reference = _reference_field()
+    bundle_path = str(tmp_path / "bundle_pr.nc")
+    export_timeseries_bundle(
+        noise,
+        pattern,
+        bundle_path,
+        LOCATIONS,
+        variable="pr",
+        transform_reference=reference,
+        transform_window=(2015, 2100),
+        dtype=np.float64,
+    )
+
+    n_time = 120
+    t_glob = np.linspace(0.3, 2.4, n_time)
+    # The forcing axis starts at year_0 and must cover the fixture's window.
+    forcing = {"co2x4": np.linspace(0.0, 5.0, 300)}
+    path = str(tmp_path / "golden_pr.nc")
+    export_golden_fixture(
+        bundle_path,
+        path,
+        noise,
+        t_glob,
+        seed=7,
+        n_realizations=2,
+        forcing_by_exp=forcing,
+        year_0=2000,
+        window_start=2015,
+        dtype=np.float64,
+    )
+
+    with xr.open_dataset(path) as ds:
+        fixture = ds.load()
+
+    assert "series_transformed" in fixture
+    assert fixture["series_transformed"].shape == fixture["series"].shape
+    # Transformed precipitation is a gamma quantile: strictly positive, and
+    # nothing like the Gaussian anomaly it came from.
+    assert np.all(fixture["series_transformed"].values > 0)
+    assert fixture.attrs["year_0"] == 2000
+
+    # It must be derivable from the fixture's own arrays plus the bundle, in
+    # the anomaly seasonal form, which is what a port has to reproduce.
+    bundle = load_timeseries_bundle(bundle_path)
+    design = _harmonic_features(n_time, t_glob)
+    pcs = fixture["stochastic_pcs"].values
+    offset = 2015 - 2000
+
+    for i, spec in enumerate(str(s) for s in fixture["location"].values):
+        idx = list(bundle["location"].values).index(spec)
+        seasonal = design[:, 1:] @ bundle["seasonal_coef"].values[idx][1:]
+        stochastic = seasonal[None, :] + pcs @ bundle["eof_projection"].values[idx]
+        annual = fixture["forced_response"].values[i][offset : offset + n_time // 12]
+        rebuilt = (
+            stochastic
+            + np.repeat(annual, 12)[None, :]
+            + float(bundle["transform_baseline"].values[idx])
+        )
+        np.testing.assert_allclose(
+            apply_transform_from_bundle(bundle, spec, rebuilt),
+            fixture["series_transformed"].values[i],
+            rtol=1e-10,
+        )
+
+
+def test_golden_fixture_omits_transformed_series_for_tas(tmp_path):
+    """A variable with no transform has no transformed series to store."""
+    from meteor.timeseries_bundle import export_golden_fixture
+
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    bundle_path = str(tmp_path / "bundle.nc")
+    export_timeseries_bundle(
+        noise, pattern, bundle_path, LOCATIONS, variable="tas", dtype=np.float64
+    )
+
+    path = str(tmp_path / "golden.nc")
+    export_golden_fixture(
+        bundle_path,
+        path,
+        noise,
+        np.linspace(0.3, 2.4, 120),
+        forcing_by_exp={"co2x4": np.linspace(0.0, 5.0, 300)},
+        year_0=2000,
+        window_start=2015,
+        dtype=np.float64,
+    )
+
+    with xr.open_dataset(path) as ds:
+        assert "series_transformed" not in ds
+        assert ds.attrs["seasonal_form"] == "absolute"
+
+
+def test_golden_fixture_rejects_a_window_off_the_forcing_axis(tmp_path):
+    """A window the forcing does not cover is an error, not a silent truncation."""
+    from meteor.timeseries_bundle import export_golden_fixture
+
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    reference = _reference_field()
+    bundle_path = str(tmp_path / "bundle_pr.nc")
+    export_timeseries_bundle(
+        noise,
+        pattern,
+        bundle_path,
+        LOCATIONS,
+        variable="pr",
+        transform_reference=reference,
+        transform_window=(2015, 2100),
+        dtype=np.float64,
+    )
+
+    with pytest.raises(ValueError, match="does not fit the forcing axis"):
+        export_golden_fixture(
+            bundle_path,
+            str(tmp_path / "golden.nc"),
+            noise,
+            np.linspace(0.3, 2.4, 120),
+            # 20 years of forcing from 2000, but the window wants 2015-2024.
+            forcing_by_exp={"co2x4": np.linspace(0.0, 5.0, 20)},
+            year_0=2000,
+            window_start=2015,
+        )

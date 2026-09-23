@@ -100,6 +100,20 @@ is that fixed-width string variables come back with `object` dtype rather than
 
 Both exporters accept `netcdf_format=` if you want the other flavour.
 
+### Two traps when reading classic netCDF by hand
+
+**Variables are padded to a four-byte boundary.** A 67-location `location`
+variable of width 17 holds 1139 bytes of data in a 1140-byte record, so
+chunking the flat run by the string width alone yields a spurious 68th entry.
+Take the element count from the dimensions, not from the data length. Any
+netCDF library handles this; a hand-rolled reader, which is the likely case in
+a browser, does not.
+
+**Location specifiers are opaque keys.** The `location` coordinate holds
+`point:40.7,-74.0` and `point:30.0,31.2` — with the trailing zeros. A client
+that rebuilds a specifier by formatting numbers produces `point:40.7,-74` and
+fails to match. Compare the strings as given rather than reconstructing them.
+
 ## Array layout is part of the contract
 
 All arrays are stored **C-contiguous** (row-major). This is load-bearing:
@@ -267,6 +281,50 @@ series = X @ seasonal_coef[loc] + seasonal_intercept[loc]
        + Σ_exp convolve(step_response[exp], dF_exp / exp_forc[exp]) @ pattern_projection[loc, exp]
 ```
 
+### Two forms of the seasonal cycle
+
+The line above is the **absolute** form: every one of the nine features, plus
+the intercept. It is what the golden fixtures contain.
+
+It is **not** what `MeteorInterface.generate_ensemble_outputs` returns. That
+path asks the noise generator for noise only
+(`generate_regional_mean_realizations(..., noise_only=True)`), which subtracts
+two terms:
+
+```python
+temp_effect = self.seasonal_coef[:, 0] * global_temp_trajectory[:, np.newaxis]
+seasonal_cycle_full = seasonal_cycle - intercept_effect - temp_effect
+```
+
+so the **intercept and the `t_glob` term are both removed**, leaving the eight
+pure harmonics. The absolute level and the warming trend come from the forced
+response instead, and keeping them in the seasonal term double-counts both:
+
+```
+anomaly form = X[:, 1:] @ seasonal_coef[loc][1:] + pcs @ eof_projection[loc] + forced
+```
+
+**A client reproducing METEOR's timeseries output wants the anomaly form.** For
+NorESM2-MM `tas` the intercept is ~287 K, so the absolute form looks like a
+temperature rather than an anomaly — noticeable. The `t_glob` coefficient is
+~0.99, which roughly *doubles* the warming trend, and that is not noticeable: a
+global mean rising 3.0 K over the century instead of 1.5 K is a plausible
+number. The first independent client got this wrong and every golden fixture
+still passed.
+
+### What drives `t_glob`
+
+`t_glob` — the first column of the design matrix, and the trajectory passed to
+`generate_stochastic_pcs` — is the global mean of **that variable's own** forced
+response. A noise model is trained against its own variable's global
+trajectory, so generation has to match it: for a `pr` bundle, `t_glob` is global
+mean precipitation, in kg m-2 s-1.
+
+This is the opposite of the warming-pathway denominator below, which is always
+the *temperature* response whatever the variable. Two adjacent quantities, both
+"a global mean trajectory", with opposite rules — do not carry the reasoning
+from one to the other.
+
 `timeseries_bundle.forced_response_from_bundle` is the reference implementation
 of the last term; `forcing_from_bundle` reads a bundled scenario's forcing out
 of the artifact, so the two together need nothing external.
@@ -279,6 +337,19 @@ zero step magnitude otherwise yields NaN and poisons the sum.
 repeating each annual value for all twelve months of that year; the
 `annual_to_monthly` attribute records this. The seasonal and stochastic terms
 are monthly throughout.
+
+**Spin-up.** `pcs_t = 0 for t < lag_order` describes the start of the
+recursion, not the start of the output window. METEOR runs the VAR from the
+pattern model's base year over the *whole* trajectory and only then slices to
+the requested years (`meteor_interface.py`, "generate over the FULL trajectory
+so spin-up is resolved before the output window"). A client that instead starts
+the recursion at the first year it wants to show opens with PCs pinned at zero
+and ramping out of nothing, so its first decades are too quiet. Nothing errors.
+
+The slice is taken on a January boundary, and that matters: the harmonic design
+matrix is indexed from the start of whatever array it is given, so a slice of a
+whole number of years leaves the seasonal phase unchanged, while one that is
+not would silently rotate the seasonal cycle.
 
 **Drawing the innovations.** `ε_t ~ N(0, varx_residual_cov)` is generated as
 `varx_residual_chol @ z` with `z` a vector of `n_modes` independent standard
@@ -408,11 +479,29 @@ Fixed-seed reference output for validating a reimplementation offline.
 | `stochastic_pcs` | `(realization, month, mode)` |
 | `series` | `(location, realization, month)` |
 | `forced_response` | `(location, year)` (optional) |
+| `series_transformed` | `(location, realization, month)` (optional) |
 
 A port will not reproduce NumPy's PCG64 stream, so the PC sequence is stored
 **as data**. Feed `stochastic_pcs` and `t_glob` into the port; it must
 reproduce `series`. The deterministic parts — seasonal cycle, EOF projection,
 forced response — are what is being validated, not the random number generator.
+
+**What each array is, precisely.** `series` is the **absolute** seasonal form
+plus the EOF projection, and contains *no* forced response — the
+`seasonal_form` attribute records this. `forced_response` is annual and starts
+at the fixture's `year_0` attribute, which must be the first calendar year of
+the forcing the fixture was built from (for bundle-sourced forcing, the
+bundle's `forcing_year_start`).
+
+`series_transformed` is present only for a variable with a distribution
+transform, and only when the fixture was given forcing and a window. It is the
+**complete** recipe — anomaly seasonal form, forced response, baseline and
+quantile mapping — and it exists because everything else in the file stops
+short of the two steps unique to precipitation. Without it a port passes every
+array here with its `pr` path entirely unimplemented.
+
+Fixtures cover the locations they were exported with (`locations=`), which need
+not be all of the bundle's.
 
 Fixtures are written with an explicit `numpy.random.Generator`, so they are
 reproducible across processes. Note that METEOR's single- and

@@ -778,6 +778,81 @@ def bundle_summary(filepath):
 GOLDEN_FORMAT = "meteor-golden-fixture"
 
 
+def _transformed_fixture_series(
+    bundle,
+    specs,
+    indices,
+    design,
+    pcs,
+    forced,
+    window_start,
+    year_0,
+):
+    """
+    Build the fully transformed series for a golden fixture, or ``None``.
+
+    Returns ``None`` unless the bundle carries a transform and there is both a
+    forced response and a window to place it in -- the transform's gamma
+    parameters are fitted for a specific window, so the series it is applied to
+    has to be the one covering that window.
+
+    Runs the complete recipe in the order the schema documents, using the
+    **anomaly** seasonal form, because that is what METEOR's own timeseries
+    path produces and therefore what a port should be checked against.
+
+    Parameters
+    ----------
+    bundle : xr.Dataset
+        The loaded bundle.
+    specs : list of str
+        Location specifiers, in fixture order.
+    indices : list of int
+        Their positions in the bundle's location coordinate.
+    design : np.ndarray
+        Harmonic design matrix, shape ``(n_time, 9)``.
+    pcs : np.ndarray
+        Stochastic PCs, shape ``(n_realizations, n_time, n_modes)``.
+    forced : np.ndarray
+        Annual forced response per location, or an empty array.
+    window_start : int or None
+        First calendar year of the fixture's months.
+    year_0 : int
+        First calendar year of the forcing trajectories, and therefore of
+        ``forced``.
+
+    Returns
+    -------
+    np.ndarray or None
+        Shape ``(n_location, n_realization, n_time)``.
+    """
+    if "transform_shape" not in bundle or not forced.size or window_start is None:
+        return None
+
+    n_time = design.shape[0]
+    n_years = n_time // 12
+    offset = int(window_start) - int(year_0)
+    if offset < 0 or offset + n_years > forced.shape[1]:
+        raise ValueError(
+            f"window_start {window_start} with {n_years} years does not fit the "
+            f"forcing axis: {forced.shape[1]} years from year_0={year_0}"
+        )
+
+    out = np.zeros((len(specs), pcs.shape[0], n_time))
+    for i, (spec, idx) in enumerate(zip(specs, indices)):
+        # Anomaly seasonal form: no intercept, and no t_glob term.
+        seasonal = design[:, 1:] @ bundle["seasonal_coef"].values[idx][1:]
+        stochastic = seasonal[None, :] + pcs @ bundle["eof_projection"].values[idx]
+
+        monthly_forced = np.repeat(forced[i, offset : offset + n_years], 12)
+        values = (
+            stochastic
+            + monthly_forced[None, :]
+            + float(bundle["transform_baseline"].values[idx])
+        )
+        out[i] = apply_transform_from_bundle(bundle, spec, values)
+    return out
+
+
 def export_golden_fixture(
     bundle_path,
     filepath,
@@ -787,6 +862,8 @@ def export_golden_fixture(
     n_realizations=2,
     forcing_by_exp=None,
     year_0=1850,
+    locations=None,
+    window_start=None,
     dtype=np.float32,
     netcdf_format=WIRE_NETCDF_FORMAT,
 ):
@@ -805,6 +882,20 @@ def export_golden_fixture(
     it. The deterministic parts -- seasonal cycle, EOF projection, forced
     response -- are what a port must reproduce from the PCs.
 
+    ``series`` holds the **absolute** seasonal form documented in the schema's
+    reconstruction, plus the EOF projection: it is not the output of
+    :meth:`MeteorInterface.generate_ensemble_outputs`, which subtracts the
+    intercept and the ``t_glob`` term and adds the forced response. See the
+    schema's "Two forms of the seasonal cycle".
+
+    For a bundle carrying a distribution transform, and when ``forcing_by_exp``
+    and ``window_start`` are supplied, the fixture also stores
+    ``series_transformed``: the complete recipe, anomaly seasonal form with the
+    forced response, the baseline and the quantile mapping applied. Without it
+    a port can pass every other array in this file with its ``pr`` path
+    unimplemented, since none of the steps unique to precipitation are
+    otherwise exercised.
+
     Parameters
     ----------
     bundle_path : str
@@ -822,7 +913,22 @@ def export_golden_fixture(
     forcing_by_exp : dict, optional
         Forcing trajectories per experiment for the forced term.
     year_0 : int, default 1850
-        First year of the forcing trajectories.
+        First calendar year of the forcing trajectories, and therefore of the
+        stored ``forced_response``. When the forcing came from
+        :func:`forcing_from_bundle` this must be the bundle's
+        ``forcing_year_start`` -- which is 1750 for bundles built from the
+        shipped scenarios, not the 1850 default. The default is kept for
+        backwards compatibility, but passing forcing read out of a bundle and
+        leaving it alone mislabels the year axis by a century.
+    locations : list of str, optional
+        Location specifiers to include. Defaults to every location in the
+        bundle, which for a 67-location bundle makes a needlessly large
+        fixture: a handful of locations validate the arithmetic just as well.
+    window_start : int, optional
+        First calendar year of ``t_glob``. Required to add
+        ``series_transformed``, because the forced response must be sliced to
+        the window the fixture covers before it can be combined with the
+        monthly terms.
     netcdf_format : str, default 'NETCDF3_64BIT'
         On-disk netCDF flavour; see :func:`export_timeseries_bundle`.
     dtype : np.dtype, default np.float32
@@ -860,7 +966,16 @@ def export_golden_fixture(
         ]
     ).T
 
-    specs = [str(s) for s in bundle["location"].values]
+    all_specs = [str(s) for s in bundle["location"].values]
+    if locations is None:
+        specs = all_specs
+    else:
+        specs = [str(s) for s in locations]
+        missing = [s for s in specs if s not in all_specs]
+        if missing:
+            raise ValueError(f"locations not in bundle: {', '.join(missing)}")
+    indices = [all_specs.index(s) for s in specs]
+
     series = np.zeros((len(specs), n_realizations, n_time))
     forced = np.zeros((len(specs), 0))
     if forcing_by_exp:
@@ -870,12 +985,12 @@ def export_golden_fixture(
                 for spec in specs
             ]
         )
-    for i, spec in enumerate(specs):
+    for i, idx in enumerate(indices):
         seasonal = (
-            design @ bundle["seasonal_coef"].values[i]
-            + bundle["seasonal_intercept"].values[i]
+            design @ bundle["seasonal_coef"].values[idx]
+            + bundle["seasonal_intercept"].values[idx]
         )
-        series[i] = seasonal[None, :] + pcs @ bundle["eof_projection"].values[i]
+        series[i] = seasonal[None, :] + pcs @ bundle["eof_projection"].values[idx]
 
     data_vars = {
         "t_glob": (("month",), t_glob.astype(dtype)),
@@ -884,6 +999,22 @@ def export_golden_fixture(
     }
     if forced.size:
         data_vars["forced_response"] = (("location", "year"), forced.astype(dtype))
+
+    transformed = _transformed_fixture_series(
+        bundle,
+        specs,
+        indices,
+        design,
+        pcs,
+        forced,
+        window_start,
+        year_0,
+    )
+    if transformed is not None:
+        data_vars["series_transformed"] = (
+            ("location", "realization", "month"),
+            transformed.astype(dtype),
+        )
 
     ds = xr.Dataset(
         data_vars,
@@ -912,8 +1043,12 @@ def export_golden_fixture(
         "created": np.datetime_as_string(np.datetime64("now", "s"), unit="s"),
         "usage": (
             "Feed stochastic_pcs and t_glob into the reimplementation; it must "
-            "reproduce series (and forced_response when present)."
+            "reproduce series (and forced_response when present). 'series' is "
+            "the absolute seasonal form plus the EOF projection, with no "
+            "forced response; 'series_transformed', when present, is the "
+            "complete recipe in the anomaly seasonal form."
         ),
+        "seasonal_form": "absolute",
     }
     ds.to_netcdf(filepath, format=netcdf_format)
     return filepath

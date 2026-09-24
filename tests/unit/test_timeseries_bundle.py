@@ -1048,3 +1048,78 @@ def test_golden_fixture_rejects_a_window_off_the_forcing_axis(tmp_path):
             year_0=2000,
             window_start=2015,
         )
+
+
+def test_supplied_emissions_reproduce_the_shipped_path():
+    """
+    Handing in a scenario's own inputs gives exactly what naming it gives.
+
+    The mapping form exists for scenarios METEOR cannot ship -- CMIP7's
+    ScenarioMIP emissions are third-party data this package has no right to
+    redistribute -- so the guarantee that matters is that supplying inputs by
+    hand changes nothing about how they are processed.
+    """
+    from meteor.scm_input_lib import load_emissions_concentrations_from_name
+    from meteor.timeseries_bundle import compute_scenario_forcing
+
+    pattern = _make_pattern_model()
+    by_name, start_name = compute_scenario_forcing(pattern, ["ssp245"])
+
+    emissions, concentrations = load_emissions_concentrations_from_name("ssp245")
+    supplied, start_supplied = compute_scenario_forcing(
+        pattern, {"anything-at-all": (emissions, concentrations)}
+    )
+
+    assert start_supplied == start_name
+    np.testing.assert_array_equal(supplied, by_name)
+
+
+def test_bundle_carries_forcing_from_supplied_emissions(tmp_path):
+    """A bundle can ship forcing for a scenario METEOR does not distribute."""
+    from meteor.scm_input_lib import load_emissions_concentrations_from_name
+    from meteor.timeseries_bundle import forcing_from_bundle
+
+    noise = _make_noise_model()
+    pattern = _make_pattern_model()
+    emissions, concentrations = load_emissions_concentrations_from_name("ssp245")
+
+    path = str(tmp_path / "bundle_supplied.nc")
+    export_timeseries_bundle(
+        noise,
+        pattern,
+        path,
+        LOCATIONS,
+        variable="tas",
+        scenarios={"cmip7-medium": (emissions, concentrations)},
+        dtype=np.float64,
+    )
+    bundle = load_timeseries_bundle(path)
+
+    # The bundle records the name it was given, not the inputs behind it.
+    assert [str(s) for s in bundle["scenario"].values] == ["cmip7-medium"]
+    assert bundle["scenario_forcing"].shape == (1, len(pattern.exp_list), 351)
+    assert bundle.attrs["forcing_year_start"] == 1750
+
+    forcing = forcing_from_bundle(bundle, "cmip7-medium")
+    assert set(forcing) <= set(pattern.exp_list)
+    assert all(np.all(np.isfinite(v)) for v in forcing.values())
+
+
+def test_supplied_scenarios_still_need_a_common_year_axis(tmp_path):
+    """Mismatched start years are caught for supplied inputs too."""
+    from meteor.scm_input_lib import load_emissions_concentrations_from_name
+    from meteor.timeseries_bundle import compute_scenario_forcing
+
+    pattern = _make_pattern_model()
+    emissions, concentrations = load_emissions_concentrations_from_name("ssp245")
+    shifted = emissions.copy()
+    shifted.index = shifted.index + 1
+
+    with pytest.raises(ValueError, match="common year axis"):
+        compute_scenario_forcing(
+            pattern,
+            {
+                "first": (emissions, concentrations),
+                "second": (shifted, concentrations),
+            },
+        )

@@ -194,8 +194,16 @@ def compute_scenario_forcing(pattern_model, scenarios):
     ----------
     pattern_model : MeteorPatternScaling
         Supplies the experiment list the forcing is split across.
-    scenarios : list of str
-        Scenario names (e.g. ``['ssp126', 'ssp245', 'ssp585']``).
+    scenarios : list of str or dict
+        Either scenario names to load from the shipped inputs
+        (e.g. ``['ssp126', 'ssp245', 'ssp585']``), or a mapping of name to
+        ``(emissions, concentrations)`` dataframes already in hand.
+
+        The mapping form exists for scenarios METEOR does not ship and cannot:
+        CMIP7's ScenarioMIP emissions, for instance, are third-party data that
+        a user must obtain themselves and that this package has no right to
+        redistribute. Supplying them here means the resulting *forcing* can be
+        bundled without the emissions ever being redistributed.
 
     Returns
     -------
@@ -208,19 +216,34 @@ def compute_scenario_forcing(pattern_model, scenarios):
     ------
     ValueError
         If the scenarios do not share a common start year or length.
+
+    Examples
+    --------
+    >>> compute_scenario_forcing(pattern, ["ssp245"])  # doctest: +SKIP
+    >>> compute_scenario_forcing(  # doctest: +SKIP
+    ...     pattern, {"my-scenario": (emissions_df, concentrations_df)}
+    ... )
     """
     exps = list(pattern_model.exp_list)
+    # A mapping supplies its own inputs; a sequence names inputs we ship.
+    supplied = scenarios if isinstance(scenarios, dict) else {}
+    names = list(scenarios)
     per_scenario = []
     year_start = None
     n_years = None
-    for scenario in scenarios:
-        emissions, concentrations = load_emissions_concentrations_from_name(scenario)
+    for scenario in names:
+        if scenario in supplied:
+            emissions, concentrations = supplied[scenario]
+        else:
+            emissions, concentrations = load_emissions_concentrations_from_name(
+                scenario
+            )
         start = int(emissions.index[0])
         if year_start is None:
             year_start = start
         elif start != year_start:
             raise ValueError(
-                f"scenario {scenario!r} starts at {start}, but {scenarios[0]!r} "
+                f"scenario {scenario!r} starts at {start}, but {names[0]!r} "
                 f"starts at {year_start}; bundles need a common year axis"
             )
         engine = scm_forcer_engine.ScmEngineForPatternScaling(
@@ -403,11 +426,17 @@ def export_timeseries_bundle(
         ``(start_year, end_year)`` the reference was sliced to. Recorded so a
         client can tell which window the fitted parameters are valid for; the
         fit depends on it.
-    scenarios : list of str, optional
-        Scenario names whose forcing trajectories should be baked in. Without
-        these a client has the step-response kernel but no forcing to convolve
-        it with, and obtaining forcing means running CICERO-SCM -- which a
-        browser cannot do. Costs roughly 4 KB per scenario.
+    scenarios : list of str or dict, optional
+        Scenarios whose forcing trajectories should be baked in. Without these
+        a client has the step-response kernel but no forcing to convolve it
+        with, and obtaining forcing means running CICERO-SCM -- which a browser
+        cannot do. Costs roughly 4 KB per scenario.
+
+        Either names of the shipped inputs, or a mapping of name to
+        ``(emissions, concentrations)`` dataframes for scenarios METEOR does
+        not ship. See :func:`compute_scenario_forcing`; the mapping form lets a
+        bundle carry forcing derived from third-party emissions without
+        redistributing the emissions themselves.
     doi : str, optional
         DOI of the deposit this artifact belongs to, recorded so a downloaded
         copy can be traced back.
@@ -534,9 +563,9 @@ def export_timeseries_bundle(
 
     forcing_year_start = -1
     if scenarios:
-        forcing, forcing_year_start = compute_scenario_forcing(
-            pattern_model, list(scenarios)
-        )
+        # Passed through rather than listed: a mapping carries the supplied
+        # emissions, and list() would reduce it to bare names.
+        forcing, forcing_year_start = compute_scenario_forcing(pattern_model, scenarios)
         data_vars["scenario_forcing"] = (
             ("scenario", "exp", "year"),
             forcing.astype(dtype),

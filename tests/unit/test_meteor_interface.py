@@ -1081,3 +1081,16 @@ def test_months_since():
 
     # Origin is a real parameter, not incidental: same year, different origins.
     assert _months_since(2015, 1850) != _months_since(2015, 1900)
+
+
+def test_default_config_pins_weight_eofs():
+    """weight_eofs is explicit in the config so train and validate agree.
+
+    It previously rode on train_noise_model_from_cmip6's default and was
+    invisible to cache validation, so a cache fitted with the other setting
+    was reused silently.
+    """
+    for variable in ("tas", "pr", "huss"):
+        config = _get_default_config(variable)
+        assert config["weight_eofs"] is True
+        assert config["use_exog"] == "none"

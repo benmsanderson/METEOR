@@ -78,6 +78,44 @@ def test_validate_temperature_input_and_convert():
         validate_temperature_input_and_convert("not a data array or float")
 
 
+def test_degree_days_calculate_batches_realizations():
+    """Passing a 2D ``(realization, month)`` DataArray must produce the same
+    per-realization output as looping ``.calculate()`` over each row.
+
+    The MeteorInterface impact path relies on this: it avoids the expensive
+    per-realization Python loop by batching the whole ensemble into one call.
+    """
+    calc = DegreeDaysCalculator(base_temperature=18.0)
+
+    rng = np.random.default_rng(0)
+    n_real, n_month = 8, 12 * 30  # 30 years
+    t = np.arange(n_month)
+    temps = (
+        15.0
+        + 8.0 * np.sin(2 * np.pi * t / 12.0)[None, :]
+        + 0.4 * rng.standard_normal((n_real, n_month))
+    )
+    ds = xr.DataArray(temps, dims=["realization", "month"], coords={"month": t})
+
+    # Per-realization loop (reference)
+    serial_hdd = np.stack(
+        [calc.calculate(ds[i]).data["annual_hdd"].values for i in range(n_real)]
+    )
+    serial_cdd = np.stack(
+        [calc.calculate(ds[i]).data["annual_cdd"].values for i in range(n_real)]
+    )
+
+    # Batched
+    result = calc.calculate(ds)
+    batched_hdd = result.data["annual_hdd"].values
+    batched_cdd = result.data["annual_cdd"].values
+
+    assert batched_hdd.shape == serial_hdd.shape
+    assert batched_cdd.shape == serial_cdd.shape
+    np.testing.assert_allclose(batched_hdd, serial_hdd, rtol=0, atol=1e-9)
+    np.testing.assert_allclose(batched_cdd, serial_cdd, rtol=0, atol=1e-9)
+
+
 class TestDegreeDaysCalculator:
     """Test DegreeDaysCalculator functionality."""
 

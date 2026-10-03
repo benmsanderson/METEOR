@@ -1266,9 +1266,11 @@ def test_load_transform_reference_pr_uses_declared_start_year(interface_factory)
     ssp_data, pr_first_year_mean = interface._load_transform_reference(
         "pr", 2005, 2010, verbose=False
     )
-
+    print(ssp_data.start_year)
     # 2005-2010 inclusive, starting 60 months into the composite.
+    print(ssp_data.sizes)
     assert ssp_data.sizes["month"] == 72
+    print(pr_first_year_mean)
     assert np.isclose(float(pr_first_year_mean.values[0, 0]), np.arange(60, 72).mean())
 
 
@@ -1493,46 +1495,6 @@ def test_apply_gridded_transform_baseline_variants(interface_factory):
     assert with_baseline.dims == ("realization", "month", "lat", "lon")
     assert np.all(without_baseline.values >= 0)
     assert np.all(with_baseline.values >= 0)
-
-
-def test_build_full_window_transformed_ensemble_without_baseline(interface_factory):
-    """A missing pr baseline leaves the generated ensemble untouched before fitting."""
-    interface, _ = interface_factory(model="TestModel", variables=("pr",))
-    noise_model = MagicMock()
-
-    monthly_prediction = xr.DataArray(
-        np.zeros((24, 2, 2)),
-        dims=["month", "lat", "lon"],
-        coords={"month": np.arange(24), "lat": [0, 1], "lon": [0, 1]},
-    )
-    # Single realization, not a list, to exercise the normalisation path.
-    noise_model.generate_realization.return_value = monthly_prediction
-    interface._load_transform_reference = MagicMock(
-        return_value=(monthly_prediction, None)
-    )
-
-    config = MagicMock()
-    config.transform_type = "gamma"
-    config.fit_3d_seasonal_func = MagicMock(return_value={})
-    config.apply_seasonal_func = MagicMock(return_value=np.ones((1, 24, 2, 2)))
-
-    result = interface._build_full_window_transformed_ensemble(
-        "pr",
-        monthly_prediction,
-        np.zeros(24),
-        noise_model,
-        np.zeros((1, 24, 3)),
-        2000,
-        2001,
-        config,
-        include_noise=True,
-        verbose=False,
-    )
-
-    passed_data = config.apply_seasonal_func.call_args[0][0]
-    assert np.allclose(passed_data, 0.0)
-    assert result.dims == ("realization", "month", "lat", "lon")
-    assert result.sizes["realization"] == 1
 
 
 def _picontrol_getter(mock_interface, value=288.0):

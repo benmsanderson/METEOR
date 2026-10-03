@@ -1604,6 +1604,8 @@ def test_apply_impacts_rejects_unusable_aggregation_keys(mock_interface):
         mock_interface._apply_impacts(
             var_output, "tas", {"degree_days": {"cdd_base": 18.0}}, verbose=False
         )
+
+
 def test_months_since():
     """Month-index conversion, including the exclusive-end-bound idiom."""
     assert _months_since(1850, 1850) == 0

@@ -33,7 +33,7 @@ dependencies = [
     "scipy",
     "numpy>=1.23",
     "pandas",
-    "xarray",
+    "xarray<2026.9",  # 2026.9 requires zarr>=3 for zarr I/O; zarr is pinned <3 below
     "netcdf4",
     "h5netcdf",
     "zarr<3",

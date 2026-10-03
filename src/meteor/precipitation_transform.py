@@ -13,9 +13,171 @@ Key Features:
 Author: METEOR Development Team
 """
 
+import os
+import warnings
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 import xarray as xr
 from scipy import stats
+from scipy.special import (  # pylint: disable=no-name-in-module
+    digamma,
+    gammaincinv,
+    polygamma,
+)
+
+# Upper bound on user-requested threads, as a multiple of the CPU count.
+# Oversubscription itself is harmless (measured flat from 8 threads to 256 on a
+# 10-core box, output bitwise-identical throughout), so this is not a
+# performance cap. It exists because one task is submitted per chunk, so an
+# absurd value like METEOR_GAMMA_PPF_THREADS=100000 would try to spawn that
+# many OS threads and die with "can't start new thread" — a crash from a typo,
+# which is exactly what the malformed-value fallback below exists to prevent.
+_GAMMA_PPF_THREAD_LIMIT_FACTOR = 8
+
+
+def _resolve_gamma_ppf_threads():
+    """Pick thread count for :func:`_threaded_gamma_ppf_3d`.
+
+    Reads the ``METEOR_GAMMA_PPF_THREADS`` environment variable so HPC users
+    can pin threads without touching Python (same pattern as ``OMP_NUM_THREADS``).
+    Falls back to ``min(8, cpu_count())`` — bounded because the underlying
+    scipy special function has diminishing returns past ~8 threads on typical
+    hardware. Set to ``1`` to disable threading entirely.
+
+    Modest oversubscription is honoured as requested: it costs nothing measurable
+    and the caller may know something we do not about their machine. Only values
+    beyond ``_GAMMA_PPF_THREAD_LIMIT_FACTOR * cpu_count`` are clamped, with a
+    warning, to keep a typo from exhausting the thread table.
+    """
+    n_cpu = os.cpu_count() or 1
+    env = os.environ.get("METEOR_GAMMA_PPF_THREADS")
+    if env:
+        try:
+            n = int(env)
+            if n >= 1:
+                ceiling = _GAMMA_PPF_THREAD_LIMIT_FACTOR * n_cpu
+                if n > ceiling:
+                    warnings.warn(
+                        f"METEOR_GAMMA_PPF_THREADS={n} exceeds {ceiling} "
+                        f"({_GAMMA_PPF_THREAD_LIMIT_FACTOR}x the {n_cpu} available "
+                        f"CPUs); clamping to {ceiling}. Thread scaling is flat well "
+                        f"below this, so nothing is lost.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    return ceiling
+                return n
+        except ValueError:
+            pass
+    return min(8, n_cpu)
+
+
+def _threaded_gamma_ppf_3d(u, shape_flat, scale_flat, n_threads=None):
+    """gamma.ppf across the trailing spatial axis, threaded.
+
+    scipy's ``gammaincinv`` (which backs ``stats.gamma.ppf``) releases the GIL,
+    so we chunk along the spatial axis and evaluate in parallel threads. For
+    the METEOR gridded workload this dominates :func:`apply_distribution_transform`.
+
+    Parameters
+    ----------
+    u : ndarray, shape (..., n_spatial)
+        Uniform-scale quantiles (output of ``norm.cdf``).
+    shape_flat, scale_flat : ndarray, shape (n_spatial,)
+    n_threads : int, optional
+        Explicit thread count. If ``None`` (default), consults the
+        ``METEOR_GAMMA_PPF_THREADS`` env var, falling back to
+        ``min(8, cpu_count())``. Bypasses threading for small problems where
+        thread setup would dominate.
+    """
+    n_spatial = shape_flat.shape[0]
+    if n_threads is None:
+        n_threads = _resolve_gamma_ppf_threads()
+    # More threads than gridpoints would hand empty chunks to idle workers.
+    n_threads = min(n_threads, n_spatial)
+    if n_threads <= 1 or n_spatial < 4096:
+        return scale_flat * gammaincinv(shape_flat, u)
+
+    chunks = np.array_split(np.arange(n_spatial), n_threads)
+    out = np.empty_like(u)
+
+    def _work(idx):
+        return idx, scale_flat[idx] * gammaincinv(shape_flat[idx], u[..., idx])
+
+    with ThreadPoolExecutor(n_threads) as ex:
+        for idx, res in ex.map(_work, chunks):
+            out[..., idx] = res
+    return out
+
+
+def _vectorized_gamma_mle(data, max_iter=8, tol=1e-8):
+    """MLE fit of Gamma(shape, scale) with location fixed at 0, vectorized.
+
+    Same estimator scipy.stats.gamma.fit(x, floc=0) uses internally, but
+    applied to a batch of independent samples in one call. For each column j
+    of ``data`` (shape ``(n_obs, n_series)``), solve
+
+        log(k) - psi(k) = log(mean(x)) - mean(log(x))       (Choi & Wette 1969)
+        theta = mean(x) / k
+
+    by Newton's method on k, seeded with the Choi-Wette initial guess.
+
+    Non-positive samples are treated as invalid and masked out; series with
+    fewer than 2 positive samples fall back to shape=1.0, scale=mean.
+
+    Parameters
+    ----------
+    data : ndarray (n_obs, n_series)
+    max_iter : int
+    tol : float
+        Convergence tolerance on |Δk| / k.
+
+    Returns
+    -------
+    shape, scale : ndarray (n_series,)
+    """
+    x = np.asarray(data, dtype=np.float64)
+
+    valid = (x > 0) & np.isfinite(x)
+    n_valid = valid.sum(axis=0)
+
+    # Sum and log-sum with invalid entries zeroed out
+    x_masked = np.where(valid, x, 0.0)
+    # Substitute 1.0 (log 1 == 0) at invalid entries *before* taking the log, so
+    # the log is never handed a negative, a zero, or a NaN. `valid` already
+    # requires x > 0, so no clamping of the surviving entries is needed.
+    logx_masked = np.log(np.where(valid, x, 1.0))
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean_x = x_masked.sum(axis=0) / n_valid
+        mean_logx = logx_masked.sum(axis=0) / n_valid
+        s = np.log(mean_x) - mean_logx  # >= 0 with equality iff constant
+
+    # Guard against degenerate series
+    fittable = (n_valid >= 2) & np.isfinite(s) & (s > 0)
+
+    # Choi-Wette initial guess for k (only used where fittable)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        k = (3.0 - s + np.sqrt(np.maximum((s - 3.0) ** 2 + 24.0 * s, 0.0))) / (12.0 * s)
+    k = np.where(fittable, k, 1.0)
+    k = np.clip(k, 1e-6, 1e6)
+
+    # Newton iterations
+    for _ in range(max_iter):
+        f = np.log(k) - digamma(k) - s
+        fp = 1.0 / k - polygamma(1, k)  # trigamma
+        step = f / fp
+        k_new = np.clip(k - step, 1e-6, 1e6)
+        if np.max(np.abs(k_new - k) / np.maximum(k, 1e-12)) < tol:
+            k = k_new
+            break
+        k = k_new
+
+    shape = np.where(fittable, k, 1.0)
+    scale = np.where(fittable, mean_x / shape, np.where(n_valid > 0, mean_x, 0.01))
+    return shape, scale
+
 
 # =============================================================================
 # PATH 1: 1D Transform (for regional/global mean time series)
@@ -194,8 +356,6 @@ def fit_distribution_parameters_3d(spatial_data, distribution="gamma"):
             f"4D (n_ensemble, n_time, n_lat, n_lon), got shape {data_array.shape}"
         )
 
-    n_spatial = n_lat * n_lon
-
     if distribution == "gaussian":
         # Fit Gaussian: simple mean and std at each grid point
         mean_params = np.mean(data_reshaped, axis=0).reshape(n_lat, n_lon)
@@ -204,32 +364,11 @@ def fit_distribution_parameters_3d(spatial_data, distribution="gamma"):
         params = {"mean": mean_params, "std": std_params}
 
     elif distribution == "gamma":
-        # Fit Gamma distribution at each grid point
-        shape_params = np.zeros(n_spatial)
-        scale_params = np.zeros(n_spatial)
-
-        print(f"Fitting Gamma distribution to {n_spatial} grid points...")
-        for i in range(n_spatial):
-            grid_data = data_reshaped[:, i]
-            # Use the 1D fitting function for consistency
-            try:
-                grid_params = fit_distribution_parameters_1d(
-                    grid_data, distribution="gamma"
-                )
-                shape_params[i] = grid_params["shape"]
-                scale_params[i] = grid_params["scale"]
-            except (ValueError, RuntimeError, RuntimeWarning):
-                # If fit fails completely (e.g., all NaNs or invalid data),
-                # use default values
-                shape_params[i] = 1.0
-                scale_params[i] = 0.01
-
-            if (i + 1) % 5000 == 0:  # pragma no cover
-                print(f"  Processed {i + 1}/{n_spatial} grid points...")
-
+        # Vectorized MLE fit across all gridpoints in one shot.
+        shape_flat, scale_flat = _vectorized_gamma_mle(data_reshaped)
         params = {
-            "shape": shape_params.reshape(n_lat, n_lon),
-            "scale": scale_params.reshape(n_lat, n_lon),
+            "shape": shape_flat.reshape(n_lat, n_lon),
+            "scale": scale_flat.reshape(n_lat, n_lon),
         }
 
     else:
@@ -351,9 +490,7 @@ def apply_distribution_transform(
         if target_dist == "gamma":
             shape_grid = target_params["shape"].flatten()
             scale_grid = target_params["scale"].flatten()
-            transformed_flat = stats.gamma.ppf(
-                uniform, a=shape_grid[None, :], scale=scale_grid[None, :]
-            )
+            transformed_flat = _threaded_gamma_ppf_3d(uniform, shape_grid, scale_grid)
         else:
             raise ValueError(
                 f"Only 'gamma' distribution supported for 3D data, got {target_dist}"

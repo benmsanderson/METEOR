@@ -481,6 +481,26 @@ def test_get_single_var_mod_data_nan_zstore_ref(light_cache_handler):
         data_getter.get_single_var_mod_data("piControl", "tas", "CanESM5")
 
 
+def test_get_single_var_mod_data_none_zstore_ref(light_cache_handler):
+    # Any missing value, not only the np.nan singleton, must be caught before
+    # it reaches gcs.get_mapper.
+    data_getter = _make_light_cache_getter(
+        light_cache_handler,
+        flds=["tas"],
+        exps=["piControl"],
+    )
+    data_getter.enable_cache = False
+
+    df_entry = data_getter.df_all[data_getter.exps.index("piControl")][
+        data_getter.flds.index("tas")
+    ]
+    df_entry["zstore"] = df_entry["zstore"].astype(object)
+    df_entry.loc[df_entry["source_id"] == "CanESM5", "zstore"] = None
+
+    with pytest.raises(KeyError, match="No zstore ref for CanESM5"):
+        data_getter.get_single_var_mod_data("piControl", "tas", "CanESM5")
+
+
 def test_get_single_var_mod_data_yearmean_cache_hit(light_cache_handler, caplog):
     data_getter = _make_light_cache_getter(
         light_cache_handler,

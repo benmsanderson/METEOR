@@ -663,7 +663,7 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
             .zstore
         )
 
-        if zstore_ref is np.nan:
+        if pd.isna(zstore_ref):
             raise KeyError(f"No zstore ref for {model}")
 
         mapper = self.gcs.get_mapper(zstore_ref)

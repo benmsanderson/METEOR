@@ -48,6 +48,9 @@ def _get_default_config(variable):
         "lag_order": 2,
         "use_picontrol_baseline": True,
         "training_scenario": "ssp245",
+        # Explicit rather than riding on train_noise_model_from_cmip6's default,
+        # so cache validation can compare against the same value training used.
+        "weight_eofs": True,
     }
 
     # Variable-specific defaults
@@ -514,6 +517,7 @@ class MeteorInterface:
             - 'n_modes_noise': Number of PCA modes for noise representation
             - 'lag_order': Temporal memory in VARX model
             - 'use_exog': Exogenous variable usage ('all', 'temp_only', 'none')
+            - 'weight_eofs': Area-weight the EOF basis (default True)
             - 'training_scenario': Scenario for temperature trajectory (default: 'ssp245')
         verbose : bool
             Print training progress messages
@@ -527,6 +531,8 @@ class MeteorInterface:
                 variable,
                 n_modes=config["n_modes_noise"],
                 lag_order=config["lag_order"],
+                use_exog=config["use_exog"],
+                weight_eofs=config.get("weight_eofs", True),
             )
         )
 
@@ -581,6 +587,7 @@ class MeteorInterface:
                 n_modes=config["n_modes_noise"],
                 lag_order=config["lag_order"],
                 use_exog=config["use_exog"],
+                weight_eofs=config.get("weight_eofs", True),
                 custom_global_temp=monthly_warming_trimmed,  # ✅ Pass pattern prediction
                 cache_dir=os.path.join(self.cache_handler.cache_dir, "noise_models"),
                 verbose=verbose,

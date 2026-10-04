@@ -286,3 +286,44 @@ def test_pattern_scaling_cache_path_roundtrips_meteor_pattern_scaling_save_name(
         # cache path (via the same convention). We don't actually train, just
         # verify the two views agree on the target filename literally.
         assert MeteorPatternScaling  # ensure the import is not marked unused
+
+
+def test_artifact_paths_mirror_pickle_names(tmp_path):
+    """Artifact helpers reuse the existing naming, swapping only the suffix."""
+    handler = cache_handling.CacheHandler(cache_dir=str(tmp_path), purpose="classic")
+
+    pickle_path = handler.get_noise_model_cache_path("CESM2", "tas")
+    artifact_path = handler.get_noise_model_artifact_path("CESM2", "tas")
+    assert pickle_path.endswith("CESM2_tas_noise_model.pkl")
+    assert artifact_path == pickle_path[: -len(".pkl")] + ".nc"
+
+    pattern_pickle = handler.get_pattern_scaling_cache_path("CESM2", variable="tas")
+    pattern_artifact = handler.get_pattern_scaling_artifact_path(
+        "CESM2", variable="tas"
+    )
+    assert pattern_pickle.endswith(".pkl")
+    assert pattern_artifact == pattern_pickle[: -len(".pkl")] + ".nc"
+
+
+def test_resolve_cached_model_path_prefers_artifact(tmp_path):
+    """A migrated cache is picked up; a legacy pickle still resolves."""
+    handler = cache_handling.CacheHandler(cache_dir=str(tmp_path), purpose="classic")
+    artifact = tmp_path / "model.nc"
+    pickle_file = tmp_path / "model.pkl"
+
+    assert handler.resolve_cached_model_path(str(artifact), str(pickle_file)) == (
+        None,
+        False,
+    )
+
+    pickle_file.write_bytes(b"legacy")
+    assert handler.resolve_cached_model_path(str(artifact), str(pickle_file)) == (
+        str(pickle_file),
+        False,
+    )
+
+    artifact.write_bytes(b"netcdf")
+    assert handler.resolve_cached_model_path(str(artifact), str(pickle_file)) == (
+        str(artifact),
+        True,
+    )

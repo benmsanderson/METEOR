@@ -689,3 +689,87 @@ class CacheHandler:
 
         os.makedirs(cache_dir, exist_ok=True)
         return os.path.join(cache_dir, f"{model_name}_{variable_name}_noise_model.pkl")
+
+    def get_noise_model_artifact_path(self, model_name, variable_name):
+        """
+        Get the portable-artifact path for a noise model.
+
+        The netCDF sibling of :meth:`get_noise_model_cache_path`. Kept as a
+        separate helper rather than a flag on the existing one so that the
+        pickle naming callers already rely on is untouched.
+
+        Parameters
+        ----------
+        model_name : str
+            Name of the CMIP6 model.
+        variable_name : str
+            Variable name (e.g. 'tas', 'pr').
+
+        Returns
+        -------
+        str or None
+            Full path to the ``.nc`` artifact, or None when caching is off.
+
+        Examples
+        --------
+        >>> data_getter = Cmip6MeteorDataGetter(exps=["piControl"], flds=["tas"])
+        >>> data_getter.get_noise_model_artifact_path("CESM2", "tas")  # doctest: +SKIP
+        '/path/to/noise_models/CESM2_tas_noise_model.nc'
+        """
+        pickle_path = self.get_noise_model_cache_path(model_name, variable_name)
+        if pickle_path is None:
+            return None
+        return pickle_path[: -len(".pkl")] + ".nc"
+
+    def get_pattern_scaling_artifact_path(
+        self, model_name, scenario="aer", variable=None
+    ):
+        """
+        Get the portable-artifact path for a pattern scaling model.
+
+        Parameters
+        ----------
+        model_name : str
+            Name of the CMIP6 model.
+        scenario : str, optional
+            Scenario suffix. Default "aer".
+        variable : str, optional
+            Variable name, included in the filename when given.
+
+        Returns
+        -------
+        str or None
+            Full path to the ``.nc`` artifact, or None when caching is off.
+        """
+        pickle_path = self.get_pattern_scaling_cache_path(
+            model_name, scenario=scenario, variable=variable
+        )
+        if pickle_path is None:
+            return None
+        return pickle_path[: -len(".pkl")] + ".nc"
+
+    def resolve_cached_model_path(self, artifact_path, pickle_path):
+        """
+        Choose between a portable artifact and a legacy pickle.
+
+        Prefers the artifact when it exists, so a cache that has been migrated
+        is picked up automatically while already-trained pickle caches keep
+        working untouched.
+
+        Parameters
+        ----------
+        artifact_path : str or None
+            Candidate ``.nc`` path.
+        pickle_path : str or None
+            Candidate ``.pkl`` path.
+
+        Returns
+        -------
+        tuple
+            ``(path, is_artifact)``; ``path`` is None when neither exists.
+        """
+        if artifact_path is not None and os.path.exists(artifact_path):
+            return artifact_path, True
+        if pickle_path is not None and os.path.exists(pickle_path):
+            return pickle_path, False
+        return None, False

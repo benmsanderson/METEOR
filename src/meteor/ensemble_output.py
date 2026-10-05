@@ -7,6 +7,7 @@ climate variables, spatial aggregations, and impact metrics.
 
 from pathlib import Path
 
+import numpy as np
 import xarray as xr
 
 
@@ -144,7 +145,18 @@ class EnsembleOutput:
                     stacked = xr.concat(slices, dim="month")
                     stacked = stacked.transpose("month", "realization", "lat", "lon")
                     ds[f"{var_name}_grid_{safe_name}"] = stacked
-
+                elif isinstance(grid_array, dict) and grid_name == "climatology":
+                    years_keys = sorted(grid_array.keys())
+                    years = [
+                        np.mean(
+                            (int(year_str.split("-")[0]), int(year_str.split("-")[1]))
+                        )
+                        for year_str in years_keys
+                    ]
+                    stacked = xr.concat(
+                        [grid_array[y] for y in years_keys], dim="year"
+                    ).assign_coords(year=years)
+                    ds[f"{var_name}_grid_{safe_name}"] = stacked
                 else:
                     ds[f"{var_name}_grid_{safe_name}"] = grid_array
 
@@ -165,10 +177,24 @@ class EnsembleOutput:
             if include_impacts:
                 for impact_name, impact_dict in var_data.impacts.items():
                     for agg_name, impact_array in impact_dict.items():
+                        if isinstance(impact_array, xr.DataArray):
+                            dimensions = impact_array.dims
+                            data = impact_array.data
+                        elif isinstance(impact_array, np.ndarray):
+                            if impact_array.shape[0] == 1:
+                                dimensions = ("year",)
+                                data = impact_array[0]
+                            else:
+                                dimensions = ("month", "year")
+                                data = impact_array
+                        else:
+                            raise ValueError(
+                                f"Unexpected type for impact array: {type(impact_array)}"
+                            )
                         safe_agg = agg_name.replace(":", "_").replace(".", "p")
                         ds[f"{var_name}_{impact_name}_{safe_agg}"] = (
-                            impact_array.dims,
-                            impact_array.data,
+                            dimensions,
+                            data,
                         )
 
             datasets[var_name] = ds

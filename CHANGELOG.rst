@@ -38,6 +38,7 @@ The changes listed in this file are categorised as follows:
 - Vectorized ``MeteorInterface._apply_impacts``' per-realization loop. The underlying ``DegreeDaysCalculator.calculate`` is already vectorized over the ``month`` dimension via xarray, so passing the whole ``(realization, month)`` DataArray in one call produces identical results (verified in ``test_degree_days_calculate_batches_realizations`` to ``atol=1e-9``) without the per-realization Python overhead. At N=100 this removes ~20 s from ``gen_impacts``; scales linearly in N.
 - Streamed the gridded distribution-transform path (``MeteorInterface._generate_gridded``) so peak memory is bounded by chunk size rather than by ``n_realizations``. Two-pass approach: accumulate per-month-of-year per-gridpoint moments to fit the Gaussian half of the quantile map, then reconstruct each chunk again and apply the transform per requested slice. Output is bitwise-identical to the previous full-window path (verified to ≤1e-16 relative on NorESM2-MM ``pr``). Chunk size defaults to ~5 GB per chunk and is overridable via ``METEOR_GRIDDED_CHUNK_SIZE``. In practice this lifts the previous silent OOM at ``n_realizations ≳ 8`` on a full-resolution CMIP6 grid: gridded ensembles at N=50 now complete on a 32 GB machine with peak ≈22 GB (was OOM).
 - Now possibly to send variable length temperature scaling timeseries, fixed noise generator for wrong ordering of base data dimensions
+- Ensemble output generation fixed for impact arrays of are climatology or on numpy array format rather than xarray Dataarray
 
 ### Fixed
 

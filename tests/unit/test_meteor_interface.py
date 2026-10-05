@@ -1274,22 +1274,39 @@ def test_load_transform_reference_pr_uses_declared_start_year(interface_factory)
     assert np.isclose(float(pr_first_year_mean.values[0, 0]), np.arange(60, 72).mean())
 
 
-def test_load_transform_reference_pr_infers_start_year_from_length(interface_factory):
-    """Without a declared start year it is inferred from the composite length."""
+def test_load_transform_reference_pr_assumes_1850_without_a_start_year(
+    interface_factory,
+):
+    """Without a declared start year the composite starts in 1850, as CMIP6
+    historical runs do, whatever its length."""
     interface, mock_getter = interface_factory(model="TestModel", variables=("pr",))
     mock_getter.make_meteor_training_data_composite.side_effect = (
-        _composite_side_effect("pr", 240)
+        _composite_side_effect("pr", (2100 - 1850 + 1) * 12)
     )
 
     ssp_data, pr_first_year_mean = interface._load_transform_reference(
         "pr", 2000, 2010, verbose=False
     )
 
-    # 240 months ending in 2010 implies the composite starts in 1991.
     assert ssp_data.sizes["month"] == 132
+    first = (2000 - 1850) * 12
     assert np.isclose(
-        float(pr_first_year_mean.values[0, 0]), np.arange(108, 120).mean()
+        float(pr_first_year_mean.values[0, 0]), np.arange(first, first + 12).mean()
     )
+
+
+def test_load_transform_reference_pr_rejects_a_composite_ending_early(
+    interface_factory,
+):
+    """A scenario run ending in 2099 is an error for a window to 2100, rather
+    than read as 1851-2100 and shifted a year."""
+    interface, mock_getter = interface_factory(model="TestModel", variables=("pr",))
+    mock_getter.make_meteor_training_data_composite.side_effect = (
+        _composite_side_effect("pr", (2099 - 1850 + 1) * 12)
+    )
+
+    with pytest.raises(ValueError, match="beyond the composite data end year"):
+        interface._load_transform_reference("pr", 2015, 2100, verbose=False)
 
 
 def test_load_transform_reference_pr_rejects_out_of_range_window(interface_factory):
@@ -1544,6 +1561,8 @@ def test_apply_impacts_custom_region_and_point_baselines(mock_interface):
     assert set(impacts["hdd"]) == {"regional:custom:nordic", "point:0.0,90.0"}
     assert impacts["hdd"]["point:0.0,90.0"].shape[0] == 2
     assert impacts["cdd"]["regional:custom:nordic"].shape[0] == 2
+    # Labelled, so a file written from them says which axis is which.
+    assert impacts["hdd"]["point:0.0,90.0"].dims == ("realization", "year")
 
 
 def test_apply_impacts_rejects_unusable_aggregation_keys(mock_interface):

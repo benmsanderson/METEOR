@@ -42,6 +42,7 @@ The changes listed in this file are categorised as follows:
 
 ### Fixed
 
+- ``_load_transform_reference`` no longer shifts a historical+scenario composite that ends before ``end_year`` (e.g. ssp245 runs ending in 2099) by a year: the data getter now records each run's start year from its CF time axis (``Cmip6MeteorDataGetter.first_year``), and a composite without one is taken to start in 1850, so a short run raises instead. Degree-day impacts from ``_apply_impacts`` stay ``xr.DataArray`` with dims ``(realization, year)``, so ``EnsembleOutput.to_netcdf`` no longer labels them ``(month, year)`` for more than one realization.
 - ``Cmip6MeteorDataGetter.validate_pattern_scaling_cache`` now accepts an optional ``variable`` argument matching the per-variable suffix ``MeteorPatternScaling`` saves under (``cmip6-{model}-aer-{variable}``). Without it, a cache that ``MeteorPatternScaling.__init__`` loads successfully by filename was reported as "invalid" by the outer validator, causing ``MeteorInterface`` to run ``prepare_pattern_scaling_training_data`` (which fetches and assembles CMIP6 data over the network) on every generation call and immediately discard the result. Threading ``variable=`` through ``_train_pattern_scaling`` fixes the mismatch and eliminates the redundant work (~13–18 s per generation call in the NorESM2-MM profiling workloads).
 - Variable length timeseries now works also when don't have "year" as time dimension.
 - Fixes to generate annual and monthly gridded ensembles with unified noise and preserving more of the variance.

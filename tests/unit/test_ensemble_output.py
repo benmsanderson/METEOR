@@ -664,3 +664,22 @@ def test_to_netcdf_with_numpy_impacts():
 
     if os.path.exists(tmp_path):
         os.remove(tmp_path)
+
+
+def test_to_netcdf_keeps_the_realization_axis_of_impacts():
+    """Degree days for several realizations are written as (realization, year)."""
+    var_tas = VariableOutput("tas")
+    var_tas.impacts["hdd"] = {
+        "global": xr.DataArray(np.ones((20, 5)), dims=("realization", "year"))
+    }
+    ensemble = EnsembleOutput({"tas": var_tas})
+
+    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
+        tmp_path = tmp.name
+    with patch("builtins.print"):
+        ensemble.to_netcdf(tmp_path, include_impacts=True)
+
+    loaded = xr.open_dataset(tmp_path)
+    assert loaded["tas_hdd_global"].dims == ("realization", "year")
+    loaded.close()
+    os.remove(tmp_path)

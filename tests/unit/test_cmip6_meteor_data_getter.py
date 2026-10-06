@@ -1024,3 +1024,70 @@ def test_get_single_var_mod_data_monthly_writes_cache_at_expected_path(
         "is looking at a different filename than save wrote to"
     )
     xr.testing.assert_equal(first, second)
+
+
+def _undecoded_time(values, units, calendar="noleap"):
+    """A time coordinate as the stores are opened: numbers plus CF attrs."""
+    return xr.DataArray(
+        np.asarray(values, dtype=float),
+        dims=["time"],
+        attrs={"units": units, "calendar": calendar},
+    )
+
+
+def test_first_year_decodes_an_undecoded_time_axis():
+    first_year = cmip6_meteor_data_getter.first_year
+    assert first_year(_undecoded_time([15.5, 45.0], "days since 1850-01-01")) == 1850
+    # piControl runs often count from a model year such as 0201.
+    assert (
+        first_year(_undecoded_time([200 * 365 + 15.5], "days since 0001-01-01")) == 201
+    )
+    assert (
+        first_year(_undecoded_time([0.5], "hours since 2015-01-01", calendar="360_day"))
+        == 2015
+    )
+    assert first_year(_undecoded_time([1.0], "not a time unit")) is None
+
+
+def _monthly_dataset(fld, start, n_months):
+    time = _undecoded_time(
+        np.arange(n_months) * 30.0 + 15.0, f"days since {start}-01-01"
+    )
+    return xr.Dataset(
+        {fld: (("time", "lat", "lon"), np.ones((n_months, 2, 2)))},
+        coords={"time": time, "lat": [0.0, 1.0], "lon": [0.0, 1.0]},
+    )
+
+
+def test_monthly_data_records_when_it_starts(light_cache_handler):
+    """The start year survives the time axis becoming a month count."""
+    data_getter = _make_light_cache_getter(
+        light_cache_handler, flds=["pr"], exps=["piControl"]
+    )
+    data_getter.enable_cache = False
+    data_getter.get_single_var_mod_data = MagicMock(
+        return_value=_monthly_dataset("pr", 2015, 24)
+    )
+
+    monthly = data_getter.get_single_var_mod_data_monthly("piControl", "pr", "CanESM5")
+
+    assert monthly.attrs["start_year"] == 2015
+    assert list(monthly["month"].values[:3]) == [0, 1, 2]
+
+
+def test_composite_starts_when_its_first_experiment_does(light_cache_handler):
+    """historical + scenario carries historical's start year."""
+    data_getter = _make_light_cache_getter(
+        light_cache_handler, flds=["pr"], exps=["piControl"]
+    )
+    data_getter.enable_cache = False
+    data_getter.get_single_var_mod_data = MagicMock(
+        side_effect=[_monthly_dataset("pr", 1850, 36), _monthly_dataset("pr", 2015, 24)]
+    )
+
+    composite = data_getter.make_meteor_training_data_composite(
+        ["historical", "ssp245"], "CanESM5", monthly=True
+    )
+
+    assert composite["pr"].attrs["start_year"] == 1850
+    assert composite["pr"].sizes["month"] == 60

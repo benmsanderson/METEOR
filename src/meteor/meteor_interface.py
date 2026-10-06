@@ -1285,12 +1285,13 @@ class MeteorInterface:
             if hasattr(ssp_data, "start_year"):
                 composite_start_year = int(ssp_data.start_year)
             else:
-                # Default assumption: historical+scenario composite starts at 1850
-                expected_months_from_1850 = (end_year - 1850 + 1) * 12
-                if n_months > expected_months_from_1850:
-                    composite_start_year = 1850
-                else:
-                    composite_start_year = end_year - (n_months // 12) + 1
+                # The data getter records the start year; a composite without
+                # it (cached before it did) is taken to start where every
+                # CMIP6 historical run does, in 1850. Inferring the start from
+                # the length instead assumes the composite ends exactly at
+                # end_year, which shifts a run ending in 2099 by a year with
+                # no error; with a fixed start, a short run is caught below.
+                composite_start_year = 1850
 
             start_year_idx = _months_since(start_year, composite_start_year)
             composite_end_year = composite_start_year + n_months // 12 - 1
@@ -2346,8 +2347,10 @@ class MeteorInterface:
                 # 'month' dimension, so we pass the whole (realization, month)
                 # array in a single call rather than looping per realization.
                 result = dd_model.calculate(temp_celsius)
-                impacts["hdd"][key] = result.data["annual_hdd"].values
-                impacts["cdd"][key] = result.data["annual_cdd"].values
+                # Kept as DataArrays, so their dimensions (realization, year)
+                # travel with them into EnsembleOutput.to_netcdf.
+                impacts["hdd"][key] = result.data["annual_hdd"]
+                impacts["cdd"][key] = result.data["annual_cdd"]
 
                 if verbose:  # pragma: no cover
                     print(f"         • HDD for {key}")

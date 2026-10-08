@@ -156,6 +156,33 @@ def year_mean_monthly_xarray(monthly_xarray: xr.DataArray) -> xr.DataArray:
     )
 
 
+def first_year(time):
+    """
+    Calendar year of the first time step of an undecoded CF time coordinate.
+
+    The data getter opens the CMIP6 stores with ``decode_times=False`` and then
+    replaces the time axis with a month count, so this is the last point at
+    which a dataset still says when it starts. Decoding one value is enough,
+    and xarray handles the non-standard calendars (``noleap``, ``360_day``)
+    and the years before 1678 that some ``piControl`` runs use.
+
+    Parameters
+    ----------
+    time : xr.DataArray
+        Time coordinate with CF ``units`` (and optionally ``calendar``) attrs
+
+    Returns
+    -------
+    int or None
+        The first year, or None if the coordinate cannot be decoded
+    """
+    try:
+        decoded = xr.decode_cf(xr.Dataset(coords={"time": time.isel(time=slice(0, 1))}))
+        return int(decoded["time"].dt.year.values[0])
+    except Exception:  # pylint: disable=broad-exception-caught
+        return None
+
+
 def make_xarray_with_correct_dims(fld_names: list, fld_values: list) -> xr.Dataset:
     """
     Make a dataset for a list of dataArrays over the same dimensions
@@ -820,10 +847,17 @@ class Cmip6MeteorDataGetter:  # pylint: disable=too-many-instance-attributes
         if dim_mapping:
             var_monthly = var_monthly.rename(dim_mapping)
 
+        # Record when the data starts before the time axis becomes a month
+        # count: _load_transform_reference reads it to find its window, which
+        # it cannot reliably infer from the length (runs ending in 2099 or
+        # extending past 2100 would put it out by a year or more).
+        start_year = first_year(ds.time)
         var_monthly = var_monthly.assign_coords(
             {"time": np.arange(len(ds.time.values))}
         ).rename({"time": "month"})
         var_monthly = var_monthly.expand_dims(dim={"ens": np.array([1])})
+        if start_year is not None:
+            var_monthly.attrs["start_year"] = start_year
 
         # Save to cache if caching is enabled
         if self.enable_cache:

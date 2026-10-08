@@ -2,6 +2,9 @@
 requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.package-data]
+meteor = ["impacts/ggcm/data/*.nc4"]
+
 [project]
 name = "meteor"
 authors = [
@@ -41,6 +44,7 @@ dependencies = [
     "scikit-learn",
     "statsmodels",
     "regionmask",
+    "requests",
 ]
 
 [project.optional-dependencies]
@@ -111,6 +115,9 @@ skip = [
     "versioneer.py", 
     "src/meteor/_version.py",
 ]
+
+[tool.black]
+target-version = ["py312"]
 
 # ... other project metadata fields as listed in:
 #     https://packaging.python.org/en/latest/guides/writing-pyproject-toml/

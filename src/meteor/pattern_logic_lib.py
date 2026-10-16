@@ -18,6 +18,33 @@ from .geo_data_utils import global_mean
 LOGGER = logging.getLogger(__name__)
 
 
+def step_response_values(pars):
+    """
+    Return the step-response parameter values as a plain dict.
+
+    The step-response fit is produced as an ``lmfit.Parameters`` object at
+    training time, but generation only ever needs its ``{t<i>: timescale,
+    s<i>: coefficient}`` values. Accepting a plain mapping as well lets a
+    portable artifact drive prediction without reconstructing an ``lmfit``
+    object -- the values, and therefore the arithmetic, are identical either
+    way.
+
+    Parameters
+    ----------
+    pars : lmfit.parameter.Parameters or dict
+        Fitted step-response parameters, or an equivalent mapping of parameter
+        name to float.
+
+    Returns
+    -------
+    dict
+        Mapping of parameter name to float value.
+    """
+    if hasattr(pars, "valuesdict"):
+        return pars.valuesdict()
+    return dict(pars)
+
+
 def make_anom(ds_exp, ds_cnt):
     """
     Make anomaly timeseries from experiment relative to control long term average
@@ -97,7 +124,7 @@ def imodel_filter(pars, forc_timeseries, forc_step=7.41, year_0=1850):
     # vector of forcing differences, dF - append 0
     diff_forc = np.append(np.diff(forc_timeseries), 0) / forc_step
     # get parameter value dictionary
-    vals = pars.valuesdict()
+    vals = step_response_values(pars)
     n_modes = len([key for key in vals if "t" in key.lower()])
     # create the synthetic pulse-response kernel for a unit step function
     # output needs to be n_times in length - long enough for the first timestep of the convolution
@@ -181,7 +208,7 @@ def pmodel(pars, n_times):
     # first we make an incrementally ascending time vector 'x'
     time_vector = np.arange(0, n_times)
     # isolate the parameter dictionary
-    vals = pars.valuesdict()
+    vals = step_response_values(pars)
     # this calculates (from parameter names) how many decay timeseries are encoded
     ntau = len([key for key in vals if "t" in key.lower()])
     # intitialise the output PC timeseries with zeros

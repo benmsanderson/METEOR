@@ -67,7 +67,8 @@ This interactive notebook covers:
 - ✅ **Spatial Detail**: Global, regional (AR6 regions), and point-based projections
 - ✅ **Multiple Variables**: Temperature, precipitation, and more with variable-specific treatment
 - ✅ **Impact Metrics**: Built-in calculation of degree days and custom impact assessments
-- ✅ **Smart Caching**: Automatic caching of trained models and downloaded data
+- ✅ **Crop Yield Impacts**: GGCMI Phase 2 emulators for maize, rice, soy, spring wheat, and winter wheat across 9 crop models (Franke et al. 2020)
+- ✅ **Smart Caching**: Automatic caching of trained models and downloaded data. GGCMI coefficient files (~110 MB each) are downloaded on demand from [Zenodo record 3592453](https://zenodo.org/records/3592453) and stored under `<cache_dir>/ggcm/`
 - ✅ **CMIP6 Integration**: Direct access to cloud-based CMIP6 data
 
 ## Architecture Overview
@@ -100,9 +101,11 @@ Emissions/Concentrations → Pattern Scaling → Annual Climate → Monthly Base
 
 ### Documentation
 - **[METEOR Interface Examples](notebooks/METEOR_Interface_Examples.ipynb)**: Complete tutorial with visualizations
+- **[GGCMI Phase 2 Crop Yield Impacts](docs/ggcm_crop_yield_impacts.md)**: Implementation notes and reference to Franke et al. (2020)
 
 ### Other Notebooks
 - `Climate_Bench_METEOR.ipynb`: ClimateBench metrics
+- `METEOR_CropYield_Demo.ipynb`: Crop yield projections under SSP2-4.5 using GGCMI Phase 2 emulators
 
 ### Module Reference
 
@@ -114,7 +117,8 @@ Emissions/Concentrations → Pattern Scaling → Annual Climate → Monthly Base
 | `cmip6_meteor_data_getter.py` | CMIP6 cloud data access |
 | `ensemble_output.py` | Output container classes |
 | `variable_transforms.py` | Variable-specific transformations |
-| `impacts/` | Climate impact assessment |
+| `impacts/` | Climate impact assessment (degree days, GGCMI Phase 2 crop yields) |
+| `impacts/ggcm/` | GGCMI Phase 2 polynomial emulator, AgMERRA baseline, Zenodo catalog & downloader |
 | `prpatt.py` | Pattern scaling algorithms |
 | `scm_forcer_engine.py` | Simple climate model integration |
 

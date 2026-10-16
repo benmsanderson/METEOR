@@ -706,3 +706,98 @@ def test_eof_weights_survive_save_load(tmp_path):
         traj, region="global", n_realizations=1, random_seed=7, return_numpy=True
     )
     assert np.allclose(a, b)
+
+
+def _save_tiny_model(tmp_path, use_exog, weight_eofs, name="m.pkl"):
+    """
+    Fit and save a minimal noise model with a given configuration.
+
+    Parameters
+    ----------
+    tmp_path : pathlib.Path
+        Destination directory.
+    use_exog : str
+        Exogenous-variable setting to fit with.
+    weight_eofs : bool
+        EOF area-weighting flag to fit with.
+    name : str
+        Filename to write.
+
+    Returns
+    -------
+    str
+        Path to the saved pickle.
+    """
+    time = np.arange(120)
+    lats = np.linspace(-80, 80, 5)
+    lons = np.linspace(0, 300, 6)
+    rng = np.random.default_rng(4)
+    data = np.zeros((len(time), len(lats), len(lons), 1))
+    for i, t in enumerate(time):
+        data[i, :, :, 0] = 5 * np.sin(2 * np.pi * t / 12) + rng.normal(0, 0.3, (5, 6))
+    ds = xr.Dataset(
+        {
+            "tas": xr.DataArray(
+                data,
+                coords={"month": time, "lat": lats, "lon": lons, "ens": np.array([1])},
+                dims=["month", "lat", "lon", "ens"],
+            )
+        }
+    )
+    model = MeteorNoiseGenerator(
+        n_modes=3, lag_order=2, use_exog=use_exog, weight_eofs=weight_eofs
+    )
+    model.fit(ds, "tas")
+    path = str(tmp_path / name)
+    model.save_model(path)
+    return path
+
+
+def test_validate_cache_rejects_use_exog_mismatch(tmp_path):
+    """A cache fitted with different exogenous settings is not interchangeable."""
+    path = _save_tiny_model(tmp_path, use_exog="all", weight_eofs=True)
+
+    is_valid, _, info = noise_generator.validate_noise_model_cache(
+        path, "tas", n_modes=3, lag_order=2, use_exog="none"
+    )
+    assert is_valid is False
+    assert "use_exog mismatch" in info["message"]
+    assert info["found"]["use_exog"] == "all"
+
+    is_valid, model, _ = noise_generator.validate_noise_model_cache(
+        path, "tas", n_modes=3, lag_order=2, use_exog="all"
+    )
+    assert is_valid is True
+    assert model is not None
+
+
+def test_validate_cache_rejects_weight_eofs_mismatch(tmp_path):
+    """The weighted and unweighted EOF bases are different models."""
+    path = _save_tiny_model(tmp_path, use_exog="none", weight_eofs=False)
+
+    is_valid, _, info = noise_generator.validate_noise_model_cache(
+        path, "tas", n_modes=3, lag_order=2, weight_eofs=True
+    )
+    assert is_valid is False
+    assert "weight_eofs mismatch" in info["message"]
+    assert info["found"]["weight_eofs"] is False
+
+    is_valid, _, _ = noise_generator.validate_noise_model_cache(
+        path, "tas", n_modes=3, lag_order=2, weight_eofs=False
+    )
+    assert is_valid is True
+
+
+def test_validate_cache_skips_new_checks_by_default(tmp_path):
+    """Callers that do not track the settings keep their previous behaviour."""
+    path = _save_tiny_model(tmp_path, use_exog="all", weight_eofs=False)
+
+    is_valid, _, info = noise_generator.validate_noise_model_cache(
+        path, "tas", n_modes=3, lag_order=2
+    )
+    assert is_valid is True
+    # Reported for diagnostics even when not enforced.
+    assert info["found"]["use_exog"] == "all"
+    assert info["found"]["weight_eofs"] is False
+    assert info["expected"]["use_exog"] is None
+    assert info["expected"]["weight_eofs"] is None

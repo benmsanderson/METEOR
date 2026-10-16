@@ -26,6 +26,29 @@ from statsmodels.tsa.api import VAR
 from .geo_data_utils import find_time_dim_and_cut, global_mean
 
 
+def _shock_source(rng=None):
+    """
+    Resolve the random source used to draw VARX innovations.
+
+    Passing ``None`` keeps the historical behaviour of drawing from the global
+    ``numpy.random`` state, so existing ``random_seed`` usage is unchanged.
+    Passing an explicit :class:`numpy.random.Generator` isolates a run from
+    global state, which is what makes a golden fixture reproducible across
+    processes and reimplementations.
+
+    Parameters
+    ----------
+    rng : np.random.Generator, optional
+        Explicit generator. When None, the legacy global state is used.
+
+    Returns
+    -------
+    np.random.Generator or module
+        Object exposing ``multivariate_normal``.
+    """
+    return np.random if rng is None else rng
+
+
 class MeteorNoiseGenerator:
     """
     Climate noise generator using PCA and VARX modeling.
@@ -109,6 +132,19 @@ class MeteorNoiseGenerator:
         self.fitted = False
         self.variable_name = None
 
+        # Plain-array view of everything generation needs. Populated by fit(),
+        # by load_model() (derived from the unpickled statsmodels/sklearn
+        # objects), and directly by the portable-artifact loader -- which is
+        # why the generation paths read these and never the fitted objects.
+        self.varx_params = None
+        self.varx_intercept = None
+        self.varx_A = None  # pylint: disable=invalid-name
+        self.varx_B = None  # pylint: disable=invalid-name
+        self.varx_sigma_u = None
+        self.seasonal_coef = None
+        self.seasonal_intercept = None
+        self.eof_components = None
+
         # In-memory cache for regional EOF projections (model-invariant)
         self._regional_eof_projections = {}
 
@@ -139,6 +175,103 @@ class MeteorNoiseGenerator:
             raise ValueError(
                 "Longitude coordinates must be NumPy arrays or xarray.DataArray"
             )
+
+    def _sync_arrays_from_fitted_objects(self):
+        """
+        Derive the plain-array generation state from the fitted library objects.
+
+        Called after :meth:`fit` and after :meth:`load_model` so that pickles
+        written by earlier versions -- which carry only the ``statsmodels`` and
+        ``sklearn`` objects -- expose the same array interface the portable
+        artifact loads directly. Extraction is lossless: ``params``, ``sigma_u``,
+        ``coef_``, ``intercept_`` and ``components_`` are already float64
+        NumPy arrays, so the generation paths are bit-for-bit unchanged.
+        """
+        if self.varx_results is not None:
+            self.varx_params = np.ascontiguousarray(self.varx_results.params)
+            self.varx_sigma_u = np.ascontiguousarray(self.varx_results.sigma_u)
+            self._decompose_varx_params()
+        if self.seasonal_model is not None:
+            self.seasonal_coef = np.ascontiguousarray(self.seasonal_model.coef_)
+            self.seasonal_intercept = np.ascontiguousarray(
+                self.seasonal_model.intercept_
+            )
+            # Hand the contiguous buffer back to the estimator. Straight after a
+            # fit these arrays are not C-contiguous, so ascontiguousarray copies
+            # them -- and keeping both the estimator's original and our copy
+            # would double the largest arrays in the model for no benefit. The
+            # values are identical; only the memory order changes.
+            self.seasonal_model.coef_ = self.seasonal_coef
+            self.seasonal_model.intercept_ = self.seasonal_intercept
+        if self.pca is not None:
+            self.eof_components = np.ascontiguousarray(self.pca.components_)
+            self.pca.components_ = self.eof_components
+
+    def _decompose_varx_params(self):
+        """
+        Split the stacked VARX parameter matrix into named coefficient arrays.
+
+        ``statsmodels`` stacks the fitted parameters row-wise in the order
+        ``[const, exog_1..exog_k, L1.y_1..L1.y_m, L2.y_1..L2.y_m, ...]`` -- the
+        exogenous rows sit immediately after the intercept, not at the end of
+        the matrix. Earlier releases read the lag blocks from ``params[1:]`` and
+        the exogenous block from ``params[-n_exog:]``, which silently
+        interleaved the exogenous rows into the first lag matrix and picked up
+        trailing lag rows as exogenous coefficients whenever ``use_exog`` was
+        ``'temp_only'`` or ``'all'``. Models fitted with ``use_exog='none'``
+        (the default) have no exogenous rows and were never affected.
+
+        Sets ``varx_intercept`` (n_modes,), ``varx_A`` (lag_order, n_modes,
+        n_modes), ``varx_B`` (n_modes, n_exog) or None, from ``varx_params``.
+        """
+        params = self.varx_params
+        n_modes = self.n_modes
+        n_rows = params.shape[0]
+        n_exog = n_rows - 1 - self.lag_order * n_modes
+        if n_exog < 0:
+            raise ValueError(
+                f"VARX parameter matrix has {n_rows} rows, too few for "
+                f"lag_order={self.lag_order} and n_modes={n_modes}"
+            )
+
+        # Every array is stored C-contiguous. Layout is part of the contract:
+        # matmul summation order depends on it, so normalizing here makes a
+        # freshly fitted model, a reloaded pickle and a reloaded portable
+        # artifact produce bit-for-bit identical output.
+        self.varx_intercept = np.ascontiguousarray(params[0, :])
+        self.varx_B = (
+            np.ascontiguousarray(params[1 : 1 + n_exog, :].T) if n_exog else None
+        )
+        lag_start = 1 + n_exog
+        self.varx_A = np.ascontiguousarray(
+            np.stack(
+                [
+                    params[lag_start + i * n_modes : lag_start + (i + 1) * n_modes, :].T
+                    for i in range(self.lag_order)
+                ]
+            )
+        )
+
+    def _seasonal_predict(self, X):  # pylint: disable=invalid-name
+        """
+        Evaluate the fitted seasonal model on a design matrix.
+
+        Equivalent to ``sklearn.LinearRegression.predict`` -- and bitwise
+        identical to it, since that method computes the same dot product --
+        but driven by the stored coefficient arrays so generation does not
+        require a live ``sklearn`` estimator.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Harmonic design matrix, shape (n_time, n_features).
+
+        Returns
+        -------
+        np.ndarray
+            Predicted field, shape (n_time, n_space).
+        """
+        return X @ self.seasonal_coef.T + self.seasonal_intercept
 
     def _create_harmonic_features(self, time, t_glob):
         """
@@ -390,6 +523,9 @@ class MeteorNoiseGenerator:
         self.variable_name = variable_name
         self.fitted = True
 
+        # Expose the fitted state as plain arrays; generation reads only these.
+        self._sync_arrays_from_fitted_objects()
+
         # Compute seasonal model R² (variance explained by
         # temperature-dependent harmonics)
         seasonal_r2 = self.seasonal_model.score(X, Y)
@@ -423,6 +559,7 @@ class MeteorNoiseGenerator:
         global_temp_trajectory,
         n_realizations=1,
         random_seed=None,
+        rng=None,
     ):
         """
         Generate stochastic principal component time series.
@@ -439,7 +576,15 @@ class MeteorNoiseGenerator:
         n_realizations : int, default 1
             Number of realizations to generate
         random_seed : int, optional
-            Random seed for reproducibility
+            Random seed for reproducibility. Seeds the global ``numpy.random``
+            state; ignored when ``rng`` is given.
+        rng : np.random.Generator, optional
+            Explicit generator to draw innovations from. Preferred over
+            ``random_seed`` when reproducibility must hold across processes or
+            against a non-Python reimplementation, since it does not depend on
+            global state. Note that the single- and multi-realization paths
+            consume draws in different shapes, so ``n_realizations=1`` and
+            ``n_realizations=n`` do not produce a common prefix.
 
         Returns
         -------
@@ -460,7 +605,7 @@ class MeteorNoiseGenerator:
         if not self.fitted:
             raise ValueError("Model must be fitted before generating realizations")
 
-        if random_seed is not None:
+        if random_seed is not None and rng is None:
             np.random.seed(random_seed)
 
         n_time = len(global_temp_trajectory)
@@ -474,8 +619,10 @@ class MeteorNoiseGenerator:
         # byte-identical for reproducibility with a given seed; multi-realization
         # path is vectorized across realizations to avoid the Python loop.
         if n_realizations == 1:
-            return self._generate_stochastic_pcs(X_exog, n_time)
-        return self._generate_stochastic_pcs_batched(X_exog, n_time, n_realizations)
+            return self._generate_stochastic_pcs(X_exog, n_time, rng=rng)
+        return self._generate_stochastic_pcs_batched(
+            X_exog, n_time, n_realizations, rng=rng
+        )
 
     # pylint: disable=too-many-locals
     def generate_realization(
@@ -538,12 +685,12 @@ class MeteorNoiseGenerator:
         if noise_only:
             # For noise-only: keep seasonal harmonics AND temperature-modulated harmonics
             # but remove the direct temperature effect (intercept + t_glob term)
-            seasonal_cycle = self.seasonal_model.predict(X)
+            seasonal_cycle = self._seasonal_predict(X)
 
             # Calculate what to subtract (intercept + direct temperature effect)
-            intercept_effect = self.seasonal_model.intercept_
+            intercept_effect = self.seasonal_intercept
             temp_effect = (
-                self.seasonal_model.coef_[:, 0] * global_temp_trajectory[:, np.newaxis]
+                self.seasonal_coef[:, 0] * global_temp_trajectory[:, np.newaxis]
             )
 
             # Remove intercept and direct temperature effect from seasonal cycle
@@ -552,7 +699,7 @@ class MeteorNoiseGenerator:
             )
         else:
             # Standard operation: full seasonal cycle with temperature dependence
-            seasonal_cycle_np = self.seasonal_model.predict(X)
+            seasonal_cycle_np = self._seasonal_predict(X)
 
         # Reshape seasonal cycle once
         n_lat = len(self.coords["lat"])
@@ -621,7 +768,7 @@ class MeteorNoiseGenerator:
         return realizations if n_realizations > 1 else realizations[0]
 
     # pylint: disable=invalid-name
-    def _generate_stochastic_pcs(self, X_exog, n_time):
+    def _generate_stochastic_pcs(self, X_exog, n_time, rng=None):
         """
         Generate stochastic principal components using fitted VARX model.
 
@@ -643,30 +790,16 @@ class MeteorNoiseGenerator:
         np.ndarray
             Generated principal components (n_time, n_modes)
         """
-        # Extract coefficient matrices from fitted VARX model
-        params = self.varx_results.params
-        n_exog = X_exog.shape[1] if X_exog is not None else 0
-
-        # Intercept (n_modes,)
-        intercept = params[0, :]
-
-        # Lag coefficient matrices A₁, A₂, ... (each n_modes × n_modes)
-        A_matrices = []
-        for lag_i in range(self.lag_order):
-            start_idx = 1 + lag_i * self.n_modes
-            end_idx = start_idx + self.n_modes
-            A_matrices.append(params[start_idx:end_idx, :].T)
-
-        # Exogenous coefficient matrix B (n_modes × n_exog)
-        B_matrix = params[-n_exog:, :].T
-
-        # Residual covariance matrix Σ (n_modes × n_modes)
-        residual_cov = self.varx_results.sigma_u
+        # Named coefficient arrays (see _decompose_varx_params for the layout)
+        intercept = self.varx_intercept
+        A_matrices = self.varx_A
+        B_matrix = self.varx_B
+        residual_cov = self.varx_sigma_u
 
         # 🚀 KEY OPTIMIZATION: Pre-generate ALL random shocks at once
         # This eliminates 97% of the bottleneck (4,212 separate MVN calls → 1 batched call)
         mean_shock = np.zeros(self.n_modes)
-        all_shocks = np.random.multivariate_normal(
+        all_shocks = _shock_source(rng).multivariate_normal(
             mean_shock, residual_cov, size=n_time
         )
 
@@ -695,7 +828,9 @@ class MeteorNoiseGenerator:
         return synthetic_pcs
 
     # pylint: disable=invalid-name
-    def _generate_stochastic_pcs_batched(self, X_exog, n_time, n_realizations):
+    def _generate_stochastic_pcs_batched(
+        self, X_exog, n_time, n_realizations, rng=None
+    ):
         """Batched VARX simulation across realizations.
 
         Same VAR(p) autoregression as :meth:`_generate_stochastic_pcs`, but the
@@ -709,17 +844,13 @@ class MeteorNoiseGenerator:
         np.ndarray
             Shape ``(n_realizations, n_time, n_modes)``.
         """
-        params = self.varx_results.params
-        n_exog = X_exog.shape[1] if X_exog is not None else 0
         n_modes = self.n_modes
 
-        intercept = params[0, :]
-        A_matrices_T = [
-            params[1 + i * n_modes : 1 + (i + 1) * n_modes, :]
-            for i in range(self.lag_order)
-        ]  # each is (n_modes, n_modes); equals A_i.T so pcs @ A_T is A @ pcs
-        B_matrix = params[-n_exog:, :].T if n_exog else None
-        residual_cov = self.varx_results.sigma_u
+        intercept = self.varx_intercept
+        # pcs @ A_i.T is A_i @ pcs for each realization row
+        A_matrices_T = [A.T for A in self.varx_A]
+        B_matrix = self.varx_B
+        residual_cov = self.varx_sigma_u
 
         # Precompute per-timestep constant contribution: intercept + B x_t.
         # Shape: (n_time, n_modes). Broadcasts along the leading realization axis.
@@ -729,7 +860,7 @@ class MeteorNoiseGenerator:
 
         # All shocks for all realizations in one MVN call.
         # Shape: (n_realizations, n_time, n_modes).
-        all_shocks = np.random.multivariate_normal(
+        all_shocks = _shock_source(rng).multivariate_normal(
             np.zeros(n_modes), residual_cov, size=(n_realizations, n_time)
         )
 
@@ -798,8 +929,22 @@ class MeteorNoiseGenerator:
             EOF components, shape (n_modes, n_space), in physical units.
         """
         if getattr(self, "eof_weights", None) is None:
-            return self.pca.components_
-        return self.pca.components_ / self.eof_weights
+            return self.eof_components
+        return self.eof_components / self.eof_weights
+
+    def physical_eof_components(self):
+        """
+        EOF components in physical (unweighted) gridcell space.
+
+        Public accessor for the exporters, which need the same physical-units
+        basis that the generation paths reconstruct from.
+
+        Returns
+        -------
+        np.ndarray
+            EOF components, shape (n_modes, n_space).
+        """
+        return self._physical_components()
 
     def _get_point_eof_values(self, lat, lon):
         """
@@ -840,6 +985,72 @@ class MeteorNoiseGenerator:
         return eof_point_values
 
     # TODO region masking and averaging from geo_data_utils.py could be reused here?
+
+    def region_weight_vector(
+        self, region="global", region_mask=None, lat=None, lon=None
+    ):
+        """
+        Spatial weights that reduce a gridded field to one location's series.
+
+        Returns the linear functional applied by
+        :meth:`_weighted_mean_over_region`, flattened over the stacked spatial
+        axis. Because that reduction is linear and data-independent, any field
+        of the form ``X @ M.T + c`` can be collapsed to a single location before
+        the matrix multiply: ``mean_region(X @ M.T + c) = X @ (M.T @ w) + c @ w``.
+        That identity is what lets a timeseries-only client ship nine seasonal
+        coefficients per location instead of nine per gridpoint.
+
+        Point extraction is expressed in the same form, as a one-hot vector at
+        the nearest gridpoint.
+
+        Parameters
+        ----------
+        region : str, default 'global'
+            Region identifier: ``'global'`` or an AR6 region code. Ignored when
+            ``lat``/``lon`` are given.
+        region_mask : np.ndarray, optional
+            Custom 2D boolean mask (n_lat, n_lon), overriding ``region``.
+        lat, lon : float, optional
+            Point coordinates; must be supplied together.
+
+        Returns
+        -------
+        np.ndarray
+            Weights summing to 1, shape (n_lat * n_lon,).
+
+        Examples
+        --------
+        >>> w = model.region_weight_vector(region="NEU")  # doctest: +SKIP
+        >>> seasonal_coef_neu = model.seasonal_coef.T @ w  # doctest: +SKIP
+        """
+        n_lat = len(self.coords["lat"])
+        n_lon = len(self.coords["lon"])
+
+        if (lat is None) != (lon is None):
+            raise ValueError(
+                "Both lat and lon must be provided together for point extraction"
+            )
+        if lat is not None:
+            weights = np.zeros((n_lat, n_lon))
+            lat_idx, lon_idx = self._find_nearest_gridpoint(lat, lon)
+            weights[lat_idx, lon_idx] = 1.0
+            return weights.reshape(-1)
+
+        lat_weights = self._compute_spatial_weights()
+        weight_grid = np.repeat(lat_weights[:, np.newaxis], n_lon, axis=1)
+        if region == "global" and region_mask is None:
+            return (weight_grid / (np.sum(lat_weights) * n_lon)).reshape(-1)
+
+        if region_mask is None:
+            region_mask = self._get_ar6_region_mask(region)
+        masked = np.where(region_mask, weight_grid, 0.0)
+        total = masked.sum()
+        if total <= 0:
+            raise ValueError(
+                f"Region '{region}' covers no gridpoints on this model grid "
+                f"({n_lat}x{n_lon}); it is too small to resolve"
+            )
+        return (masked / total).reshape(-1)
 
     def _get_regional_eof_projection(self, region, region_mask=None):
         """
@@ -999,16 +1210,16 @@ class MeteorNoiseGenerator:
 
         if noise_only:
             # For noise-only: seasonal harmonics without direct temperature effect
-            seasonal_cycle = self.seasonal_model.predict(X)
-            intercept_effect = self.seasonal_model.intercept_
+            seasonal_cycle = self._seasonal_predict(X)
+            intercept_effect = self.seasonal_intercept
             temp_effect = (
-                self.seasonal_model.coef_[:, 0] * global_temp_trajectory[:, np.newaxis]
+                self.seasonal_coef[:, 0] * global_temp_trajectory[:, np.newaxis]
             )
             seasonal_cycle_full = (
                 seasonal_cycle - intercept_effect[np.newaxis, :] - temp_effect
             )
         else:
-            seasonal_cycle_full = self.seasonal_model.predict(X)
+            seasonal_cycle_full = self._seasonal_predict(X)
 
         # Compute seasonal mean (point extraction or regional average)
         n_lat = len(self.coords["lat"])
@@ -1244,6 +1455,10 @@ class MeteorNoiseGenerator:
         self._fix_coords_to_np()
         # Load variable_name if available (for backward compatibility)
         self.variable_name = model_data.get("variable_name", None)
+
+        # Derive the plain-array generation state from the unpickled objects so
+        # legacy pickles and portable artifacts drive identical code paths.
+        self._sync_arrays_from_fitted_objects()
 
         print(f"Model loaded from {filepath}")
 
@@ -1530,13 +1745,22 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
     variable_name,
     n_modes=40,
     lag_order=2,
+    use_exog=None,
+    weight_eofs=None,
 ):
     """
     Validate a cached noise model file.
 
     Checks if the cached pickle file exists, can be loaded, and contains
-    the expected configuration (n_modes, lag_order, variable_name) and
-    required attributes (pca, varx_results).
+    the expected configuration (n_modes, lag_order, variable_name, and
+    optionally use_exog and weight_eofs) and required attributes
+    (pca, varx_results).
+
+    ``use_exog`` and ``weight_eofs`` change what the fitted model *is*, not
+    just how big it is, so a cache trained under different settings is not
+    interchangeable with one trained under the current configuration. They are
+    opt-in (``None`` skips the check) so that callers which do not track those
+    settings keep their existing behaviour.
 
     Parameters
     ----------
@@ -1548,6 +1772,13 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
         Expected number of PCA modes. Default is 40.
     lag_order : int, optional
         Expected temporal lag order. Default is 2.
+    use_exog : str, optional
+        Expected exogenous-variable setting ('none', 'temp_only', 'all').
+        When None (default) the setting is not checked. Note that pickles
+        written before the setting existed load as 'all'.
+    weight_eofs : bool, optional
+        Expected EOF area-weighting flag. When None (default) the flag is not
+        checked. Pickles written before weighting existed load as False.
 
     Returns
     -------
@@ -1572,6 +1803,8 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
             "variable_name": variable_name,
             "n_modes": n_modes,
             "lag_order": lag_order,
+            "use_exog": use_exog,
+            "weight_eofs": weight_eofs,
         },
         "found": {},
         "message": "",
@@ -1591,6 +1824,8 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
         info["found"]["n_modes"] = getattr(noise_model, "n_modes", None)
         info["found"]["lag_order"] = getattr(noise_model, "lag_order", None)
         info["found"]["variable_name"] = getattr(noise_model, "variable_name", None)
+        info["found"]["use_exog"] = getattr(noise_model, "use_exog", None)
+        info["found"]["weight_eofs"] = getattr(noise_model, "weight_eofs", None)
 
         # Validate n_modes
         if not hasattr(noise_model, "n_modes") or noise_model.n_modes != n_modes:
@@ -1616,6 +1851,26 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
             info["message"] = (
                 f"variable_name mismatch: expected '{variable_name}', "
                 f"found '{info['found']['variable_name']}'"
+            )
+            return False, None, info
+
+        # Validate use_exog (opt-in): a model fitted with exogenous regressors
+        # is a different model, not a differently sized one.
+        if use_exog is not None and info["found"]["use_exog"] != use_exog:
+            info["message"] = (
+                f"use_exog mismatch: expected '{use_exog}', "
+                f"found '{info['found']['use_exog']}'"
+            )
+            return False, None, info
+
+        # Validate weight_eofs (opt-in): the EOF basis differs between the
+        # weighted and unweighted fits, so the two are not interchangeable.
+        if weight_eofs is not None and bool(info["found"]["weight_eofs"]) != bool(
+            weight_eofs
+        ):
+            info["message"] = (
+                f"weight_eofs mismatch: expected {weight_eofs}, "
+                f"found {info['found']['weight_eofs']}"
             )
             return False, None, info
 

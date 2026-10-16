@@ -19,6 +19,15 @@ The changes listed in this file are categorised as follows:
 
 ### Added
 
+- **GGCMI Phase 2 crop yield impacts** in ``src/meteor/impacts/ggcm/`` for emulating global gridded crop model yield responses (Franke et al., 2020)
+    - 34-term third-order polynomial emulator over CO₂, temperature, precipitation, and nitrogen inputs (``coefficients.py``)
+    - ``GgcmDownloader`` that fetches coefficient tensors on demand from Zenodo record 3592453 and caches them (``downloader.py``)
+    - Data catalog helpers for available crops and crop models (``data_catalog.py``)
+    - Bundled AgMERRA 1980-2010 climatological baseline (``baseline.py`` and ``data/*.nc4``)
+    - Crop yield emulation integrated into ``MeteorInterface`` via an ``impacts={"crop_yield": ...}`` argument, with results exposed on ``EnsembleOutput.crop_impacts``
+    - Documentation in ``docs/ggcm_crop_yield_impacts.md`` and a demo notebook ``notebooks/METEOR_CropYield_Demo.ipynb``
+- ``CacheHandler.get_subdir()`` for locating named cache subdirectories (e.g. GGCM coefficient files) alongside the standard cache structure
+- ``requests`` runtime dependency and packaging of bundled GGCM ``.nc4`` data files
 - Performance profiling harness (``scripts/profiling/run_profile.py``, ``scripts/profiling/analyze.py``) with parameterized workloads covering training and generation. Baseline numbers and optimization targets documented in ``docs/profiling_baseline.md``.
 
 ### Changed
@@ -29,9 +38,11 @@ The changes listed in this file are categorised as follows:
 - Vectorized ``MeteorInterface._apply_impacts``' per-realization loop. The underlying ``DegreeDaysCalculator.calculate`` is already vectorized over the ``month`` dimension via xarray, so passing the whole ``(realization, month)`` DataArray in one call produces identical results (verified in ``test_degree_days_calculate_batches_realizations`` to ``atol=1e-9``) without the per-realization Python overhead. At N=100 this removes ~20 s from ``gen_impacts``; scales linearly in N.
 - Streamed the gridded distribution-transform path (``MeteorInterface._generate_gridded``) so peak memory is bounded by chunk size rather than by ``n_realizations``. Two-pass approach: accumulate per-month-of-year per-gridpoint moments to fit the Gaussian half of the quantile map, then reconstruct each chunk again and apply the transform per requested slice. Output is bitwise-identical to the previous full-window path (verified to ≤1e-16 relative on NorESM2-MM ``pr``). Chunk size defaults to ~5 GB per chunk and is overridable via ``METEOR_GRIDDED_CHUNK_SIZE``. In practice this lifts the previous silent OOM at ``n_realizations ≳ 8`` on a full-resolution CMIP6 grid: gridded ensembles at N=50 now complete on a 32 GB machine with peak ≈22 GB (was OOM).
 - Now possibly to send variable length temperature scaling timeseries, fixed noise generator for wrong ordering of base data dimensions
+- Ensemble output generation fixed for impact arrays of are climatology or on numpy array format rather than xarray Dataarray
 
 ### Fixed
 
+- ``_load_transform_reference`` no longer shifts a historical+scenario composite that ends before ``end_year`` (e.g. ssp245 runs ending in 2099) by a year: the data getter now records each run's start year from its CF time axis (``Cmip6MeteorDataGetter.first_year``), and a composite without one is taken to start in 1850, so a short run raises instead. Degree-day impacts from ``_apply_impacts`` stay ``xr.DataArray`` with dims ``(realization, year)``, so ``EnsembleOutput.to_netcdf`` no longer labels them ``(month, year)`` for more than one realization.
 - ``Cmip6MeteorDataGetter.validate_pattern_scaling_cache`` now accepts an optional ``variable`` argument matching the per-variable suffix ``MeteorPatternScaling`` saves under (``cmip6-{model}-aer-{variable}``). Without it, a cache that ``MeteorPatternScaling.__init__`` loads successfully by filename was reported as "invalid" by the outer validator, causing ``MeteorInterface`` to run ``prepare_pattern_scaling_training_data`` (which fetches and assembles CMIP6 data over the network) on every generation call and immediately discard the result. Threading ``variable=`` through ``_train_pattern_scaling`` fixes the mismatch and eliminates the redundant work (~13–18 s per generation call in the NorESM2-MM profiling workloads).
 - Variable length timeseries now works also when don't have "year" as time dimension.
 - Fixes to generate annual and monthly gridded ensembles with unified noise and preserving more of the variance.

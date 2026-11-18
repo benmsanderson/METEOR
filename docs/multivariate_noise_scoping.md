@@ -612,9 +612,37 @@ Zenodo deposit.
       would come from LUH2 or LUH3, whose classes need mapping onto ESA CCI's.
       The human development index is chosen by SSP, so the CMIP7 markers each
       need an SSP.
-- [ ] How many of METEOR's models publish daily `tas`, `tasmax`, `pr` and
+- [x] How many of METEOR's models publish daily `tas`, `tasmax`, `pr` and
       `psl`, and monthly `psl`? This sets both the mapper's pooled training
       set and which models need distilled rather than per-ESM indices.
+      *Surveyed 2026-11-18 from catalog listings (Pangeo CMIP6 archive, and
+      ESGF via the DKRZ and CEDA index nodes), for historical and ssp245.
+      Not yet checked: that the four variables share an ensemble member, and
+      that their time coverage is complete.*
+      - Monthly `psl`: all 40 models on ESGF; Pangeo lacks only
+        ACCESS-ESM1-5 under ssp245. No obstacle for the chain.
+      - All four daily variables, complete in Pangeo (21): ACCESS-CM2,
+        BCC-CSM2-MR, CMCC-ESM2, CNRM-CM6-1, CNRM-ESM2-1, CanESM5, EC-Earth3,
+        EC-Earth3-Veg, GFDL-CM4, GFDL-ESM4, INM-CM4-8, INM-CM5-0,
+        IPSL-CM6A-LR, KACE-1-0-G, MIROC6, MPI-ESM1-2-HR, MPI-ESM1-2-LR,
+        MRI-ESM2-0, NorESM2-LM, NorESM2-MM, TaiESM1.
+      - Complete only with ESGF (8): ACCESS-ESM1-5, CMCC-CM2-SR5, FGOALS-g3,
+        HadGEM3-GC31-LL, KIOST-ESM, MIROC-ES2L, NESM3, UKESM1-0-LL.
+      - Missing only daily `tasmax` (3): CESM2, CESM2-WACCM, IITM-ESM. They
+        qualify if the mapper uses `tas` alone.
+      - Partial (4): AWI-CM-1-1-MR (no historical `pr` or `psl`),
+        CAMS-CSM1-0 (no daily `psl`), CNRM-CM6-1-HR (no ssp245 `tasmax` or
+        `pr`), FGOALS-f3-L (no ssp245 daily output).
+      - Little or no daily output (4): CAS-ESM2-0, GISS-E2-1-G, GISS-E2-1-H,
+        MCM-UA-1-0.
+      - piControl: 26 models have all four daily variables.
+
+      So a pooled mapper has ample training data: the 21 Pangeo-complete
+      models, several with 30 or more historical members. Of the 29 models
+      in meteor-view's current release, 7 lack the daily set from any source
+      (CAS-ESM2-0, CESM2, CESM2-WACCM, CNRM-CM6-1-HR, FGOALS-f3-L,
+      GISS-E2-1-G, MCM-UA-1-0); those, and any ESGF-only model not fetched,
+      would rely on distilled indices.
 - [ ] What should the daily mapper train on: reanalysis, pooled CMIP6 daily
       output, or both? And which method: analog resampling first, or
       conditional diffusion?

@@ -29,8 +29,19 @@ from . import __version__
 from .noise_generator import MeteorNoiseGenerator
 from .pattern_logic_lib import step_response_values
 
-#: Bump on any incompatible change to the on-disk layout.
-SCHEMA_VERSION = 1
+#: Highest schema version this release reads. Bump on any incompatible change
+#: to the on-disk layout.
+SCHEMA_VERSION = 2
+
+#: Schema version written for files that use no version-2 feature. Writing the
+#: lowest version a file needs keeps it readable by older releases.
+BASE_SCHEMA_VERSION = 1
+
+#: Version 2 adds per-calendar-month noise scaling (``seasonal_sd`` in a noise
+#: artifact, ``eof_projection_monthly`` in a timeseries bundle). A reader that
+#: ignored it would return noise in standardized rather than physical units,
+#: so files using it are marked 2 and older readers refuse them.
+SEASONAL_SCALING_SCHEMA_VERSION = 2
 
 #: ``format`` attribute identifying a portable noise-model artifact.
 NOISE_FORMAT = "meteor-noise-emulator"
@@ -61,6 +72,7 @@ def _provenance_attrs(
     doi=None,
     source_url=None,
     created=None,
+    schema_version=BASE_SCHEMA_VERSION,
 ):
     """
     Build the common provenance attribute block.
@@ -111,7 +123,7 @@ def _provenance_attrs(
     return {
         "doi": "" if doi is None else str(doi),
         "source_url": "" if source_url is None else str(source_url),
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": int(schema_version),
         "meteor_version": __version__,
         "cmip6_model": "" if cmip6_model is None else str(cmip6_model),
         "training_scenario": (
@@ -220,6 +232,12 @@ def export_noise_model(
             ("space",),
             np.asarray(model.eof_weights, dtype=dtype).reshape(-1),
         )
+    seasonal_sd = getattr(model, "seasonal_sd", None)
+    if seasonal_sd is not None:
+        data_vars["seasonal_sd"] = (
+            ("month_of_year", "space"),
+            np.asarray(seasonal_sd, dtype=dtype),
+        )
 
     ds = xr.Dataset(
         data_vars,
@@ -240,13 +258,23 @@ def export_noise_model(
         "lag_order": int(model.lag_order),
         "use_exog": str(model.use_exog),
         "weight_eofs": int(bool(model.weight_eofs)),
+        "seasonal_scaling": int(seasonal_sd is not None),
         "n_lat": int(n_lat),
         "n_lon": int(n_lon),
         "space_ordering": (
             "space index = lat_index * n_lon + lon_index (C order over lat, lon)"
         ),
         **_provenance_attrs(
-            cmip6_model, training_scenario, training_config, doi, source_url
+            cmip6_model,
+            training_scenario,
+            training_config,
+            doi,
+            source_url,
+            schema_version=(
+                BASE_SCHEMA_VERSION
+                if seasonal_sd is None
+                else SEASONAL_SCALING_SCHEMA_VERSION
+            ),
         ),
     }
 
@@ -304,6 +332,7 @@ def load_noise_model(filepath):
         lag_order=int(ds.attrs["lag_order"]),
         use_exog=str(ds.attrs["use_exog"]),
         weight_eofs=bool(int(ds.attrs["weight_eofs"])),
+        seasonal_scaling="seasonal_sd" in ds,
     )
 
     model.varx_intercept = ds["varx_intercept"].values
@@ -314,6 +343,7 @@ def load_noise_model(filepath):
     model.seasonal_intercept = ds["seasonal_intercept"].values
     model.eof_components = ds["eof_components"].values
     model.eof_weights = ds["eof_weights"].values if "eof_weights" in ds else None
+    model.seasonal_sd = ds["seasonal_sd"].values if "seasonal_sd" in ds else None
 
     model.coords = {
         "lat": ds["lat"].values,

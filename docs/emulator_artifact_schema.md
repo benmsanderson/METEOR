@@ -1,9 +1,13 @@
-# METEOR portable emulator artifacts — schema v1
+# METEOR portable emulator artifacts — schema v2
 
 Three related on-disk formats, all netCDF, all self-describing, none requiring
 code execution to read. Each carries a `format` attribute identifying it and a
 `schema_version` attribute; a reader must refuse a `schema_version` higher than
 it understands.
+
+A file is written with the lowest version its contents need. Version 2 adds only
+seasonal scaling of the noise (see [Seasonal scaling](#seasonal-scaling-schema-v2));
+a file without it is still version 1 and reads unchanged in older clients.
 
 | Format string | Written by | Purpose |
 |---|---|---|
@@ -145,6 +149,7 @@ Spatial fields are flattened as `space_index = lat_index * n_lon + lon_index`.
 | `seasonal_intercept` | `(space,)` | |
 | `eof_components` | `(mode, space)` | As fitted; in weighted space when `eof_weights` present |
 | `eof_weights` | `(space,)` | Optional sqrt(cos-lat) weights |
+| `seasonal_sd` | `(month_of_year, space)` | Optional (schema v2); per-gridcell anomaly spread for each calendar month, physical units |
 
 **EOF convention:** `eof_components` is stored *raw* — in the weighted space the
 PCA was fitted in. Physical-units components are `eof_components / eof_weights`
@@ -165,7 +170,7 @@ the stacking convention.
 
 ### Attributes
 `format`, `schema_version`, `meteor_version`, `variable_name`, `n_modes`,
-`lag_order`, `use_exog`, `weight_eofs`, `n_lat`, `n_lon`, `space_ordering`,
+`lag_order`, `use_exog`, `weight_eofs`, `seasonal_scaling`, `n_lat`, `n_lon`, `space_ordering`,
 `cmip6_model`, `training_scenario`, `training_config` (JSON), `created`.
 
 ### Reconstruction
@@ -175,6 +180,7 @@ X       = harmonic design matrix (see feature coordinate for column order)
 pcs_t   = varx_intercept + Σ_i varx_A[i] @ pcs_{t-i-1} [+ varx_B @ x_t] + ε_t,
           ε_t ~ N(0, varx_residual_cov),  pcs_t = 0 for t < lag_order
 field   = X @ seasonal_coef.T + seasonal_intercept + pcs @ physical_eofs
+          [ * seasonal_sd[t % 12]   when seasonal_sd is present ]
 ```
 
 The `feature` coordinate names the nine design-matrix columns in order:
@@ -218,6 +224,33 @@ field   = pcs @ pattern_v                    # summed over modes
 Contributions from multiple experiments are summed; the `base` experiment
 contributes nothing.
 
+### Seasonal scaling (schema v2)
+
+Without it, the VAR innovations have one covariance all year, so every calendar
+month gets the year-round variance: midlatitude summer variability comes out
+too large and winter variability too small. A model fitted with
+`seasonal_scaling=True` divides each gridcell's anomalies by their spread for
+that calendar month before the EOF fit, and generation multiplies them back:
+
+```
+anomaly[t, x] = (pcs_t @ physical_eofs)[x] * seasonal_sd[t % 12, x]
+```
+
+Month index `t = 0` is a January, as for the harmonics. The VAR itself is
+unchanged. A cell with no variance in some month has `seasonal_sd = 0` there,
+and its anomaly is zero.
+
+Because the rescaling is per gridcell, a location mean no longer factors into
+one projection: it needs one per calendar month,
+
+```
+eof_projection_monthly[loc, m] = (physical_eofs * seasonal_sd[m]) @ w_loc
+```
+
+which is what a timeseries bundle ships in place of `eof_projection`. The name
+differs on purpose: a reader that ignored the scaling would produce noise in
+standardized units, so it should fail on the missing `eof_projection` instead.
+
 ---
 
 ## `meteor-timeseries-bundle`
@@ -235,7 +268,8 @@ This is what a browser client downloads. It never carries the EOF maps.
 | `varx_intercept`, `varx_A`, `varx_residual_cov`, `varx_B` | as above | Shared across locations |
 | `varx_residual_chol` | `(mode, mode_in)` | Lower-triangular Cholesky factor of `varx_residual_cov` |
 | `scenario_forcing` | `(scenario, exp, year)` | Per-scenario forcing; NaN for absent experiments |
-| `eof_projection` | `(location, mode)` | EOF basis projected onto the location |
+| `eof_projection` | `(location, mode)` | EOF basis projected onto the location; absent when the model has seasonal scaling |
+| `eof_projection_monthly` | `(location, month_of_year, mode)` | Schema v2 replacement for `eof_projection` when the model has seasonal scaling |
 | `seasonal_coef` | `(location, feature)` | Nine coefficients per location |
 | `seasonal_intercept` | `(location,)` | |
 | `pattern_projection` | `(location, exp, pattern_mode)` | Spatial pattern projected onto the location |
@@ -277,7 +311,7 @@ residual is float32 storage noise.
 
 ```
 series = X @ seasonal_coef[loc] + seasonal_intercept[loc]
-       + pcs @ eof_projection[loc]
+       + pcs @ eof_projection[loc]            (or pcs_t @ eof_projection_monthly[loc, t % 12])
        + Σ_exp convolve(step_response[exp], dF_exp / exp_forc[exp]) @ pattern_projection[loc, exp]
 ```
 

@@ -5,7 +5,7 @@ import pytest
 import xarray as xr
 
 from meteor.meteor import MeteorPatternScaling
-from meteor.noise_generator import MeteorNoiseGenerator
+from meteor.noise_generator import MeteorNoiseGenerator, project_pcs
 from meteor.timeseries_bundle import (
     BUNDLE_FORMAT,
     bundle_summary,
@@ -1122,4 +1122,108 @@ def test_supplied_scenarios_still_need_a_common_year_axis(tmp_path):
                 "first": (emissions, concentrations),
                 "second": (shifted, concentrations),
             },
+        )
+
+
+def _make_seasonal_noise_model(seed=5):
+    """The synthetic noise model with a per-month gridcell spread attached."""
+    model = _make_noise_model(seed)
+    rng = np.random.default_rng(seed + 100)
+    model.seasonal_scaling = True
+    model.seasonal_sd = rng.uniform(0.2, 2.0, (12, N_SPACE))
+    return model
+
+
+def test_seasonal_bundle_reproduces_meteor_regional_series(tmp_path):
+    """Monthly projections reproduce METEOR's output, and old readers fail."""
+    from meteor.timeseries_bundle import bundle_eof_projection
+
+    noise = _make_seasonal_noise_model()
+    pattern = _make_pattern_model()
+    path = str(tmp_path / "bundle.nc")
+    export_timeseries_bundle(
+        noise, pattern, path, LOCATIONS, variable="tas", dtype=np.float64
+    )
+    bundle = load_timeseries_bundle(path)
+    assert bundle.attrs["schema_version"] == 2
+    # Renamed so a reader that predates seasonal scaling cannot silently
+    # produce noise in standardized units
+    assert "eof_projection" not in bundle
+    assert bundle["eof_projection_monthly"].dims == (
+        "location",
+        "month_of_year",
+        "mode",
+    )
+    assert "eof_projection_monthly[t % 12]" in bundle.attrs["reconstruction"]
+
+    n_time = 240
+    t_glob = np.linspace(0.2, 3.0, n_time)
+    pcs = noise.generate_stochastic_pcs(
+        t_glob, n_realizations=3, rng=np.random.default_rng(17)
+    )
+    design = _harmonic_features(n_time, t_glob)
+    for spec in LOCATIONS:
+        location = parse_location(spec)
+        kwargs = (
+            {"lat": location["lat"], "lon": location["lon"]}
+            if location["kind"] == "point"
+            else {"region": location["region"]}
+        )
+        expected = noise.generate_regional_mean_realizations(
+            t_glob, n_realizations=3, stochastic_pcs=pcs, return_numpy=True, **kwargs
+        )
+        idx = list(bundle["location"].values).index(spec)
+        seasonal = (
+            design @ bundle["seasonal_coef"].values[idx]
+            + bundle["seasonal_intercept"].values[idx]
+        )
+        actual = seasonal[None, :] + project_pcs(
+            pcs, bundle_eof_projection(bundle, idx)
+        )
+        np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-10)
+
+
+def test_seasonal_golden_fixture_is_self_consistent(tmp_path):
+    from meteor.timeseries_bundle import bundle_eof_projection, export_golden_fixture
+
+    noise = _make_seasonal_noise_model()
+    bundle_path = str(tmp_path / "bundle.nc")
+    export_timeseries_bundle(
+        noise,
+        _make_pattern_model(),
+        bundle_path,
+        LOCATIONS,
+        variable="tas",
+        dtype=np.float64,
+    )
+    n_time = 120
+    t_glob = np.linspace(0.3, 2.4, n_time)
+    fixture_path = str(tmp_path / "golden.nc")
+    export_golden_fixture(
+        bundle_path,
+        fixture_path,
+        noise,
+        t_glob,
+        seed=7,
+        n_realizations=2,
+        dtype=np.float64,
+    )
+    with xr.open_dataset(fixture_path) as ds:
+        fixture = ds.load()
+    assert fixture.attrs["schema_version"] == 2
+
+    bundle = load_timeseries_bundle(bundle_path)
+    design = _harmonic_features(n_time, t_glob)
+    pcs = fixture["stochastic_pcs"].values
+    for i, spec in enumerate(str(s) for s in fixture["location"].values):
+        idx = list(bundle["location"].values).index(spec)
+        seasonal = (
+            design @ bundle["seasonal_coef"].values[idx]
+            + bundle["seasonal_intercept"].values[idx]
+        )
+        rebuilt = seasonal[None, :] + project_pcs(
+            pcs, bundle_eof_projection(bundle, idx)
+        )
+        np.testing.assert_allclose(
+            rebuilt, fixture["series"].values[i], rtol=1e-12, atol=1e-10
         )

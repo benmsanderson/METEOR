@@ -39,9 +39,12 @@ from scipy.stats import norm as _norm
 
 from . import __version__, pattern_logic_lib, scm_forcer_engine
 from .geo_data_utils import extract_point, global_mean, regional_mean
+from .noise_generator import project_pcs
 from .portable_artifact import (
+    BASE_SCHEMA_VERSION,
     SCHEMA_VERSION,
     SEASONAL_FEATURE_NAMES,
+    SEASONAL_SCALING_SCHEMA_VERSION,
     _provenance_attrs,
     _step_response_arrays,
 )
@@ -474,14 +477,16 @@ def export_timeseries_bundle(
     n_loc = len(parsed)
     n_modes = noise_model.n_modes
 
-    eof_projection = np.zeros((n_loc, n_modes))
+    seasonal_scaling = getattr(noise_model, "seasonal_sd", None) is not None
+    eof_projection = np.zeros(
+        (n_loc, 12, n_modes) if seasonal_scaling else (n_loc, n_modes)
+    )
     seasonal_coef = np.zeros((n_loc, len(noise_model.seasonal_coef[0])))
     seasonal_intercept = np.zeros(n_loc)
 
-    physical_eofs = noise_model.physical_eof_components()
     for i, location in enumerate(parsed):
         weights = _noise_weight_vector(noise_model, location)
-        eof_projection[i] = physical_eofs @ weights
+        eof_projection[i] = noise_model.location_projection(weights)
         seasonal_coef[i] = noise_model.seasonal_coef.T @ weights
         seasonal_intercept[i] = noise_model.seasonal_intercept @ weights
 
@@ -519,7 +524,6 @@ def export_timeseries_bundle(
             ("mode", "mode_in"),
             np.asarray(noise_model.varx_sigma_u, dtype),
         ),
-        "eof_projection": (("location", "mode"), eof_projection.astype(dtype)),
         "seasonal_coef": (("location", "feature"), seasonal_coef.astype(dtype)),
         "seasonal_intercept": (("location",), seasonal_intercept.astype(dtype)),
         "pattern_projection": (
@@ -544,6 +548,21 @@ def export_timeseries_bundle(
             np.array([p["lon"] for p in parsed], dtype=np.float64),
         ),
     }
+    if seasonal_scaling:
+        # One projection per calendar month: the noise is rescaled by each
+        # gridcell's spread for that month before the location mean. Named
+        # differently from the single projection on purpose, so a reader that
+        # predates seasonal scaling fails rather than producing noise in
+        # standardized units.
+        data_vars["eof_projection_monthly"] = (
+            ("location", "month_of_year", "mode"),
+            eof_projection.astype(dtype),
+        )
+    else:
+        data_vars["eof_projection"] = (
+            ("location", "mode"),
+            eof_projection.astype(dtype),
+        )
     if noise_model.varx_B is not None:
         data_vars["varx_B"] = (
             ("mode", "exog"),
@@ -645,7 +664,12 @@ def export_timeseries_bundle(
         "step_response": "u_i(t) = s_i * (1 - exp(-t / tau_i)), t in years from year_0",
         "reconstruction": (
             "series = seasonal_coef @ X(t) + seasonal_intercept "
-            "+ pcs(t) @ eof_projection + sum_exp pattern_projection @ "
+            + (
+                "+ pcs(t) @ eof_projection_monthly[t % 12] "
+                if seasonal_scaling
+                else "+ pcs(t) @ eof_projection "
+            )
+            + "+ sum_exp pattern_projection @ "
             "convolve(step_response, dF_exp / exp_forc)"
         ),
         "transform_type": "gamma" if transform_reference is not None else "",
@@ -658,7 +682,16 @@ def export_timeseries_bundle(
         "forcing_year_start": int(forcing_year_start),
         "annual_to_monthly": "each annual value is repeated for all 12 months",
         **_provenance_attrs(
-            cmip6_model, training_scenario, training_config, doi, source_url
+            cmip6_model,
+            training_scenario,
+            training_config,
+            doi,
+            source_url,
+            schema_version=(
+                SEASONAL_SCALING_SCHEMA_VERSION
+                if seasonal_scaling
+                else BASE_SCHEMA_VERSION
+            ),
         ),
     }
 
@@ -704,6 +737,28 @@ def load_timeseries_bundle(filepath):
             f"understands at most {SCHEMA_VERSION}. Upgrade METEOR to read it."
         )
     return ds
+
+
+def bundle_eof_projection(bundle, index):
+    """
+    Return the noise projection for one bundle location.
+
+    Parameters
+    ----------
+    bundle : xr.Dataset
+        Bundle from :func:`load_timeseries_bundle`.
+    index : int
+        Location index.
+
+    Returns
+    -------
+    np.ndarray
+        Shape (n_modes,), or (12, n_modes) for a bundle exported from a model
+        with seasonal scaling. Apply with :func:`meteor.noise_generator.project_pcs`.
+    """
+    if "eof_projection_monthly" in bundle:
+        return bundle["eof_projection_monthly"].values[index]
+    return bundle["eof_projection"].values[index]
 
 
 def forced_response_from_bundle(bundle, location, forcing_by_exp, year_0=1850):
@@ -870,7 +925,9 @@ def _transformed_fixture_series(
     for i, (spec, idx) in enumerate(zip(specs, indices)):
         # Anomaly seasonal form: no intercept, and no t_glob term.
         seasonal = design[:, 1:] @ bundle["seasonal_coef"].values[idx][1:]
-        stochastic = seasonal[None, :] + pcs @ bundle["eof_projection"].values[idx]
+        stochastic = seasonal[None, :] + project_pcs(
+            pcs, bundle_eof_projection(bundle, idx)
+        )
 
         monthly_forced = np.repeat(forced[i, offset : offset + n_years], 12)
         values = (
@@ -1019,7 +1076,9 @@ def export_golden_fixture(
             design @ bundle["seasonal_coef"].values[idx]
             + bundle["seasonal_intercept"].values[idx]
         )
-        series[i] = seasonal[None, :] + pcs @ bundle["eof_projection"].values[idx]
+        series[i] = seasonal[None, :] + project_pcs(
+            pcs, bundle_eof_projection(bundle, idx)
+        )
 
     data_vars = {
         "t_glob": (("month",), t_glob.astype(dtype)),
@@ -1056,7 +1115,7 @@ def export_golden_fixture(
     )
     ds.attrs = {
         "format": GOLDEN_FORMAT,
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": int(bundle.attrs.get("schema_version", BASE_SCHEMA_VERSION)),
         "seed": int(seed),
         "rng": "numpy.random.default_rng(seed) -> PCG64",
         "year_0": int(year_0),

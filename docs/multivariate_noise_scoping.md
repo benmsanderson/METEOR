@@ -1,8 +1,10 @@
 # METEOR v2: a multivariate noise model — scoping
 
 *Scoping document, 2026-10-02; revised 2026-10-16 to take IAM-FIRE as a
-consumer, and 2026-11-18 to place v2 within a tiered design for downscaling
-(see [Downscaling and generative tiers](#downscaling-and-generative-tiers)).
+consumer, 2026-11-18 to place v2 within a tiered design for downscaling
+(see [Downscaling and generative tiers](#downscaling-and-generative-tiers)),
+and again 2026-11-18 after stage 1's first tests (see
+[Stage 1 findings](#stage-1-findings)).
 Code references are to `base` at `2edad23`; IAM-FIRE references are
 to [bc3LC/IAM-FIRE](https://github.com/bc3LC/IAM-FIRE) at `ad04771`.*
 
@@ -47,6 +49,14 @@ high-resolution mapper, built as optional modules on its output. That makes
 the core's monthly output a public interface, adds sea-level pressure to the
 chain as a conditioning variable, and offers a cheaper route to annual
 extremes: distilling them from a daily mapper instead of fitting them per ESM.
+
+Stage 1's first tests changed the design in two ways. The temperature–
+precipitation link is local, so coupling the two variables' global EOFs, as
+first proposed, recovers almost none of it; a **local coupling** in grid space
+does. And v1 gives every calendar month the same noise variance, which makes
+midlatitude summer temperature up to twice too variable; that is fixed first,
+by **seasonal scaling**, because the local coupling inherits it. See
+[Stage 1 findings](#stage-1-findings).
 
 ## Motivation
 
@@ -146,15 +156,25 @@ variability, its own random draws.
   and the direct temperature term.
 - **Variability:** one `MeteorNoiseGenerator` per variable
   (`noise_generator.py`). It fits 40 area-weighted EOFs to the variable's
-  anomalies, then a VAR model (lag 2) on their principal components, with
-  global temperature as an exogenous term. It is trained on historical plus
+  anomalies, then a VAR model (lag 2) on their principal components (with no
+  exogenous term by default). It is trained on historical plus
   the training scenario (`ssp245` by default), against the pattern model's
   own warming for that scenario (`meteor_interface.py:500`); piControl, cut to
   its first 150 years (`cmip6_meteor_data_getter.py:679`), serves as the
   baseline for anomalies.
+- **One variance all year:** the VAR's innovation covariance does not depend
+  on the month, so every calendar month gets the year-round variance. Against
+  held-out MPI-ESM1-2-LR members, regional summer temperature variability in
+  the northern midlatitudes is 1.3–2× too large and winter variability too
+  small. `seasonal_scaling` fixes this
+  ([PR 113](https://github.com/benmsanderson/METEOR/pull/113); off by default).
+- **No noise beyond the modes:** the 40 EOFs are all there is. For
+  precipitation they explain about half the anomaly variance.
 - **Non-Gaussian variables:** a per-month distribution transform (gamma for
   precipitation) from the transform registry (`variable_transforms.py`),
-  applied around the noise model. Entries for `hurs` and `sfcWind` are
+  applied to the generated output, per aggregation, against the ESM's own
+  data. The EOFs are fitted to untransformed precipitation. Entries for
+  `hurs` and `sfcWind` are
   sketched there but commented out.
 - **Generation:** `generate_ensemble_outputs` loops over variables, each with
   its own random draws (`meteor_interface.py:739`). Temperature and
@@ -248,6 +268,49 @@ The first term is v1's VAR model. The second is the coupling: same-month
 (*l* = 0) and lagged effects of each parent. With *C* = 0 the model is exactly
 v1.
 
+**Two kinds of coupling.** The form above couples components: it can only
+carry dependence that lives in the parent's and child's leading EOFs. That
+suits links set by large-scale circulation, such as conditioning on sea-level
+pressure. Stage 1 showed it does not suit links set locally, by clouds and
+soil moisture, as the temperature–precipitation link is: most of that
+dependence is in the variance the EOFs discard. Those links use a **local
+coupling**, in grid space, instead:
+
+$$
+y'(x,t) = \beta(x,m)\, s'(x,t) + e(x,t)
+$$
+
+where *s'* is the parent's anomaly at the same gridcell, *β* varies with
+calendar month *m* through two harmonics, and the residual *e* gets the
+variable's v1 machinery (EOFs and VAR model) in place of *y'* itself. Three
+further pieces make it work:
+
+- **Seasonal scaling** of both variables: anomalies are divided by each
+  cell's spread for that calendar month before their EOFs, and multiplied
+  back after generation. Without it the parent's summer variance is
+  inflated, and *β·s'* with it.
+- **A residual beyond the modes** at each output location: the unresolved
+  parts of *s'*, *β·s'* and *e*, drawn jointly from their covariance for that
+  calendar month. Without it the child is missing the variance its modes
+  drop, the coupled part dominates, and the dependence comes out too strong
+  (in the prototype, WNA 3.28 and CNA 3.41 against the ESM's 3.09 and 2.68).
+- **Conditioning on parent components only.** The parent is generated first
+  and passed down as components, so the child needs no gridded parent field.
+
+It keeps the chain's properties. *β* is fitted per gridcell by least squares
+on about 3,000 months, so it is well determined without shrinkage, and each
+variable's fit stays separate. With *β* = 0, no residual and no scaling it is
+exactly v1. And a location mean still collapses to a few numbers: for a
+location with weights *w*, the local term is the parent's components times
+one vector per calendar month,
+*Σ_x w(x) β(x,m) σ_s(x,m) EOF_s(x)*, so the browser cost is the same order as
+v1's.
+
+Global component coupling, applied on top of the local term to *e*, added
+nothing in stage 1, so temperature–precipitation uses the local form alone.
+Which later links are local and which large-scale is decided per variable
+by the same gate.
+
 **Ordering.** A proposed starting order:
 
 1. Temperature (root, unchanged from v1)
@@ -304,7 +367,7 @@ conditioned on. Stage 1 (bold) is temperature and precipitation; dashed boxes
 are the variables IAM-FIRE needs. Sea-level pressure is not shown in any
 browser view; it is there to condition later variables and downstream tiers.
 
-**Estimation.**
+**Estimation** (component coupling; the local form is above).
 
 - **Seasonality:** *C* varies with the month through a few smooth harmonics,
   not 12 free matrices. The temperature–precipitation relationship flips sign
@@ -355,8 +418,10 @@ can't feed back to sustain a heatwave. Temperature's own autocorrelation partly
 stands in for that. If validation shows the gap matters, shared latent drivers
 are the fallback.
 
-**Cost.** Training adds one regression per variable. Generation adds one small
-matrix multiply per parent per month: still linear in the number of variables.
+**Cost.** Training adds one regression per variable (per gridcell for a local
+coupling). Generation adds one small matrix multiply per parent per month,
+plus a few residual draws per location: still linear in the number of
+variables.
 
 ## Validation
 
@@ -384,6 +449,54 @@ own joint behaviour, on years held out from training.
   own STITCHES and BASD run gives a fourth comparison.
 - **No regression:** with couplings off, v1 golden fixtures must pass
   unchanged.
+
+Because the joint exceedance ratio uses quantiles, it is unchanged by the
+precipitation transform (a monotone map per month and location), so it can be
+checked on noise-only regional series without the full pipeline.
+
+### Stage 1 findings
+
+Tested on MPI-ESM1-2-LR: trained on member r1i1p1f1 (historical and ssp245,
+1850–2100), compared with nine held-out members over 1980–2040, 100
+realizations, forced change removed by subtracting the ensemble mean. The
+ratio is for the hottest fifth and driest fifth of summer seasons together.
+
+| Region | ESM (90% interval) | v1 | Component coupling | Local coupling |
+| --- | --- | --- | --- | --- |
+| WNA JJA | 3.09 (2.66–3.36) | 0.97 | 0.97 | 2.84 |
+| CNA JJA | 2.68 (2.29–3.03) | 0.98 | 1.20 | 3.04 |
+| ENA JJA | 1.18 (0.86–1.51) | 1.00 | 1.10 | 1.52 |
+| WCE JJA | 2.45 (2.09–2.79) | 1.03 | 1.16 | 2.45 |
+| MED JJA | 2.09 (1.74–2.50) | 1.11 | 1.07 | 2.03 |
+| EEU JJA | 2.54 (2.13–2.82) | 0.97 | 1.14 | 2.52 |
+| EAS JJA | 1.04 (0.78–1.39) | 1.05 | 0.88 | 1.43 |
+| SAU DJF | 1.20 (0.93–1.51) | 1.05 | 1.05 | 1.52 |
+| SES DJF | 1.11 (0.88–1.56) | 1.07 | 1.19 | 1.83 |
+| WSAF DJF | 1.94 (1.59–2.20) | 1.00 | 1.57 | 2.07 |
+| ESAF DJF | 2.31 (1.99–2.64) | 0.91 | 1.73 | 2.25 |
+
+Component coupling is the design above with 40 modes, fitted in the full
+pipeline; 120 modes did no better. Local coupling is a prototype (noise-only,
+regional, 40 modes, with seasonal scaling and the residual), not yet in the
+package.
+
+- **Component coupling fails.** It explains 8% of precipitation's innovation
+  variance out of sample. Even before any coupling, METEOR's 40-mode
+  reconstruction of its own training member gives a summer WNA correlation of
+  −0.28, against the ESM's −0.67: the dependence is outside the modes.
+- **Local coupling nearly passes.** It falls inside the ESM's 90% interval in
+  6–9 of 11 regions, depending on the seed and on 20, 40 or 80 modes; several
+  misses are over by 0.01. Correlations match too (WNA −0.72 against −0.67).
+- **It over-couples where the ESM's dependence is weak** (SES in every run;
+  EAS and SAU in some). One possible cause, not yet tested: forced change left
+  in the training member's anomalies would add a spurious hot-dry link.
+- **Seasonal scaling is a prerequisite**, and fixes temperature on its own: in
+  the full pipeline the share of region-seasons whose seasonal-mean
+  temperature spread is within 0.8–1.25× of the ESM rises from 61% to 93%.
+  Precipitation does not benefit (98% falls to 59%, its seasonal means about
+  10% too variable): its quantile map already corrects the monthly
+  distribution. So scaling suits temperature; for precipitation's residual
+  under a local coupling it still has to be checked.
 
 ## Downscaling and generative tiers
 
@@ -483,10 +596,19 @@ variables together from one random stream.
 
 - **Bundles:** each variable's bundle gains a list of its parents and its
   coupling coefficients. A v1 bundle is a v2 bundle with no parents, so
-  existing exports keep working.
-- **Format version:** bundles move to `_v2`. Readers accept both, treating v1
-  as uncoupled. `docs/emulator_artifact_schema.md` (on the export branch) would
-  document the new fields.
+  existing exports keep working. For a local coupling, each location carries
+  one projection of the parent's components per calendar month, the child
+  residual's projection per calendar month, and the residual covariance per
+  calendar month; all are a few hundred numbers per location.
+- **Format version:** seasonal scaling already takes artifact schema
+  version 2 (per-month noise projections, `eof_projection_monthly`), and
+  files without it stay version 1. Couplings will need the next version.
+  Readers accept older versions, treating them as uncoupled.
+  `docs/emulator_artifact_schema.md` documents the fields.
+- **The residual is per location.** Drawn independently at each location, it
+  carries no correlation between locations, so joint statistics across two
+  regions rely on the modes alone. Gridded output needs a spatial model for it
+  (see *Open questions*).
 - **A public interface:** the schema is what downstream tiers, including
   third-party ones, read. It should document the core's realization output
   (monthly fields, forced component, global drivers, model, scenario, seed)
@@ -544,6 +666,17 @@ Stage 0 is the forced-response track and can run alongside stage 1.
    precipitation conditioned on temperature.
    - Gate: joint hot-dry exceedance ratios match CMIP6 for several models, and
      v1 fixtures pass with couplings off.
+   - Status (2026-11-18): component coupling built and failed the gate;
+     local coupling prototyped and close to passing on one model (see
+     [Stage 1 findings](#stage-1-findings)). Remaining, in order:
+     1. Seasonal scaling: merge
+        [PR 113](https://github.com/benmsanderson/METEOR/pull/113), and
+        decide whether it becomes the default for temperature.
+     2. Local coupling, with its residual, in the package and its bundles.
+     3. Check precipitation's seasonal-mean spread under the coupled model.
+     4. Test the over-coupling in SES (detrended training anomalies).
+     5. Run the gate on at least four models with large ensembles, e.g.
+        MPI-ESM1-2-LR, CanESM5, MIROC6 and ACCESS-ESM1-5.
 2. **A third variable: TXx.** Add the annual hottest day, conditioned on summer
    temperature. It tests mixed time steps and GEV marginals, and is the most
    useful single extreme. One pass over each model's daily output extracts
@@ -584,11 +717,28 @@ Zenodo deposit.
 
 ## Open questions and risks
 
-- [ ] Is precipitation transformed to Gaussian **before** its EOFs, so that
+- [x] Is precipitation transformed to Gaussian **before** its EOFs, so that
       couplings work on the Gaussian scale and carry through the
-      back-transform?
-- [ ] Does v1 add residual noise beyond the 40 modes? If so, that residual
-      needs coupling too, or local correlations will be too weak.
+      back-transform? *No: the EOFs are fitted to untransformed
+      precipitation, and the gamma map is applied to the generated output.
+      Rank-based statistics such as the joint exceedance ratio are unchanged
+      by it.*
+- [x] Does v1 add residual noise beyond the 40 modes? If so, that residual
+      needs coupling too, or local correlations will be too weak. *No, and
+      the 40 modes miss about half of precipitation's variance. Hence the
+      local coupling and its per-location residual.*
+- [ ] Should seasonal scaling become the default for temperature? It changes
+      every published output and forces cached noise models to retrain.
+- [ ] Why does seasonal scaling make precipitation's seasonal means about 10%
+      too variable, and should precipitation's residual be scaled under a
+      local coupling?
+- [ ] Does forced change left in the single training member's anomalies cause
+      the over-coupling in SES, and would detrending, more members or
+      piControl fix it?
+- [ ] How should the residual beyond the modes be modelled for gridded output,
+      where it needs spatial correlation?
+- [ ] Which later links (precipitation to dry days, temperature to humidity,
+      sea-level pressure to the rest) are local, and which large-scale?
 - [ ] Does the forcing engine already support patterns per forcing agent (CO₂,
       aerosol), or does that need adding for solar radiation, humidity and
       soil moisture?
@@ -654,6 +804,8 @@ Zenodo deposit.
 
 Risks:
 
+- **One model so far.** The local coupling has been tested only on
+  MPI-ESM1-2-LR. Mitigation: the multi-model gate before anything ships.
 - **The chain's ordering misses feedbacks.** Mitigation: validate persistence
   and compound frequencies; fall back to shared latent drivers where they
   fail.

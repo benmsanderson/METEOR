@@ -1,7 +1,9 @@
 # METEOR v2: a multivariate noise model — scoping
 
 *Scoping document, 2026-10-02; revised 2026-10-16 to take IAM-FIRE as a
-consumer. Code references are to `base` at `2edad23`; IAM-FIRE references are
+consumer, and 2026-11-18 to place v2 within a tiered design for downscaling
+(see [Downscaling and generative tiers](#downscaling-and-generative-tiers)).
+Code references are to `base` at `2edad23`; IAM-FIRE references are
 to [bc3LC/IAM-FIRE](https://github.com/bc3LC/IAM-FIRE) at `ad04771`.*
 
 ## Summary
@@ -34,6 +36,17 @@ in each month, which v1 does not cleanly separate, and only then on
 variability. So v2 runs as two tracks: a forced-response track, which can start
 on v1 and gives IAM-FIRE its mean projections, and the noise chain, which
 gives it realistic year-to-year fire.
+
+v2 is also the precursor to spatial and temporal downscaling, not something
+downscaling would replace. Downscaling refines a large-scale state; it cannot
+correct one, so a wrong coarse temperature–precipitation dependence carries
+into every downscaled product. METEOR keeps its niche (as fast as possible,
+and more informative than pattern scaling) by staying a fast core that runs in
+the browser, with heavier generative tiers, such as a daily or
+high-resolution mapper, built as optional modules on its output. That makes
+the core's monthly output a public interface, adds sea-level pressure to the
+chain as a conditioning variable, and offers a cheaper route to annual
+extremes: distilling them from a daily mapper instead of fitting them per ESM.
 
 ## Motivation
 
@@ -186,6 +199,7 @@ The variables worth adding differ in ways a single model has to accommodate.
 | Long-memory fields | mrso (soil moisture) | Longer or seasonal lags; lag 2 in months misses interannual memory |
 | Annual extremes | TXx, Rx1day | An annual time step, extreme-value (GEV) marginals, conditioned on the monthly state of that year |
 | Derived indices | Fire Weather Index, WBGT | The index emulated directly, because the daily inputs needed to compute it are not available |
+| Circulation, for conditioning | psl (sea-level pressure), or a few of its EOFs | Carried for what it tells later variables and downstream tiers, not for display: a warm, dry month can come from a blocking high or from scattered convection, and only circulation tells them apart |
 
 Statistics *across* a year's months, such as IAM-FIRE's annual-maximum VPD,
 annual-maximum dry-day count and dry-day seasonality, are not variables:
@@ -238,15 +252,21 @@ v1.
 
 1. Temperature (root, unchanged from v1)
 2. Precipitation, given temperature
-3. Dry-day count, given precipitation and temperature
-4. Humidity, given temperature and precipitation
-5. Surface solar radiation, given temperature, precipitation and humidity
-   (cloud links all three)
-6. Soil moisture, given temperature and precipitation, with longer own lags
-7. Annual indices, given the monthly state of their year: TXx given
+3. Sea-level pressure, given temperature and precipitation
+4. Dry-day count, given precipitation and temperature
+5. Humidity, given temperature, precipitation and sea-level pressure
+6. Surface solar radiation, given temperature, precipitation, sea-level
+   pressure and humidity (cloud links them)
+7. Soil moisture, given temperature and precipitation, with longer own lags
+8. Annual indices, given the monthly state of their year: TXx given
    temperature, Rx1day given precipitation
 
-Items 3–5 are IAM-FIRE's. The earlier draft's annual fire-season length,
+Sea-level pressure comes after precipitation so that stage 1 (temperature and
+precipitation alone) is unchanged. Physically, circulation drives both, so
+moving it ahead of precipitation is an option once stage 1 has passed; it
+would change precipitation's parents and so need precipitation refitted.
+
+Items 4–6 are IAM-FIRE's. The earlier draft's annual fire-season length,
 given temperature, humidity and precipitation, is dropped: IAM-FIRE's
 predictors cover fire with monthly variables, and a fire-season index can
 be computed from them if it is wanted.
@@ -257,12 +277,13 @@ flowchart LR
     direction LR
     tas["Temperature<br/><small>root, as in v1</small>"]
     pr["Precipitation<br/><small>given tas</small>"]
+    psl["Sea-level pressure<br/><small>given tas, pr</small>"]
     ndd["Dry days<br/><small>given pr, tas</small>"]
-    hurs["Humidity<br/><small>given tas, pr</small>"]
-    rsds["Solar radiation<br/><small>given tas, pr, hurs</small>"]
+    hurs["Humidity<br/><small>given tas, pr, psl</small>"]
+    rsds["Solar radiation<br/><small>given tas, pr, psl, hurs</small>"]
     mrso["Soil moisture<br/><small>given tas, pr; long lags</small>"]
     tas --> pr --> ndd
-    pr --> hurs --> rsds
+    pr --> psl --> hurs --> rsds
     pr --> mrso
   end
   subgraph annual [Annual indices, GEV marginals]
@@ -280,7 +301,8 @@ flowchart LR
 
 Arrows show only the generation order; each box lists all the variables it is
 conditioned on. Stage 1 (bold) is temperature and precipitation; dashed boxes
-are the variables IAM-FIRE needs.
+are the variables IAM-FIRE needs. Sea-level pressure is not shown in any
+browser view; it is there to condition later variables and downstream tiers.
 
 **Estimation.**
 
@@ -298,6 +320,17 @@ components in the relevant season (e.g. TXx on June–August temperature
 components), plus its own residual. That residual gets an extreme-value (GEV)
 marginal through the transform registry. This mixes time steps without changing
 the monthly model.
+
+The regression and GEV parameters can come from two sources. The first is
+each ESM's own daily output, as originally planned; but many of METEOR's
+models do not publish daily `tasmax` or `pr`. The second is **distillation**
+from a universal daily mapper (see
+[Downscaling and generative tiers](#downscaling-and-generative-tiers)): run
+the mapper offline on many core realizations, compute the index from its daily
+fields, and fit the same regression to that. The browser bundle is the same
+either way. Distillation covers every model at once; per-ESM fitting keeps
+each model's own daily behaviour, and is where the per-model descriptors the
+mapper needs come from.
 
 **Forced response.** Each variable keeps its own pattern scaling, extended in
 two ways that IAM-FIRE needs.
@@ -352,6 +385,97 @@ own joint behaviour, on years held out from training.
 - **No regression:** with couplings off, v1 golden fixtures must pass
   unchanged.
 
+## Downscaling and generative tiers
+
+METEOR works on each ESM's grid (roughly 1–2°) at a monthly step. Users will
+ask for finer grids and daily weather. Machine-learning downscaling cannot run
+in the browser, and METEOR's niche is to be as fast as possible while being
+more informative than pattern scaling. So downscaling is built as optional
+tiers on top of the core, never inside it.
+
+| Tier | Runs | Gives | Where it comes from |
+| --- | --- | --- | --- |
+| **Core** | Browser, milliseconds | Monthly coupled variability, forced seasonality, several drivers, on the ESM grid | v1, then this document |
+| **Distilled indices** | Browser, nearly free | Daily-derived indices (TXx, Rx1day, dry days, VPD extremes) as regressions on the monthly state | Fitted offline from the generative tier, or from ESM daily output (see *Annual indices*) |
+| **Light spatial** | Browser or server, cheap | Change factors on an observed climatology, or a linear map from the core's EOFs to fine-scale fields | Observations or reanalysis |
+| **Generative** | GPU, offline | Daily, high-resolution, multivariate fields | A universal daily mapper, and later generative spatial downscaling |
+
+**The core's output is the interface.** Every tier consumes the same thing:
+one realization's monthly fields on the ESM grid, its forced component
+separately, global temperature and forcing from CICERO-SCM, and the model,
+scenario and seed. Two rules follow.
+
+- **The core is the truth at monthly scale.** Daily or fine-scale output must
+  aggregate back to the core's monthly fields on the ESM grid, by rescaling
+  after generation or by constraining the sampler. Otherwise meteor-view and a
+  downstream tier would disagree about the same realization.
+- **The core must carry enough to condition on.** Monthly temperature and
+  precipitation underdetermine daily weather. This is why sea-level pressure
+  joins the chain, though no browser view needs it.
+
+**A universal daily mapper.** One model across all ESMs, not one per ESM. It
+takes a month's multivariate anomaly, mean state, warming level, location and
+season, and returns daily fields consistent with them. It gives up each ESM's
+own daily behaviour; spread between models still enters through the monthly
+state. Where models differ materially at the daily scale, such as how
+precipitation intensity scales with warming, a few per-model descriptors
+become extra inputs. Candidate methods:
+
+| Method | Strength | Weakness |
+| --- | --- | --- |
+| Statistical weather generator (e.g. GWGEN; Sommer & Kaplan 2017) | Cheap, open source, global | Mostly one site and one variable at a time: weak spatial and cross-variable coherence |
+| Analog resampling ("method of fragments") from ERA5 or W5E5 | Resamples whole observed days, so keeps spatial, temporal and cross-variable consistency; indices come straight from the daily fields | Cannot go beyond the observed record; changes in the shape of the daily distribution must be added separately |
+| Conditional diffusion, monthly to daily (e.g. DiffESM; Bassetti et al. 2024) | Learns daily variability, including its change with warming | Needs a GPU, and daily training data |
+
+Training data is the larger choice:
+
+| Training data | Strength | Weakness |
+| --- | --- | --- |
+| Reanalysis only (ERA5, W5E5) | Real weather | About 85 years and little warming, so changes in daily extremes are extrapolated |
+| CMIP6 daily output, pooled across models | Spans the warming range; learns how the daily distribution shifts | Inherits ESM biases at the daily scale |
+| Pretrain on pooled CMIP6, anchor to reanalysis | Both | More work; must check that the anchoring keeps the learned response to warming |
+
+AI weather and climate models (ACE2, Watt-Meyer et al. 2025; NeuralGCM;
+GenCast) are another route: METEOR would supply boundary conditions, such as
+sea-surface temperature patterns, and the model the weather. That gives
+dynamically consistent daily weather, but loses the link to each ESM's own
+behaviour, which is much of METEOR's identity. They are more useful as a
+reference for checking a mapper's daily statistics.
+
+**Spatial downscaling.** Options, cheapest first:
+
+- **Change factors** onto an observed climatology (W5E5 at 0.5°, CHELSA at
+  1 km, ERA5-Land at 9 km). Already the plan for `meteor.impacts.fire`, and
+  the baseline every other option has to beat.
+- **Quantile (delta) mapping** (Cannon et al. 2015; ISIMIP3BASD, Lange 2019;
+  open-source implementations in xclim and ibicus). Applied one variable at a
+  time it weakens dependence between variables, which undoes v2's coupling;
+  multivariate methods such as MBCn (Cannon 2018) avoid that.
+- **A linear map from the core's EOFs to fine-scale fields**, regressed on
+  coarsened observations, plus a stochastic fine-scale residual. It ships as a
+  matrix and runs in the browser. It is linear and assumes the coarse-to-fine
+  relationship does not change with warming.
+- **Generative downscaling** (diffusion, e.g. CorrDiff; Mardani et al. 2025).
+  Super-resolution has many valid answers, so calibrated fine-scale
+  variability needs a generative model. Trained on observations, it assumes
+  the coarse-to-fine relationship holds as climate changes, which is doubtful
+  for snowlines, orographic rain and convection. Trained on coarse/fine model
+  pairs, as regional-climate-model emulators are (Doury et al. 2023; CORDEX,
+  convection-permitting and km-scale global runs), it learns how that
+  relationship changes, but inherits the fine model's biases and coverage.
+  Analog methods such as LOCA2 (Pierce et al. 2023) are a non-ML reference.
+
+**Distillation.** The generative tier also trains the fast one. Running the
+daily mapper offline on many core realizations and regressing the indices
+people ask for on the monthly state gives coefficients that ship in browser
+bundles. The browser then has daily-derived indices for the cost of a matrix
+multiply, and anyone who needs the daily fields themselves runs the mapper.
+
+**What would make v2 redundant.** Only an end-to-end generative emulator,
+mapping global temperature and forcing directly to daily, high-resolution
+fields. That would replace METEOR as a whole, giving up its speed,
+transparency and browser delivery: a different product, not a successor.
+
 ## Implications for the artifact format and meteor-view
 
 The chain maps cleanly onto per-variable bundles; the main change is generating
@@ -363,6 +487,10 @@ variables together from one random stream.
 - **Format version:** bundles move to `_v2`. Readers accept both, treating v1
   as uncoupled. `docs/emulator_artifact_schema.md` (on the export branch) would
   document the new fields.
+- **A public interface:** the schema is what downstream tiers, including
+  third-party ones, read. It should document the core's realization output
+  (monthly fields, forced component, global drivers, model, scenario, seed)
+  as a stable contract, not only meteor-view's input.
 - **Generation:** variables are generated in chain order, in one pass, from one
   seeded stream, in Python and in meteor-view's JS kernel alike. A client loads
   only the variables it shows plus their parents.
@@ -423,15 +551,31 @@ Stage 0 is the forced-response track and can run alongside stage 1.
    count.
    - Gate: TXx distributions and their change with warming match each model's
      daily-derived values.
+   - The coefficients come from per-ESM daily output here. Once a universal
+     daily mapper exists (stage 5), distillation can supply them for models
+     without daily output, with this stage's per-ESM fits as its check.
 3. **meteor-view support.** v2 bundles, chain-order generation in JS, and the
    first compound-event views.
    - Gate: browser output matches METEOR's golden fixtures for coupled models.
 4. **Fire weather for IAM-FIRE, then further variables, one at a time.**
-   First the dry-day count, humidity and solar radiation, in chain order,
-   then IAM-FIRE run on coupled realizations. After that, soil moisture
+   First sea-level pressure, then the dry-day count, humidity and solar
+   radiation, in chain order, then IAM-FIRE run on coupled realizations. After that, soil moisture
    (drought with memory) and heat stress, which reuses humidity.
    - Gate per variable: its own validation, without refitting the earlier ones.
    - Gate for IAM-FIRE: the end-to-end burned-area comparison above.
+5. **Downscaling tiers (research track, outside the core).** A universal
+   daily mapper on the core's output, then distillation of daily-derived
+   indices into browser bundles, and the light spatial tier. Generative
+   spatial downscaling follows only if the light tier proves inadequate.
+   None of this changes the core or its bundles beyond the distilled
+   coefficients.
+   - Gate for the mapper: its daily fields aggregate exactly to the core's
+     monthly fields, and its daily statistics (TXx, Rx1day, dry-spell lengths,
+     their change with warming) match held-out ESM daily output.
+   - Gate for distillation: distilled indices match per-ESM fits from stage 2
+     where those exist.
+   - Gate for the light spatial tier: it matches or beats IAM-FIRE's
+     ISIMIP3BASD output for CanESM5 and MPI-ESM1-2-LR on held-out years.
 
 **Relation to the current training run.** v2 is weeks of work, so meteor-view's
 remaining large-grid models are still being trained on v1, which completes its
@@ -468,6 +612,17 @@ Zenodo deposit.
       would come from LUH2 or LUH3, whose classes need mapping onto ESA CCI's.
       The human development index is chosen by SSP, so the CMIP7 markers each
       need an SSP.
+- [ ] How many of METEOR's models publish daily `tas`, `tasmax`, `pr` and
+      `psl`, and monthly `psl`? This sets both the mapper's pooled training
+      set and which models need distilled rather than per-ESM indices.
+- [ ] What should the daily mapper train on: reanalysis, pooled CMIP6 daily
+      output, or both? And which method: analog resampling first, or
+      conditional diffusion?
+- [ ] Which consumer sets the target spatial resolution: IAM-FIRE at 0.5°,
+      or km-scale users? This decides whether the light spatial tier is
+      enough.
+- [ ] Should the mapper also condition on a few per-model descriptors, and
+      which ones?
 
 Risks:
 
@@ -482,12 +637,43 @@ Risks:
   mis-scales fire. Mitigation: the multi-driver patterns of stage 0.
 - **Retraining cost.** v2 means one more full run across ~40 models, the large
   ones on a 32 GB machine.
+- **Downstream tiers pull the core off course.** Generative work is
+  open-ended, and could tempt runtime cost or GPU dependence into the core.
+  Mitigation: the core's output is a fixed interface; tiers only read it, and
+  only distilled coefficients flow back.
 
 ## References
 
+- Bassetti, S., Hutchinson, B., Tebaldi, C. & Kravitz, B. (2024). DiffESM:
+  Conditional emulation of temperature and precipitation in Earth system
+  models with 3D diffusion models. *Journal of Advances in Modeling Earth
+  Systems*, 16, e2023MS004194. <https://doi.org/10.1029/2023MS004194>
+- Cannon, A. J. (2018). Multivariate quantile mapping bias correction: an
+  N-dimensional probability density function transform for climate model
+  simulations of multiple variables. *Climate Dynamics*, 50, 31–49.
+  <https://doi.org/10.1007/s00382-017-3580-6>
+- Cannon, A. J., Sobie, S. R. & Murdock, T. Q. (2015). Bias correction of GCM
+  precipitation by quantile mapping: how well do methods preserve changes in
+  quantiles and extremes? *Journal of Climate*, 28, 6938–6959.
+  <https://doi.org/10.1175/JCLI-D-14-00754.1>
+- Doury, A., Somot, S., Gadat, S., Ribes, A. & Corre, L. (2023). Regional
+  climate model emulator based on deep learning: concept and first evaluation
+  of a novel hybrid downscaling approach. *Climate Dynamics*, 60, 1751–1779.
+  <https://doi.org/10.1007/s00382-022-06343-9>
 - Lange, S. (2019). Trend-preserving bias adjustment and statistical
   downscaling with ISIMIP3BASD (v1.0). *Geoscientific Model Development*, 12,
   3055–3070. <https://doi.org/10.5194/gmd-12-3055-2019>
+- Mardani, M. et al. (2025). Residual corrective diffusion modeling for
+  km-scale atmospheric downscaling. *Communications Earth & Environment*, 6,
+  124. <https://doi.org/10.1038/s43247-025-02042-5>
+- Pierce, D. W., Cayan, D. R., Feldman, D. R. & Risser, M. D. (2023). Future
+  increases in North American extreme precipitation in CMIP6 downscaled with
+  LOCA. *Journal of Hydrometeorology*, 24, 951–975.
+  <https://doi.org/10.1175/JHM-D-22-0194.1>
+- Sommer, P. S. & Kaplan, J. O. (2017). A globally calibrated scheme for
+  generating daily meteorology from monthly statistics: Global-WGEN (GWGEN)
+  v1.0. *Geoscientific Model Development*, 10, 3771–3791.
+  <https://doi.org/10.5194/gmd-10-3771-2017>
 - Stocker, B. D. et al. (2020). P-model v1.0: an optimality-based light use
   efficiency model for simulating ecosystem gross primary production.
   *Geoscientific Model Development*, 13, 1545–1581.
@@ -495,6 +681,9 @@ Risks:
 - Tebaldi, C. et al. (2022). STITCHES: creating new scenarios of climate
   model output by stitching together pieces of existing simulations. *Earth
   System Dynamics*, 13, 1557–1609. <https://doi.org/10.5194/esd-13-1557-2022>
+- Watt-Meyer, O. et al. (2025). ACE2: accurately learning subseasonal to
+  decadal atmospheric variability and forced responses. *npj Climate and
+  Atmospheric Science*, 8, 205. <https://doi.org/10.1038/s41612-025-01090-0>
 - Zscheischler, J. & Seneviratne, S. I. (2017). Dependence of drivers affects
   risks associated with compound events. *Science Advances*, 3(6), e1700263.
   <https://doi.org/10.1126/sciadv.1700263>

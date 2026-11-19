@@ -19,6 +19,8 @@ The changes listed in this file are categorised as follows:
 
 ### Added
 
+- **Seasonal scaling of the noise** (``seasonal_scaling``, on by default except for pr): the noise is rescaled per gridcell and calendar month, so it has a seasonal cycle of variance. Changes tas output and invalidates cached tas noise models. Files that use it are written as schema version 2
+
 - **GGCMI Phase 2 crop yield impacts** in ``src/meteor/impacts/ggcm/`` for emulating global gridded crop model yield responses (Franke et al., 2020)
     - 34-term third-order polynomial emulator over CO₂, temperature, precipitation, and nitrogen inputs (``coefficients.py``)
     - ``GgcmDownloader`` that fetches coefficient tensors on demand from Zenodo record 3592453 and caches them (``downloader.py``)

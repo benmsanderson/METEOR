@@ -49,6 +49,19 @@ def _shock_source(rng=None):
     return np.random if rng is None else rng
 
 
+def project_pcs(pcs, projection):
+    """
+    Collapse PCs (..., n_time, n_modes) to one location's series (..., n_time).
+
+    ``projection`` is (n_modes,), or (12, n_modes) with seasonal scaling, in
+    which case step t uses row t % 12 (step 0 is a January).
+    """
+    if projection.ndim == 1:
+        return pcs @ projection
+    months = np.arange(pcs.shape[-2]) % 12
+    return np.einsum("...tk,tk->...t", pcs, projection[months])
+
+
 class MeteorNoiseGenerator:
     """
     Climate noise generator using PCA and VARX modeling.
@@ -78,7 +91,14 @@ class MeteorNoiseGenerator:
         Whether the model has been fitted
     """
 
-    def __init__(self, n_modes=40, lag_order=2, use_exog="none", weight_eofs=True):
+    def __init__(
+        self,
+        n_modes=40,
+        lag_order=2,
+        use_exog="none",
+        weight_eofs=True,
+        seasonal_scaling=True,
+    ):
         """
         Initialize the noise generator.
 
@@ -117,11 +137,19 @@ class MeteorNoiseGenerator:
             leading EOFs and pushing the global-mean-carrying structure into
             trailing (truncated) modes. Set False to recover the legacy
             unweighted behavior.
+        seasonal_scaling : bool, default True
+            Divide each gridcell's anomalies by their standard deviation for
+            that calendar month before the EOF/VAR fit, and multiply generated
+            anomalies by it again, so the noise has a seasonal cycle of
+            variance. Without it every month gets the year-round variance.
         """
         self.n_modes = n_modes
         self.lag_order = lag_order
         self.use_exog = use_exog
         self.weight_eofs = weight_eofs
+        self.seasonal_scaling = seasonal_scaling
+        # (12, n_space) anomaly spread per calendar month; None = no rescaling
+        self.seasonal_sd = None
         # sqrt(cos-lat) weights applied to the EOF basis (set during fit when
         # weight_eofs is True; None means the basis is in raw gridcell space).
         self.eof_weights = None
@@ -486,6 +514,11 @@ class MeteorNoiseGenerator:
         anomalies_stacked = anomalies.stack(space=("lat", "lon"))
         anomalies_flat = anomalies_stacked.data
 
+        if self.seasonal_scaling:
+            anomalies_flat = self._standardize_by_month(anomalies_flat, time)
+        else:
+            self.seasonal_sd = None
+
         if self.weight_eofs:
             # Area-weight the basis by sqrt(cos-lat) so PCA optimizes
             # area-weighted variance (consistent with the global mean) instead
@@ -554,6 +587,43 @@ class MeteorNoiseGenerator:
                 print("   - Exogenous vars: none (pure VAR)")
 
     # pylint: disable=too-many-locals
+    def _standardize_by_month(self, anomalies_flat, time):
+        """
+        Divide (n_time, n_space) anomalies by their spread per calendar month.
+
+        Sets ``self.seasonal_sd``. Anomalies are centred first, since a
+        constant offset (the piControl baseline) divided by a month-dependent
+        scale would look like a seasonal cycle. Cells with no variance in a
+        month get a zero spread and reconstruct as zero.
+        """
+        anomalies_flat = np.asarray(anomalies_flat, dtype=np.float64)
+        anomalies_flat = anomalies_flat - anomalies_flat.mean(axis=0)
+        months = np.asarray(time).astype(int) % 12
+        spread = np.stack([anomalies_flat[months == m].std(axis=0) for m in range(12)])
+        # Rounding-level spreads would turn rounding noise into unit variance
+        spread[spread <= 1e-10 * spread.max()] = 0.0
+        self.seasonal_sd = spread
+        return anomalies_flat / np.where(spread > 0, spread, np.inf)[months]
+
+    def reconstruct_anomalies(self, pcs):
+        """Turn PCs (..., n_time, n_modes) into anomalies (..., n_time, n_space)."""
+        anomalies = pcs @ self._physical_components()
+        if self.seasonal_sd is not None:
+            anomalies = anomalies * self.seasonal_sd[np.arange(pcs.shape[-2]) % 12]
+        return anomalies
+
+    def location_projection(self, weights):
+        """
+        Projection of the EOFs onto spatial ``weights`` (n_space,).
+
+        Returns (n_modes,), or (12, n_modes) with seasonal scaling; apply it
+        with :func:`project_pcs`.
+        """
+        physical = self._physical_components()
+        if self.seasonal_sd is None:
+            return physical @ weights
+        return ((physical * weights) @ self.seasonal_sd.T).T
+
     def generate_stochastic_pcs(
         self,
         global_temp_trajectory,
@@ -741,7 +811,7 @@ class MeteorNoiseGenerator:
                 synthetic_pcs = self._generate_stochastic_pcs(X_exog, n_time)
 
             # Reconstruct anomalies (NumPy)
-            reconstructed_anomalies = synthetic_pcs @ self._physical_components()
+            reconstructed_anomalies = self.reconstruct_anomalies(synthetic_pcs)
             reconstructed_anomalies_reshaped = reconstructed_anomalies.reshape(
                 n_time, n_lat, n_lon
             )
@@ -962,12 +1032,20 @@ class MeteorNoiseGenerator:
         Returns
         -------
         np.ndarray
-            EOF values at the point, shape (n_modes,)
+            EOF values at the point, shape (n_modes,), or (12, n_modes) for a
+            model fitted with seasonal scaling.
         """
         # Create cache key
         point_id = f"point_{lat:.2f}_{lon:.2f}"
         if point_id in self._regional_eof_projections:
             return self._regional_eof_projections[point_id]
+
+        if self.seasonal_sd is not None:
+            eof_point_values = self.location_projection(
+                self.region_weight_vector(lat=lat, lon=lon)
+            )
+            self._regional_eof_projections[point_id] = eof_point_values
+            return eof_point_values
 
         # Find nearest gridpoint
         lat_idx, lon_idx = self._find_nearest_gridpoint(lat, lon)
@@ -1068,7 +1146,8 @@ class MeteorNoiseGenerator:
         Returns
         -------
         np.ndarray
-            Mean projection of each EOF mode for the region, shape (n_modes,)
+            Mean projection of each EOF mode for the region, shape (n_modes,),
+            or (12, n_modes) for a model fitted with seasonal scaling.
         """
         # Check cache first
         region_id = region if region_mask is None else f"custom_{id(region_mask)}"
@@ -1080,13 +1159,18 @@ class MeteorNoiseGenerator:
         n_lon = len(self.coords["lon"])
 
         # Get EOFs reshaped to spatial grid (n_modes, n_lat, n_lon)
-        eof_components = self._physical_components().reshape(self.n_modes, n_lat, n_lon)
+        eof_components = self._physical_components()
+        if self.seasonal_sd is not None:  # one set of EOFs per calendar month
+            eof_components = eof_components[None] * self.seasonal_sd[:, None]
+        eof_components = eof_components.reshape(-1, n_lat, n_lon)
         if region_mask is None and region != "global":
             region_mask = self._get_ar6_region_mask(region)
 
         eof_projections = self._weighted_mean_over_region(
             eof_components, None, None, region_mask, region
         )
+        if self.seasonal_sd is not None:
+            eof_projections = eof_projections.reshape(12, self.n_modes)
 
         # Cache and return
         self._regional_eof_projections[region_id] = eof_projections
@@ -1271,7 +1355,7 @@ class MeteorNoiseGenerator:
         realizations = []
         for pcs in pcs_to_use:
             # Anomaly contribution: PCs @ EOF_projections
-            anomaly_mean = pcs @ eof_projections  # (n_time,)
+            anomaly_mean = project_pcs(pcs, eof_projections)  # (n_time,)
 
             # Combine components
             realization = seasonal_mean + anomaly_mean
@@ -1413,6 +1497,8 @@ class MeteorNoiseGenerator:
             "use_exog": self.use_exog,
             "weight_eofs": self.weight_eofs,
             "eof_weights": self.eof_weights,
+            "seasonal_scaling": self.seasonal_scaling,
+            "seasonal_sd": self.seasonal_sd,
             "seasonal_model": self.seasonal_model,
             "pca": self.pca,
             "varx_results": self.varx_results,
@@ -1447,6 +1533,9 @@ class MeteorNoiseGenerator:
         # key, which correctly restores the legacy unweighted behavior.
         self.weight_eofs = model_data.get("weight_eofs", False)
         self.eof_weights = model_data.get("eof_weights", None)
+        self.seasonal_scaling = model_data.get("seasonal_scaling", False)
+        self.seasonal_sd = model_data.get("seasonal_sd", None)
+        self._regional_eof_projections = {}
         self.seasonal_model = model_data["seasonal_model"]
         self.pca = model_data["pca"]
         self.varx_results = model_data["varx_results"]
@@ -1477,6 +1566,7 @@ def train_noise_model_from_cmip6(
     use_exog="none",
     weight_eofs=True,
     verbose=False,
+    seasonal_scaling=True,
 ):
     """
     Train a noise generator from CMIP6 data.
@@ -1529,6 +1619,8 @@ def train_noise_model_from_cmip6(
         MeteorNoiseGenerator for details. Set False for legacy unweighted EOFs.
     verbose : bool, default False
         If True, prints variance decomposition statistics after fitting.
+    seasonal_scaling : bool, default True
+        Per-gridcell, per-calendar-month rescaling. See MeteorNoiseGenerator.
 
     Returns
     -------
@@ -1571,7 +1663,11 @@ def train_noise_model_from_cmip6(
 
     # Create and fit noise generator
     noise_gen = MeteorNoiseGenerator(
-        n_modes=n_modes, lag_order=lag_order, use_exog=use_exog, weight_eofs=weight_eofs
+        n_modes=n_modes,
+        lag_order=lag_order,
+        use_exog=use_exog,
+        weight_eofs=weight_eofs,
+        seasonal_scaling=seasonal_scaling,
     )
     noise_gen.fit(
         monthly_data,
@@ -1747,6 +1843,7 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
     lag_order=2,
     use_exog=None,
     weight_eofs=None,
+    seasonal_scaling=None,
 ):
     """
     Validate a cached noise model file.
@@ -1779,6 +1876,9 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
     weight_eofs : bool, optional
         Expected EOF area-weighting flag. When None (default) the flag is not
         checked. Pickles written before weighting existed load as False.
+    seasonal_scaling : bool, optional
+        Expected seasonal-scaling flag. When None (default) the flag is not
+        checked. Pickles written before the option existed load as False.
 
     Returns
     -------
@@ -1805,6 +1905,7 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
             "lag_order": lag_order,
             "use_exog": use_exog,
             "weight_eofs": weight_eofs,
+            "seasonal_scaling": seasonal_scaling,
         },
         "found": {},
         "message": "",
@@ -1826,6 +1927,7 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
         info["found"]["variable_name"] = getattr(noise_model, "variable_name", None)
         info["found"]["use_exog"] = getattr(noise_model, "use_exog", None)
         info["found"]["weight_eofs"] = getattr(noise_model, "weight_eofs", None)
+        info["found"]["seasonal_scaling"] = getattr(noise_model, "seasonal_scaling", 0)
 
         # Validate n_modes
         if not hasattr(noise_model, "n_modes") or noise_model.n_modes != n_modes:
@@ -1871,6 +1973,14 @@ def validate_noise_model_cache(  # pylint: disable=too-many-return-statements
             info["message"] = (
                 f"weight_eofs mismatch: expected {weight_eofs}, "
                 f"found {info['found']['weight_eofs']}"
+            )
+            return False, None, info
+
+        found = bool(info["found"]["seasonal_scaling"])
+        if seasonal_scaling is not None and found != bool(seasonal_scaling):
+            info["message"] = (
+                f"seasonal_scaling mismatch: expected {seasonal_scaling}, "
+                f"found {info['found']['seasonal_scaling']}"
             )
             return False, None, info
 

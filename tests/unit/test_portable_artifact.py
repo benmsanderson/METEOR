@@ -6,6 +6,7 @@ import xarray as xr
 
 from meteor.noise_generator import MeteorNoiseGenerator
 from meteor.portable_artifact import (
+    BASE_SCHEMA_VERSION,
     NOISE_FORMAT,
     SCHEMA_VERSION,
     export_noise_model,
@@ -14,7 +15,9 @@ from meteor.portable_artifact import (
 )
 
 
-def _fit_small_model(use_exog="none", weight_eofs=True, n_modes=3):
+def _fit_small_model(
+    use_exog="none", weight_eofs=True, n_modes=3, seasonal_scaling=False
+):
     """
     Fit a noise generator on a small synthetic grid.
 
@@ -60,7 +63,11 @@ def _fit_small_model(use_exog="none", weight_eofs=True, n_modes=3):
         }
     )
     model = MeteorNoiseGenerator(
-        n_modes=n_modes, lag_order=2, use_exog=use_exog, weight_eofs=weight_eofs
+        n_modes=n_modes,
+        lag_order=2,
+        use_exog=use_exog,
+        weight_eofs=weight_eofs,
+        seasonal_scaling=seasonal_scaling,
     )
     model.fit(ds, "tas")
     return model
@@ -164,7 +171,10 @@ def test_exported_artifact_metadata(tmp_path):
 
     with xr.open_dataset(path) as ds:
         assert ds.attrs["format"] == NOISE_FORMAT
-        assert ds.attrs["schema_version"] == SCHEMA_VERSION
+        # No version-2 feature used, so older readers can still open it
+        assert ds.attrs["schema_version"] == BASE_SCHEMA_VERSION
+        assert ds.attrs["seasonal_scaling"] == 0
+        assert "seasonal_sd" not in ds
         assert ds.attrs["cmip6_model"] == "TEST-ESM"
         assert ds.attrs["training_scenario"] == "ssp370"
         assert "n_modes_noise" in ds.attrs["training_config"]
@@ -375,3 +385,23 @@ def test_depositing_from_a_dirty_tree_warns(tmp_path):
             )
     finally:
         pa.__version__ = original
+
+
+def test_seasonal_scaling_round_trips_and_marks_schema_2(tmp_path):
+    """A seasonally scaled model reloads bit for bit; older readers refuse it."""
+    model = _fit_small_model(seasonal_scaling=True)
+    assert model.seasonal_sd is not None
+    before = _generate_all(model)
+
+    path = str(tmp_path / "noise_seasonal.nc")
+    export_noise_model(model, path)
+    with xr.open_dataset(path) as ds:
+        assert ds.attrs["schema_version"] == 2
+        assert ds.attrs["seasonal_scaling"] == 1
+        assert ds["seasonal_sd"].dims == ("month_of_year", "space")
+
+    reloaded = load_noise_model(path)
+    assert reloaded.seasonal_scaling is True
+    after = _generate_all(reloaded)
+    for key, expected in before.items():
+        assert np.array_equal(expected, after[key]), f"{key} differs after round-trip"

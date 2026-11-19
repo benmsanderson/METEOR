@@ -30,8 +30,9 @@ from .noise_generator import MeteorNoiseGenerator
 from .pattern_logic_lib import step_response_values
 
 #: Highest schema version this release reads. Bump on any incompatible change
-#: to the on-disk layout. Version 2 adds seasonal scaling of the noise.
-SCHEMA_VERSION = 2
+#: to the on-disk layout. Version 2 adds seasonal scaling of the noise, and
+#: version 3 a local coupling to another variable's noise.
+SCHEMA_VERSION = 3
 
 #: Written for files without seasonal scaling, so older readers can open them.
 BASE_SCHEMA_VERSION = 1
@@ -231,6 +232,16 @@ def export_noise_model(
             ("month_of_year", "space"),
             np.asarray(seasonal_sd, dtype=dtype),
         )
+    parent = getattr(model, "coupling_parent", None)
+    if parent is not None:
+        data_vars["coupling_components"] = (
+            ("parent_mode", "space"),
+            np.asarray(model.coupling_components, dtype=dtype),
+        )
+        data_vars["coupling_scale"] = (
+            ("month_of_year", "space"),
+            np.asarray(model.coupling_scale, dtype=dtype),
+        )
 
     ds = xr.Dataset(
         data_vars,
@@ -252,6 +263,7 @@ def export_noise_model(
         "use_exog": str(model.use_exog),
         "weight_eofs": int(bool(model.weight_eofs)),
         "seasonal_scaling": int(seasonal_sd is not None),
+        "coupling_parent": parent or "",
         "n_lat": int(n_lat),
         "n_lon": int(n_lon),
         "space_ordering": (
@@ -263,7 +275,9 @@ def export_noise_model(
             training_config,
             doi,
             source_url,
-            schema_version=BASE_SCHEMA_VERSION if seasonal_sd is None else 2,
+            schema_version=(
+                3 if parent else BASE_SCHEMA_VERSION if seasonal_sd is None else 2
+            ),
         ),
     }
 
@@ -333,6 +347,10 @@ def load_noise_model(filepath):
     model.eof_components = ds["eof_components"].values
     model.eof_weights = ds["eof_weights"].values if "eof_weights" in ds else None
     model.seasonal_sd = ds["seasonal_sd"].values if "seasonal_sd" in ds else None
+    if "coupling_components" in ds:
+        model.coupling_parent = str(ds.attrs["coupling_parent"])
+        model.coupling_components = ds["coupling_components"].values
+        model.coupling_scale = ds["coupling_scale"].values
 
     model.coords = {
         "lat": ds["lat"].values,

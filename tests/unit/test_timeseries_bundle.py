@@ -1171,3 +1171,30 @@ def test_seasonal_bundle_reproduces_meteor_regional_series(tmp_path):
             pcs, bundle["eof_projection"].values[idx]
         )
         np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-10)
+
+
+def test_coupled_bundle_ships_the_parent_projection(tmp_path):
+    """A coupled model's bundle splits its projection into own and parent modes."""
+    from meteor.timeseries_bundle import _noise_weight_vector
+
+    noise = _make_seasonal_noise_model()
+    rng = np.random.default_rng(7)
+    noise.coupling_parent = "tas"
+    noise.coupling_components = rng.standard_normal((4, N_SPACE))
+    noise.coupling_scale = rng.uniform(-2.0, 0.0, (12, N_SPACE))
+    path = str(tmp_path / "bundle.nc")
+    export_timeseries_bundle(
+        noise, _make_pattern_model(), path, LOCATIONS, variable="pr", dtype=np.float64
+    )
+    bundle = load_timeseries_bundle(path)
+    assert bundle.attrs["schema_version"] == 3
+    assert bundle.attrs["coupling_parent"] == "tas"
+    for idx, spec in enumerate(LOCATIONS):
+        weights = _noise_weight_vector(noise, parse_location(spec))
+        full = noise.location_projection(weights)
+        np.testing.assert_allclose(
+            bundle["eof_projection"].values[idx], full[:, : noise.n_modes]
+        )
+        np.testing.assert_allclose(
+            bundle["parent_projection"].values[idx], full[:, noise.n_modes :]
+        )

@@ -52,6 +52,9 @@ def _get_default_config(variable):
         # so cache validation can compare against the same value training used.
         "weight_eofs": True,
         "seasonal_scaling": True,
+        # Variable whose noise this one's is locally coupled to (e.g. "tas"
+        # for pr); it must come earlier in the variable list. None = uncoupled.
+        "coupling_parent": None,
     }
 
     # Variable-specific defaults
@@ -139,10 +142,22 @@ class GenerationInputs:
         Stochastic PCs generated once over the full trajectory and sliced to the
         output window. Shape ``(n_realizations, n_months, n_modes)``. ``None`` when
         ``include_noise`` is False.
+    full_stochastic_pcs : np.ndarray or None
+        The same PCs before slicing, for a variable coupled to this one.
     """
 
     pattern: PatternScalingResult
     stochastic_pcs: Any
+    full_stochastic_pcs: Any = None
+
+
+def _coupling_matches(model, parent):
+    """Whether a cached model's coupling is the one configured, to this parent."""
+    if parent is None:
+        return getattr(model, "coupling_parent", None) is None
+    return getattr(model, "coupling_parent", None) == parent.variable_name and (
+        np.array_equal(model.coupling_components, parent.physical_eof_components())
+    )
 
 
 def _months_since(year, origin_year):
@@ -527,6 +542,13 @@ class MeteorInterface:
             Print training progress messages
         """
         cache_file = self.cache_handler.get_noise_model_cache_path(self.model, variable)
+        parent = config.get("coupling_parent")
+        if parent is not None and parent not in self.noise_models:
+            raise ValueError(
+                f"{variable}'s coupling_parent '{parent}' must be trained first: "
+                "list it earlier in the variables"
+            )
+        parent_model = self.noise_models[parent] if parent is not None else None
 
         # Check cache
         is_valid, cached_model, info = (  # pylint: disable=unused-variable
@@ -540,6 +562,8 @@ class MeteorInterface:
                 seasonal_scaling=config.get("seasonal_scaling", True),
             )
         )
+        if is_valid and not _coupling_matches(cached_model, parent_model):
+            is_valid = False
 
         if is_valid:
             if verbose:  # pragma: no cover
@@ -594,6 +618,7 @@ class MeteorInterface:
                 use_exog=config["use_exog"],
                 weight_eofs=config.get("weight_eofs", True),
                 seasonal_scaling=config.get("seasonal_scaling", True),
+                coupling_parent=parent_model,
                 custom_global_temp=monthly_warming_trimmed,  # ✅ Pass pattern prediction
                 cache_dir=os.path.join(self.cache_handler.cache_dir, "noise_models"),
                 verbose=verbose,
@@ -749,19 +774,27 @@ class MeteorInterface:
 
         results = {}
 
+        # Each coupled variable's parent, and every variable's full PCs for them
+        parent_of = {
+            v: getattr(self.noise_models.get(v), "coupling_parent", None)
+            for v in self.variables
+        }
+        parent_of = {v: p for v, p in parent_of.items() if p in self.variables}
+        full_pcs = {}
         for variable in self.variables:
             if verbose:  # pragma: no cover
                 print(f"\n📊 Generating {variable.upper()}...")
 
             var_output = VariableOutput(variable)
+            parent = parent_of.get(variable)
 
             # Prepare shared generation inputs ONCE when both output types are
             # requested, so the time series and gridded paths are driven by the
             # same pattern scaling and the same spun-up stochastic PCs (mutually
-            # consistent noise). When only one type is requested there is nothing
-            # to be consistent with, so that generator builds its own inputs.
+            # consistent noise), or when a coupling links this variable's PCs to
+            # another's. Otherwise each generator builds its own inputs.
             gen_inputs = None
-            if timeseries and gridded:
+            if timeseries and gridded or parent or variable in parent_of.values():
                 gen_inputs = self._prepare_generation(
                     variable,
                     scenario,
@@ -770,8 +803,10 @@ class MeteorInterface:
                     n_realizations,
                     include_noise=include_noise,
                     temp_scaling_ts=temp_scaling_ts,
+                    parent_pcs=full_pcs.get(parent),
                     verbose=verbose,
                 )
+                full_pcs[variable] = gen_inputs.full_stochastic_pcs
 
             # Generate timeseries if requested
             if timeseries:
@@ -1159,6 +1194,7 @@ class MeteorInterface:
         n_realizations,
         include_noise=True,
         temp_scaling_ts=None,
+        parent_pcs=None,
         verbose=True,
     ):
         """
@@ -1185,6 +1221,8 @@ class MeteorInterface:
             If False, no PCs are generated (climatology only).
         temp_scaling_ts : xr.DataArray, optional
             Optional global-mean temperature trajectory to scale the pattern to.
+        parent_pcs : np.ndarray, optional
+            Full-trajectory PCs of the variable this one is coupled to.
         verbose : bool
             Print progress messages.
 
@@ -1202,7 +1240,7 @@ class MeteorInterface:
             verbose=verbose,
         )
 
-        stochastic_pcs = None
+        stochastic_pcs = full_pcs = None
         if include_noise:
             noise_model = self.noise_models[variable]
             if verbose:  # pragma: no cover
@@ -1217,6 +1255,7 @@ class MeteorInterface:
                 pattern.full_monthly_warming,
                 n_realizations=n_realizations,
                 random_seed=None,
+                parent_pcs=parent_pcs,
             )
             if full_pcs.ndim == 2:
                 # Single realization -> add leading realization axis
@@ -1225,7 +1264,7 @@ class MeteorInterface:
                 :, pattern.start_month_idx : pattern.end_month_idx, :
             ]
 
-        return GenerationInputs(pattern=pattern, stochastic_pcs=stochastic_pcs)
+        return GenerationInputs(pattern, stochastic_pcs, full_pcs)
 
     def _get_transform_config(self, variable):
         """

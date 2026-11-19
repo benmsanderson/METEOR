@@ -476,19 +476,25 @@ def export_timeseries_bundle(
     n_loc = len(parsed)
     n_modes = noise_model.n_modes
 
-    seasonal_scaling = getattr(noise_model, "seasonal_sd", None) is not None
+    parent = getattr(noise_model, "coupling_parent", None)
+    seasonal_scaling = parent is not None or noise_model.seasonal_sd is not None
     projection_dims = ("location", "mode")
     if seasonal_scaling:  # one projection per calendar month
         projection_dims = ("location", "month_of_year", "mode")
     eof_projection = np.zeros(
         (n_loc, 12, n_modes) if seasonal_scaling else (n_loc, n_modes)
     )
+    if parent is not None:  # the parent's PCs, scaled by the local coupling
+        parent_projection = np.zeros((n_loc, 12, len(noise_model.coupling_components)))
     seasonal_coef = np.zeros((n_loc, len(noise_model.seasonal_coef[0])))
     seasonal_intercept = np.zeros(n_loc)
 
     for i, location in enumerate(parsed):
         weights = _noise_weight_vector(noise_model, location)
-        eof_projection[i] = noise_model.location_projection(weights)
+        projection = noise_model.location_projection(weights)
+        eof_projection[i] = projection[..., :n_modes]
+        if parent is not None:
+            parent_projection[i] = projection[..., n_modes:]
         seasonal_coef[i] = noise_model.seasonal_coef.T @ weights
         seasonal_intercept[i] = noise_model.seasonal_intercept @ weights
 
@@ -551,6 +557,11 @@ def export_timeseries_bundle(
             np.array([p["lon"] for p in parsed], dtype=np.float64),
         ),
     }
+    if parent is not None:
+        data_vars["parent_projection"] = (
+            ("location", "month_of_year", "parent_mode"),
+            parent_projection.astype(dtype),
+        )
     if noise_model.varx_B is not None:
         data_vars["varx_B"] = (
             ("mode", "exog"),
@@ -655,7 +666,13 @@ def export_timeseries_bundle(
             "+ pcs(t) @ eof_projection (or eof_projection[:, t % 12] when it has "
             "a month_of_year dim) + sum_exp pattern_projection @ "
             "convolve(step_response, dF_exp / exp_forc)"
+            + (
+                f" + {parent} pcs(t) @ parent_projection[:, t % 12]"
+                if parent is not None
+                else ""
+            )
         ),
+        "coupling_parent": parent or "",
         "transform_type": "gamma" if transform_reference is not None else "",
         "transform_window_start": (
             -1 if not transform_window else int(transform_window[0])
@@ -671,7 +688,9 @@ def export_timeseries_bundle(
             training_config,
             doi,
             source_url,
-            schema_version=2 if seasonal_scaling else BASE_SCHEMA_VERSION,
+            schema_version=(
+                3 if parent else 2 if seasonal_scaling else BASE_SCHEMA_VERSION
+            ),
         ),
     }
 

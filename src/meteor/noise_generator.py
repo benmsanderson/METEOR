@@ -150,6 +150,11 @@ class MeteorNoiseGenerator:
         self.seasonal_scaling = seasonal_scaling
         # (12, n_space) anomaly spread per calendar month; None = no rescaling
         self.seasonal_sd = None
+        # Local coupling to a parent variable (see _fit_local_coupling)
+        self.coupling_parent = None
+        self.coupling_components = None
+        self.coupling_scale = None
+        self.training_t_glob = None
         # sqrt(cos-lat) weights applied to the EOF basis (set during fit when
         # weight_eofs is True; None means the basis is in raw gridcell space).
         self.eof_weights = None
@@ -374,6 +379,7 @@ class MeteorNoiseGenerator:
         picontrol_baseline=None,
         save_diagnostics=False,
         verbose=False,
+        coupling_parent=None,
     ):
         """
         Fit the noise generator to monthly climate data.
@@ -399,6 +405,11 @@ class MeteorNoiseGenerator:
             X_features, t_glob, and time for debugging purposes.
         verbose : bool, default False
             If True, prints variance decomposition statistics after fitting.
+        coupling_parent : MeteorNoiseGenerator, optional
+            Fitted model of another variable in ``monthly_data`` (e.g. tas for
+            pr). This variable's anomalies are then a local, seasonally varying
+            multiple of the parent's plus an independent residual, which is
+            what the EOFs and VAR model. See :meth:`_fit_local_coupling`.
         """
         # Extract the variable data
         if variable_name not in monthly_data:
@@ -458,6 +469,7 @@ class MeteorNoiseGenerator:
 
         # Create harmonic features
         X = self._create_harmonic_features(time, t_glob)
+        self.training_t_glob = np.asarray(t_glob, dtype=np.float64)
         # print(t_glob)
         # print(t_globm)
 
@@ -514,6 +526,11 @@ class MeteorNoiseGenerator:
         anomalies_stacked = anomalies.stack(space=("lat", "lon"))
         anomalies_flat = anomalies_stacked.data
 
+        self.coupling_parent = self.coupling_components = self.coupling_scale = None
+        if coupling_parent is not None:
+            anomalies_flat = self._fit_local_coupling(
+                monthly_data, anomalies_flat, time, coupling_parent
+            )
         if self.seasonal_scaling:
             anomalies_flat = self._standardize_by_month(anomalies_flat, time)
         else:
@@ -605,24 +622,92 @@ class MeteorNoiseGenerator:
         self.seasonal_sd = spread
         return anomalies_flat / np.where(spread > 0, spread, np.inf)[months]
 
+    def _fit_local_coupling(self, monthly_data, anomalies_flat, time, parent):
+        """
+        Fit pr'(x, t) = slope(x, month) * tas'(x, t) + residual, cell by cell.
+
+        The slope is two harmonics in calendar month, fitted by least squares
+        to the parent's anomalies (computed with the parent's own seasonal
+        model). Generation applies it to the parent's EOF reconstruction, so
+        the coupling is stored as the parent's components and a (12, n_space)
+        scale. Returns the residual, which the EOFs and VAR then model.
+        """
+        if len(parent.training_t_glob) != len(time):
+            raise ValueError("coupling_parent was fitted on a different time axis")
+        field = monthly_data[parent.variable_name].mean(dim=["ens"])
+        x_parent = parent._create_harmonic_features(  # pylint: disable=protected-access
+            time, parent.training_t_glob
+        )
+        tas = field.stack(space=("lat", "lon")).data - parent.seasonal_model.predict(
+            x_parent
+        )
+        tas = tas - tas.mean(axis=0)
+        own = np.asarray(anomalies_flat, dtype=np.float64)
+        own = own - own.mean(axis=0)
+        months = np.asarray(time).astype(int) % 12
+        s_tt = np.stack([(tas[months == m] ** 2).sum(0) for m in range(12)])
+        s_to = np.stack(
+            [(tas[months == m] * own[months == m]).sum(0) for m in range(12)]
+        )
+        angle = 2 * np.pi * np.arange(12) / 12
+        basis = np.stack(
+            [
+                np.ones(12),
+                np.cos(angle),
+                np.sin(angle),
+                np.cos(2 * angle),
+                np.sin(2 * angle),
+            ],
+            axis=1,
+        )  # (12, 5)
+        normal = np.einsum("mi,mj,mx->xij", basis, basis, s_tt)
+        ridge = 1e-6 * np.trace(normal, axis1=1, axis2=2)[:, None, None] + 1e-30
+        coef = np.linalg.solve(
+            normal + ridge * np.eye(5), (basis.T @ s_to).T[..., None]
+        )
+        slope = basis @ coef[..., 0].T  # (12, n_space)
+
+        self.coupling_parent = parent.variable_name
+        self.coupling_components = parent.physical_eof_components()
+        parent_sd = 1.0 if parent.seasonal_sd is None else parent.seasonal_sd
+        self.coupling_scale = slope * parent_sd
+        return own - slope[months] * tas
+
+    def _components_by_month(self):
+        """
+        Physical components (n_modes, n_space), or (12, n_modes, n_space).
+
+        They vary by calendar month with seasonal scaling or a coupling. With a
+        coupling, the parent's modes follow this model's own.
+        """
+        components = self._physical_components()
+        if self.seasonal_sd is not None:
+            components = components[None] * self.seasonal_sd[:, None]
+        if self.coupling_parent is not None:
+            parent = self.coupling_components[None] * self.coupling_scale[:, None]
+            own = np.broadcast_to(components, (12,) + components.shape[-2:])
+            components = np.concatenate([own, parent], axis=1)
+        return components
+
     def reconstruct_anomalies(self, pcs):
         """Turn PCs (..., n_time, n_modes) into anomalies (..., n_time, n_space)."""
-        anomalies = pcs @ self._physical_components()
-        if self.seasonal_sd is not None:
-            anomalies = anomalies * self.seasonal_sd[np.arange(pcs.shape[-2]) % 12]
+        components = self._components_by_month()
+        if components.ndim == 2:
+            return pcs @ components
+        months = np.arange(pcs.shape[-2]) % 12
+        anomalies = np.empty(pcs.shape[:-1] + components.shape[-1:])
+        for m in range(12):
+            anomalies[..., months == m, :] = pcs[..., months == m, :] @ components[m]
         return anomalies
 
     def location_projection(self, weights):
         """
         Projection of the EOFs onto spatial ``weights`` (n_space,).
 
-        Returns (n_modes,), or (12, n_modes) with seasonal scaling; apply it
-        with :func:`project_pcs`.
+        Returns (n_modes,), or (12, n_modes) with seasonal scaling or a
+        coupling; apply it with :func:`project_pcs`.
         """
-        physical = self._physical_components()
-        if self.seasonal_sd is None:
-            return physical @ weights
-        return ((physical * weights) @ self.seasonal_sd.T).T
+        return self._components_by_month() @ weights
 
     def generate_stochastic_pcs(
         self,
@@ -630,6 +715,7 @@ class MeteorNoiseGenerator:
         n_realizations=1,
         random_seed=None,
         rng=None,
+        parent_pcs=None,
     ):
         """
         Generate stochastic principal component time series.
@@ -655,6 +741,9 @@ class MeteorNoiseGenerator:
             global state. Note that the single- and multi-realization paths
             consume draws in different shapes, so ``n_realizations=1`` and
             ``n_realizations=n`` do not produce a common prefix.
+        parent_pcs : np.ndarray, optional
+            For a coupled model, the parent model's PCs for the same
+            realizations; they are appended after this model's own.
 
         Returns
         -------
@@ -689,10 +778,20 @@ class MeteorNoiseGenerator:
         # byte-identical for reproducibility with a given seed; multi-realization
         # path is vectorized across realizations to avoid the Python loop.
         if n_realizations == 1:
-            return self._generate_stochastic_pcs(X_exog, n_time, rng=rng)
-        return self._generate_stochastic_pcs_batched(
-            X_exog, n_time, n_realizations, rng=rng
-        )
+            pcs = self._generate_stochastic_pcs(X_exog, n_time, rng=rng)
+        else:
+            pcs = self._generate_stochastic_pcs_batched(
+                X_exog, n_time, n_realizations, rng=rng
+            )
+        if self.coupling_parent is None:
+            return pcs
+        if parent_pcs is None:
+            raise ValueError(
+                f"This model is coupled to {self.coupling_parent}: pass that "
+                "model's PCs for the same realizations as parent_pcs"
+            )
+        parent_pcs = np.reshape(parent_pcs, pcs.shape[:-1] + (-1,))
+        return np.concatenate([pcs, parent_pcs], axis=-1)
 
     # pylint: disable=too-many-locals
     def generate_realization(
@@ -1040,7 +1139,7 @@ class MeteorNoiseGenerator:
         if point_id in self._regional_eof_projections:
             return self._regional_eof_projections[point_id]
 
-        if self.seasonal_sd is not None:
+        if self.seasonal_sd is not None or self.coupling_parent is not None:
             eof_point_values = self.location_projection(
                 self.region_weight_vector(lat=lat, lon=lon)
             )
@@ -1159,18 +1258,15 @@ class MeteorNoiseGenerator:
         n_lon = len(self.coords["lon"])
 
         # Get EOFs reshaped to spatial grid (n_modes, n_lat, n_lon)
-        eof_components = self._physical_components()
-        if self.seasonal_sd is not None:  # one set of EOFs per calendar month
-            eof_components = eof_components[None] * self.seasonal_sd[:, None]
-        eof_components = eof_components.reshape(-1, n_lat, n_lon)
+        components = self._components_by_month()
+        eof_components = components.reshape(-1, n_lat, n_lon)
         if region_mask is None and region != "global":
             region_mask = self._get_ar6_region_mask(region)
 
         eof_projections = self._weighted_mean_over_region(
             eof_components, None, None, region_mask, region
         )
-        if self.seasonal_sd is not None:
-            eof_projections = eof_projections.reshape(12, self.n_modes)
+        eof_projections = eof_projections.reshape(components.shape[:-1])
 
         # Cache and return
         self._regional_eof_projections[region_id] = eof_projections
@@ -1499,6 +1595,10 @@ class MeteorNoiseGenerator:
             "eof_weights": self.eof_weights,
             "seasonal_scaling": self.seasonal_scaling,
             "seasonal_sd": self.seasonal_sd,
+            "coupling_parent": self.coupling_parent,
+            "coupling_components": self.coupling_components,
+            "coupling_scale": self.coupling_scale,
+            "training_t_glob": self.training_t_glob,
             "seasonal_model": self.seasonal_model,
             "pca": self.pca,
             "varx_results": self.varx_results,
@@ -1535,6 +1635,10 @@ class MeteorNoiseGenerator:
         self.eof_weights = model_data.get("eof_weights", None)
         self.seasonal_scaling = model_data.get("seasonal_scaling", False)
         self.seasonal_sd = model_data.get("seasonal_sd", None)
+        self.coupling_parent = model_data.get("coupling_parent")
+        self.coupling_components = model_data.get("coupling_components")
+        self.coupling_scale = model_data.get("coupling_scale")
+        self.training_t_glob = model_data.get("training_t_glob")
         self._regional_eof_projections = {}
         self.seasonal_model = model_data["seasonal_model"]
         self.pca = model_data["pca"]
@@ -1567,6 +1671,7 @@ def train_noise_model_from_cmip6(
     weight_eofs=True,
     verbose=False,
     seasonal_scaling=True,
+    coupling_parent=None,
 ):
     """
     Train a noise generator from CMIP6 data.
@@ -1621,6 +1726,9 @@ def train_noise_model_from_cmip6(
         If True, prints variance decomposition statistics after fitting.
     seasonal_scaling : bool, default True
         Per-gridcell, per-calendar-month rescaling. See MeteorNoiseGenerator.
+    coupling_parent : MeteorNoiseGenerator, optional
+        Fitted model of a variable to couple this one to. See
+        MeteorNoiseGenerator.fit.
 
     Returns
     -------
@@ -1676,6 +1784,7 @@ def train_noise_model_from_cmip6(
         picontrol_baseline=picontrol_baseline,
         save_diagnostics=save_diagnostics,
         verbose=verbose,
+        coupling_parent=coupling_parent,
     )
     # Cache if requested
     if cache_dir is not None:

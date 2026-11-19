@@ -19,9 +19,7 @@ The changes listed in this file are categorised as follows:
 
 ### Added
 
-- **Seasonal scaling of the noise** (``seasonal_scaling``, off by default) in ``MeteorNoiseGenerator`` and the ``MeteorInterface`` variable config. Anomalies are divided by their per-gridcell, per-calendar-month standard deviation before the EOF/VAR fit and multiplied back at generation, so the noise has the right seasonal cycle of variance. Without it every month gets the year-round variance; for MPI-ESM1-2-LR, regional summer temperature variability in the northern midlatitudes is 1.3-2x too large and winter variability too small
-    - Applied in the gridded, regional, point and streaming paths via ``reconstruct_anomalies``, ``location_projection`` and ``project_pcs``
-    - Portable artifacts gain ``seasonal_sd``; timeseries bundles ship ``eof_projection_monthly`` in place of ``eof_projection``. Files that use it are written as schema version 2, so older readers refuse them rather than return noise in standardized units; files that do not stay version 1
+- **Seasonal scaling of the noise** (``seasonal_scaling``, on by default except for pr): the noise is rescaled per gridcell and calendar month, so it has a seasonal cycle of variance. Changes tas output and invalidates cached tas noise models. Files that use it are written as schema version 2
 
 - **GGCMI Phase 2 crop yield impacts** in ``src/meteor/impacts/ggcm/`` for emulating global gridded crop model yield responses (Franke et al., 2020)
     - 34-term third-order polynomial emulator over CO₂, temperature, precipitation, and nitrogen inputs (``coefficients.py``)

@@ -30,18 +30,11 @@ from .noise_generator import MeteorNoiseGenerator
 from .pattern_logic_lib import step_response_values
 
 #: Highest schema version this release reads. Bump on any incompatible change
-#: to the on-disk layout.
+#: to the on-disk layout. Version 2 adds seasonal scaling of the noise.
 SCHEMA_VERSION = 2
 
-#: Schema version written for files that use no version-2 feature. Writing the
-#: lowest version a file needs keeps it readable by older releases.
+#: Written for files without seasonal scaling, so older readers can open them.
 BASE_SCHEMA_VERSION = 1
-
-#: Version 2 adds per-calendar-month noise scaling (``seasonal_sd`` in a noise
-#: artifact, ``eof_projection_monthly`` in a timeseries bundle). A reader that
-#: ignored it would return noise in standardized rather than physical units,
-#: so files using it are marked 2 and older readers refuse them.
-SEASONAL_SCALING_SCHEMA_VERSION = 2
 
 #: ``format`` attribute identifying a portable noise-model artifact.
 NOISE_FORMAT = "meteor-noise-emulator"
@@ -270,11 +263,7 @@ def export_noise_model(
             training_config,
             doi,
             source_url,
-            schema_version=(
-                BASE_SCHEMA_VERSION
-                if seasonal_sd is None
-                else SEASONAL_SCALING_SCHEMA_VERSION
-            ),
+            schema_version=BASE_SCHEMA_VERSION if seasonal_sd is None else 2,
         ),
     }
 

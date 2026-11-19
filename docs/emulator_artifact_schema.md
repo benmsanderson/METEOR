@@ -5,9 +5,8 @@ code execution to read. Each carries a `format` attribute identifying it and a
 `schema_version` attribute; a reader must refuse a `schema_version` higher than
 it understands.
 
-A file is written with the lowest version its contents need. Version 2 adds only
-seasonal scaling of the noise (see [Seasonal scaling](#seasonal-scaling-schema-v2));
-a file without it is still version 1 and reads unchanged in older clients.
+Version 2 adds only seasonal scaling of the noise (`seasonal_sd`); files
+without it are still written as version 1.
 
 | Format string | Written by | Purpose |
 |---|---|---|
@@ -180,7 +179,7 @@ X       = harmonic design matrix (see feature coordinate for column order)
 pcs_t   = varx_intercept + Σ_i varx_A[i] @ pcs_{t-i-1} [+ varx_B @ x_t] + ε_t,
           ε_t ~ N(0, varx_residual_cov),  pcs_t = 0 for t < lag_order
 field   = X @ seasonal_coef.T + seasonal_intercept + pcs @ physical_eofs
-          [ * seasonal_sd[t % 12]   when seasonal_sd is present ]
+          [ * seasonal_sd[t % 12]   when present; t = 0 is a January ]
 ```
 
 The `feature` coordinate names the nine design-matrix columns in order:
@@ -224,33 +223,6 @@ field   = pcs @ pattern_v                    # summed over modes
 Contributions from multiple experiments are summed; the `base` experiment
 contributes nothing.
 
-### Seasonal scaling (schema v2)
-
-Without it, the VAR innovations have one covariance all year, so every calendar
-month gets the year-round variance: midlatitude summer variability comes out
-too large and winter variability too small. A model fitted with
-`seasonal_scaling=True` divides each gridcell's anomalies by their spread for
-that calendar month before the EOF fit, and generation multiplies them back:
-
-```
-anomaly[t, x] = (pcs_t @ physical_eofs)[x] * seasonal_sd[t % 12, x]
-```
-
-Month index `t = 0` is a January, as for the harmonics. The VAR itself is
-unchanged. A cell with no variance in some month has `seasonal_sd = 0` there,
-and its anomaly is zero.
-
-Because the rescaling is per gridcell, a location mean no longer factors into
-one projection: it needs one per calendar month,
-
-```
-eof_projection_monthly[loc, m] = (physical_eofs * seasonal_sd[m]) @ w_loc
-```
-
-which is what a timeseries bundle ships in place of `eof_projection`. The name
-differs on purpose: a reader that ignored the scaling would produce noise in
-standardized units, so it should fail on the missing `eof_projection` instead.
-
 ---
 
 ## `meteor-timeseries-bundle`
@@ -268,8 +240,7 @@ This is what a browser client downloads. It never carries the EOF maps.
 | `varx_intercept`, `varx_A`, `varx_residual_cov`, `varx_B` | as above | Shared across locations |
 | `varx_residual_chol` | `(mode, mode_in)` | Lower-triangular Cholesky factor of `varx_residual_cov` |
 | `scenario_forcing` | `(scenario, exp, year)` | Per-scenario forcing; NaN for absent experiments |
-| `eof_projection` | `(location, mode)` | EOF basis projected onto the location; absent when the model has seasonal scaling |
-| `eof_projection_monthly` | `(location, month_of_year, mode)` | Schema v2 replacement for `eof_projection` when the model has seasonal scaling |
+| `eof_projection` | `(location, mode)` | EOF basis projected onto the location; `(location, month_of_year, mode)` with seasonal scaling (v2) |
 | `seasonal_coef` | `(location, feature)` | Nine coefficients per location |
 | `seasonal_intercept` | `(location,)` | |
 | `pattern_projection` | `(location, exp, pattern_mode)` | Spatial pattern projected onto the location |
@@ -311,7 +282,7 @@ residual is float32 storage noise.
 
 ```
 series = X @ seasonal_coef[loc] + seasonal_intercept[loc]
-       + pcs @ eof_projection[loc]            (or pcs_t @ eof_projection_monthly[loc, t % 12])
+       + pcs @ eof_projection[loc]            (pcs_t @ eof_projection[loc, t % 12] in v2)
        + Σ_exp convolve(step_response[exp], dF_exp / exp_forc[exp]) @ pattern_projection[loc, exp]
 ```
 

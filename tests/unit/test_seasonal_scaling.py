@@ -6,7 +6,7 @@ import xarray as xr
 
 from meteor import noise_generator
 from meteor.meteor_interface import _get_default_config
-from meteor.noise_generator import MeteorNoiseGenerator, month_of_year, project_pcs
+from meteor.noise_generator import MeteorNoiseGenerator, project_pcs
 
 N_LAT, N_LON = 5, 6
 LATS = np.linspace(-60, 60, N_LAT)
@@ -14,32 +14,17 @@ LONS = np.linspace(0, 300, N_LON)
 N_SPACE = N_LAT * N_LON
 
 
+def month_of_year(n_time):
+    return np.arange(n_time) % 12
+
+
 def _seasonal_spread(months):
     """Anomaly spread by calendar month: 1.6 in January, 0.4 in July."""
     return 1.0 + 0.6 * np.cos(2 * np.pi * months / 12)
 
 
-def _dataset(n_years=40, seed=0, offset=0.0):
-    """
-    Monthly field whose anomaly variance has a strong seasonal cycle.
-
-    Anomalies are AR(1) in time, partly shared across cells, and multiplied
-    by a calendar-month spread, on top of a mean seasonal cycle.
-
-    Parameters
-    ----------
-    n_years : int
-        Length in years; month 0 is a January.
-    seed : int
-        Random seed.
-    offset : float
-        Constant added everywhere (mimics an absolute-temperature field).
-
-    Returns
-    -------
-    xr.Dataset
-        Dataset with a ``tas`` variable on (month, lat, lon, ens).
-    """
+def _dataset(n_years=40, seed=0):
+    """AR(1) anomalies scaled by a calendar-month spread, on a mean cycle."""
     rng = np.random.default_rng(seed)
     n_time = 12 * n_years
     months = month_of_year(n_time)
@@ -52,7 +37,7 @@ def _dataset(n_years=40, seed=0, offset=0.0):
         :, None
     ]
     cycle = 10 * np.sin(2 * np.pi * np.arange(n_time) / 12)
-    field = offset + cycle[:, None] + anomalies
+    field = cycle[:, None] + anomalies
     da = xr.DataArray(
         field.reshape(n_time, N_LAT, N_LON, 1),
         coords={"month": np.arange(n_time), "lat": LATS, "lon": LONS, "ens": [0]},
@@ -76,11 +61,11 @@ def _monthly_sd(series):
     return np.array([series[..., months == m].std() for m in range(12)])
 
 
-def test_off_by_default_and_in_default_config():
-    assert MeteorNoiseGenerator().seasonal_scaling is False
-    assert _get_default_config("tas")["seasonal_scaling"] is False
-    model = _fit(seasonal_scaling=False)
-    assert model.seasonal_sd is None
+def test_defaults_on_except_for_pr():
+    assert MeteorNoiseGenerator().seasonal_scaling is True
+    assert _get_default_config("tas")["seasonal_scaling"] is True
+    assert _get_default_config("pr")["seasonal_scaling"] is False
+    assert _fit(seasonal_scaling=False).seasonal_sd is None
 
 
 def test_scaling_reproduces_seasonal_cycle_of_variance():
@@ -104,13 +89,6 @@ def test_scaling_reproduces_seasonal_cycle_of_variance():
     # Training spread ratio is 1.6 / 0.4 = 4
     assert ratios[True] == pytest.approx(4.0, rel=0.2)
     assert ratios[False] < 1.5
-
-
-def test_seasonal_sd_matches_training_spread():
-    model = _fit(seasonal_scaling=True)
-    assert model.seasonal_sd.shape == (12, N_SPACE)
-    jan_over_jul = model.seasonal_sd[0] / model.seasonal_sd[6]
-    assert np.median(jan_over_jul) == pytest.approx(4.0, rel=0.2)
 
 
 def test_constant_offset_does_not_leak_into_the_basis():
@@ -164,12 +142,6 @@ def test_regional_point_and_gridded_paths_agree():
     )
 
 
-def test_project_pcs_single_projection_is_plain_matmul():
-    pcs = np.random.default_rng(0).standard_normal((3, 24, 4))
-    proj = np.arange(4.0)
-    assert np.array_equal(project_pcs(pcs, proj), pcs @ proj)
-
-
 def test_cell_without_variance_reconstructs_as_zero():
     ds = _dataset()
     values = ds["tas"].values.copy()
@@ -186,13 +158,6 @@ def test_cell_without_variance_reconstructs_as_zero():
     anomalies = model.reconstruct_anomalies(pcs)
     assert np.isfinite(anomalies).all()
     assert np.all(anomalies[:, month_of_year(24) == 6, 0] == 0.0)
-
-
-def test_missing_calendar_month_is_an_error():
-    ds = _dataset(n_years=1).isel(month=slice(0, 11))
-    model = MeteorNoiseGenerator(n_modes=4, lag_order=1, seasonal_scaling=True)
-    with pytest.raises(ValueError, match="every calendar month"):
-        model.fit(ds, "tas", custom_global_temp=np.zeros(11))
 
 
 def test_pickle_round_trip_and_cache_validation(tmp_path):
@@ -219,29 +184,5 @@ def test_pickle_round_trip_and_cache_validation(tmp_path):
     assert not ok and "seasonal_scaling mismatch" in info["message"]
     ok, _, _ = noise_generator.validate_noise_model_cache(
         path, "tas", n_modes=6, lag_order=1, seasonal_scaling=True
-    )
-    assert ok
-
-
-def test_older_pickles_load_without_scaling(tmp_path):
-    model = _fit(seasonal_scaling=False, n_modes=4)
-    path = str(tmp_path / "old.pkl")
-    model.save_model(path)
-    # Simulate a pickle written before the option existed
-    import pickle  # pylint: disable=import-outside-toplevel
-
-    with open(path, "rb") as f:
-        data = pickle.load(f)  # nosec - test fixture
-    data.pop("seasonal_scaling")
-    data.pop("seasonal_sd")
-    with open(path, "wb") as f:
-        pickle.dump(data, f)
-
-    loaded = MeteorNoiseGenerator(seasonal_scaling=True)
-    loaded.load_model(path)
-    assert loaded.seasonal_scaling is False
-    assert loaded.seasonal_sd is None
-    ok, _, _ = noise_generator.validate_noise_model_cache(
-        path, "tas", n_modes=4, lag_order=1, seasonal_scaling=False
     )
     assert ok

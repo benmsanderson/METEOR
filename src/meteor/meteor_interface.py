@@ -51,9 +51,7 @@ def _get_default_config(variable):
         # Explicit rather than riding on train_noise_model_from_cmip6's default,
         # so cache validation can compare against the same value training used.
         "weight_eofs": True,
-        # Per-gridcell, per-calendar-month rescaling of the noise. Off by
-        # default so cached models and published outputs are unchanged.
-        "seasonal_scaling": False,
+        "seasonal_scaling": True,
     }
 
     # Variable-specific defaults
@@ -71,6 +69,9 @@ def _get_default_config(variable):
         config["use_exog"] = "none"
         config["transform"] = True
         config["transform_type"] = "gamma"
+        # The gamma quantile map already fixes pr's monthly distribution;
+        # scaling on top makes its seasonal means ~10% too variable.
+        config["seasonal_scaling"] = False
     else:
         # Generic defaults for other variables
         config["use_exog"] = "none"
@@ -520,8 +521,7 @@ class MeteorInterface:
             - 'lag_order': Temporal memory in VARX model
             - 'use_exog': Exogenous variable usage ('all', 'temp_only', 'none')
             - 'weight_eofs': Area-weight the EOF basis (default True)
-            - 'seasonal_scaling': Give the noise a per-gridcell seasonal cycle
-              of variance (default False)
+            - 'seasonal_scaling': Per-month noise variance (default True, False for pr)
             - 'training_scenario': Scenario for temperature trajectory (default: 'ssp245')
         verbose : bool
             Print training progress messages
@@ -537,7 +537,7 @@ class MeteorInterface:
                 lag_order=config["lag_order"],
                 use_exog=config["use_exog"],
                 weight_eofs=config.get("weight_eofs", True),
-                seasonal_scaling=config.get("seasonal_scaling", False),
+                seasonal_scaling=config.get("seasonal_scaling", True),
             )
         )
 
@@ -593,7 +593,7 @@ class MeteorInterface:
                 lag_order=config["lag_order"],
                 use_exog=config["use_exog"],
                 weight_eofs=config.get("weight_eofs", True),
-                seasonal_scaling=config.get("seasonal_scaling", False),
+                seasonal_scaling=config.get("seasonal_scaling", True),
                 custom_global_temp=monthly_warming_trimmed,  # ✅ Pass pattern prediction
                 cache_dir=os.path.join(self.cache_handler.cache_dir, "noise_models"),
                 verbose=verbose,

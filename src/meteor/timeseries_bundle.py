@@ -44,7 +44,6 @@ from .portable_artifact import (
     BASE_SCHEMA_VERSION,
     SCHEMA_VERSION,
     SEASONAL_FEATURE_NAMES,
-    SEASONAL_SCALING_SCHEMA_VERSION,
     _provenance_attrs,
     _step_response_arrays,
 )
@@ -478,6 +477,9 @@ def export_timeseries_bundle(
     n_modes = noise_model.n_modes
 
     seasonal_scaling = getattr(noise_model, "seasonal_sd", None) is not None
+    projection_dims = ("location", "mode")
+    if seasonal_scaling:  # one projection per calendar month
+        projection_dims = ("location", "month_of_year", "mode")
     eof_projection = np.zeros(
         (n_loc, 12, n_modes) if seasonal_scaling else (n_loc, n_modes)
     )
@@ -524,6 +526,7 @@ def export_timeseries_bundle(
             ("mode", "mode_in"),
             np.asarray(noise_model.varx_sigma_u, dtype),
         ),
+        "eof_projection": (projection_dims, eof_projection.astype(dtype)),
         "seasonal_coef": (("location", "feature"), seasonal_coef.astype(dtype)),
         "seasonal_intercept": (("location",), seasonal_intercept.astype(dtype)),
         "pattern_projection": (
@@ -548,21 +551,6 @@ def export_timeseries_bundle(
             np.array([p["lon"] for p in parsed], dtype=np.float64),
         ),
     }
-    if seasonal_scaling:
-        # One projection per calendar month: the noise is rescaled by each
-        # gridcell's spread for that month before the location mean. Named
-        # differently from the single projection on purpose, so a reader that
-        # predates seasonal scaling fails rather than producing noise in
-        # standardized units.
-        data_vars["eof_projection_monthly"] = (
-            ("location", "month_of_year", "mode"),
-            eof_projection.astype(dtype),
-        )
-    else:
-        data_vars["eof_projection"] = (
-            ("location", "mode"),
-            eof_projection.astype(dtype),
-        )
     if noise_model.varx_B is not None:
         data_vars["varx_B"] = (
             ("mode", "exog"),
@@ -664,12 +652,8 @@ def export_timeseries_bundle(
         "step_response": "u_i(t) = s_i * (1 - exp(-t / tau_i)), t in years from year_0",
         "reconstruction": (
             "series = seasonal_coef @ X(t) + seasonal_intercept "
-            + (
-                "+ pcs(t) @ eof_projection_monthly[t % 12] "
-                if seasonal_scaling
-                else "+ pcs(t) @ eof_projection "
-            )
-            + "+ sum_exp pattern_projection @ "
+            "+ pcs(t) @ eof_projection (or eof_projection[:, t % 12] when it has "
+            "a month_of_year dim) + sum_exp pattern_projection @ "
             "convolve(step_response, dF_exp / exp_forc)"
         ),
         "transform_type": "gamma" if transform_reference is not None else "",
@@ -687,11 +671,7 @@ def export_timeseries_bundle(
             training_config,
             doi,
             source_url,
-            schema_version=(
-                SEASONAL_SCALING_SCHEMA_VERSION
-                if seasonal_scaling
-                else BASE_SCHEMA_VERSION
-            ),
+            schema_version=2 if seasonal_scaling else BASE_SCHEMA_VERSION,
         ),
     }
 
@@ -737,28 +717,6 @@ def load_timeseries_bundle(filepath):
             f"understands at most {SCHEMA_VERSION}. Upgrade METEOR to read it."
         )
     return ds
-
-
-def bundle_eof_projection(bundle, index):
-    """
-    Return the noise projection for one bundle location.
-
-    Parameters
-    ----------
-    bundle : xr.Dataset
-        Bundle from :func:`load_timeseries_bundle`.
-    index : int
-        Location index.
-
-    Returns
-    -------
-    np.ndarray
-        Shape (n_modes,), or (12, n_modes) for a bundle exported from a model
-        with seasonal scaling. Apply with :func:`meteor.noise_generator.project_pcs`.
-    """
-    if "eof_projection_monthly" in bundle:
-        return bundle["eof_projection_monthly"].values[index]
-    return bundle["eof_projection"].values[index]
 
 
 def forced_response_from_bundle(bundle, location, forcing_by_exp, year_0=1850):
@@ -926,7 +884,7 @@ def _transformed_fixture_series(
         # Anomaly seasonal form: no intercept, and no t_glob term.
         seasonal = design[:, 1:] @ bundle["seasonal_coef"].values[idx][1:]
         stochastic = seasonal[None, :] + project_pcs(
-            pcs, bundle_eof_projection(bundle, idx)
+            pcs, bundle["eof_projection"].values[idx]
         )
 
         monthly_forced = np.repeat(forced[i, offset : offset + n_years], 12)
@@ -1077,7 +1035,7 @@ def export_golden_fixture(
             + bundle["seasonal_intercept"].values[idx]
         )
         series[i] = seasonal[None, :] + project_pcs(
-            pcs, bundle_eof_projection(bundle, idx)
+            pcs, bundle["eof_projection"].values[idx]
         )
 
     data_vars = {
@@ -1115,7 +1073,7 @@ def export_golden_fixture(
     )
     ds.attrs = {
         "format": GOLDEN_FORMAT,
-        "schema_version": int(bundle.attrs.get("schema_version", BASE_SCHEMA_VERSION)),
+        "schema_version": int(bundle.attrs["schema_version"]),
         "seed": int(seed),
         "rng": "numpy.random.default_rng(seed) -> PCG64",
         "year_0": int(year_0),

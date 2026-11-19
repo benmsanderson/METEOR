@@ -1154,25 +1154,23 @@ class MeteorNoiseGenerator:
         if region_id in self._regional_eof_projections:
             return self._regional_eof_projections[region_id]
 
-        if self.seasonal_sd is not None:
-            eof_projections = self.location_projection(
-                self.region_weight_vector(region=region, region_mask=region_mask)
-            )
-            self._regional_eof_projections[region_id] = eof_projections
-            return eof_projections
-
         # Compute EOF projections
         n_lat = len(self.coords["lat"])
         n_lon = len(self.coords["lon"])
 
         # Get EOFs reshaped to spatial grid (n_modes, n_lat, n_lon)
-        eof_components = self._physical_components().reshape(self.n_modes, n_lat, n_lon)
+        eof_components = self._physical_components()
+        if self.seasonal_sd is not None:  # one set of EOFs per calendar month
+            eof_components = eof_components[None] * self.seasonal_sd[:, None]
+        eof_components = eof_components.reshape(-1, n_lat, n_lon)
         if region_mask is None and region != "global":
             region_mask = self._get_ar6_region_mask(region)
 
         eof_projections = self._weighted_mean_over_region(
             eof_components, None, None, region_mask, region
         )
+        if self.seasonal_sd is not None:
+            eof_projections = eof_projections.reshape(12, self.n_modes)
 
         # Cache and return
         self._regional_eof_projections[region_id] = eof_projections

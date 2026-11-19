@@ -18,9 +18,9 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v6
     - name: Setup python
-      uses: actions/setup-python@v1
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dev dependencies
@@ -69,9 +69,9 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v6
     - name: Setup python
-      uses: actions/setup-python@v1
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install test dependencies
@@ -99,9 +99,9 @@ jobs:
         python-version: ['3.12']
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v6
     - name: Setup python
-      uses: actions/setup-python@v1
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install notebook dependencies
@@ -128,9 +128,9 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v6
     - name: Setup python
-      uses: actions/setup-python@v1
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install
